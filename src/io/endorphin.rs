@@ -22,9 +22,13 @@ use glam::{EulerRot, Mat3, Quat, Vec3};
 use roxmltree::Node;
 
 use super::IoError;
+use crate::document::physics::{
+    BodyDef, Frame, Gains, Geometry, Ground, Interaction, JointDef, Limits, MuscleGains, MuscleSet,
+    PhysicsRig, ShapeDef,
+};
 use crate::document::{
     CharacterId, CharacterKind, Channel, ClipKind, ClipProps, FrameRange, Interp, Joint,
-    Keyframe, Project, ProjectSettings, Property, SkeletonRef,
+    Keyframe, Project, ProjectSettings, Property, SimLevel, SkeletonRef,
 };
 
 /// An imported project plus human-readable notes on what was converted or left out.
@@ -60,6 +64,10 @@ pub fn import_scene(path: &Path) -> Result<Import, IoError> {
     });
     let mut notes = Vec::new();
     let mut skipped_joints = 0;
+    if let Some(engine) = engine {
+        read_physics_settings(&mut project, root, engine);
+    }
+    let isotropic = engine.and_then(|e| e.attribute("enableNonSphericalInertialBodies")) != Some("true");
 
     for node in elements(child(root, "Characters")) {
         let kind = if node.attribute("typeName") == Some("animatableProp") {
@@ -67,12 +75,21 @@ pub fn import_scene(path: &Path) -> Result<Import, IoError> {
         } else {
             CharacterKind::Character
         };
-        add_character(&mut project, node, kind, &mut skipped_joints);
+        add_character(&mut project, node, kind, isotropic, &mut skipped_joints);
     }
     if let Some(env) = child(root, "Environment") {
         if child(env, "Skeleton").is_some() {
-            add_character(&mut project, env, CharacterKind::Environment, &mut skipped_joints);
+            add_character(&mut project, env, CharacterKind::Environment, isotropic, &mut skipped_joints);
         }
+    }
+    // endorphin simulates everything from the first frame unless an event says otherwise.
+    // Scenery is moved by its animation and pushes things, but isn't simulated itself.
+    for character in project.characters.iter_mut().filter(|c| c.physics.is_some()) {
+        character.default_level = if character.kind == CharacterKind::Environment {
+            SimLevel::CollisionOnly
+        } else {
+            SimLevel::Simulated
+        };
     }
     if project.characters.is_empty() {
         return Err(IoError::Format("the scene contains no characters".into()));
@@ -91,6 +108,38 @@ pub fn import_scene(path: &Path) -> Result<Import, IoError> {
     });
 
     let mut lanes = Lanes::default();
+
+    // Each character's starting placement and pose, held underneath everything else.
+    // It's not a muscle target ("active" = false), just where things begin.
+    let start_frame = engine
+        .and_then(|e| child(e, "PlaybackRange"))
+        .and_then(|r| attr_i32(&r, "start"))
+        .unwrap_or(0);
+    let mut start_poses = 0;
+    for pose in elements(child(root, "Poses")) {
+        let Some(character) = pose.attribute("character").and_then(|n| project.character_by_name(n)).cloned() else { continue };
+        let channels = pose_channels(pose, &character.skeleton);
+        if channels.is_empty() {
+            continue;
+        }
+        let track = lanes.track(&mut project, character.id, "Start pose", i32::MIN, i32::MIN);
+        let props = ClipProps {
+            name: "Start pose".to_owned(),
+            track,
+            start: start_frame,
+            duration: 1_000_000,
+            blend_in: 0,
+            blend_out: 0,
+            weight: 1.0,
+            enabled: true,
+        };
+        let id = project.add_clip(props, ClipKind::Motion, channels);
+        if let Some(clip) = project.clip_mut(id) {
+            clip.source.insert("active".into(), "false".into());
+            clip.source.insert("endorphin.type".into(), "Pose".into());
+        }
+        start_poses += 1;
+    }
     let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
     let mut missing_targets = 0;
     let mut skipped_channels = 0;
@@ -115,7 +164,11 @@ pub fn import_scene(path: &Path) -> Result<Import, IoError> {
             let channels = animation_channels(event, &character.skeleton, fps, &mut skipped_channels);
             (ClipKind::Motion, channels)
         } else {
-            (ClipKind::Event { event: label.to_owned() }, Vec::new())
+            // Active poses carry their target pose as held channels.
+            let channels = child(event, "Pose")
+                .map(|pose| pose_channels(pose, &character.skeleton))
+                .unwrap_or_default();
+            (ClipKind::Event { event: label.to_owned() }, channels)
         };
         let blend_in = attr_f32(event, "bentryBlendPeriod").map_or(0, |s| (s * fps).round() as i32);
         let props = ClipProps {
@@ -143,6 +196,11 @@ pub fn import_scene(path: &Path) -> Result<Import, IoError> {
         _ if first < last => FrameRange { start: first.min(0), end: last },
         _ => FrameRange { start: 0, end: (fps * 5.0) as i32 },
     };
+    let range = project.settings.range;
+    for clip in project.clips.iter_mut().filter(|c| c.props.name == "Start pose" && c.props.duration == 1_000_000) {
+        clip.props.start = range.start;
+        clip.props.duration = (range.end - range.start).max(1);
+    }
 
     let people = project.characters.iter().filter(|c| c.kind == CharacterKind::Character).count();
     notes.push(format!(
@@ -153,8 +211,18 @@ pub fn import_scene(path: &Path) -> Result<Import, IoError> {
     for (label, n) in &counts {
         notes.push(format!("{n} × {label}"));
     }
-    if counts.keys().any(|l| *l != "Animation") {
-        notes.push("Physics events are kept as event clips with their original settings; they don't simulate yet.".into());
+    if start_poses > 0 {
+        notes.push(format!("{start_poses} starting pose(s) placed as held clips under each character's animation."));
+    }
+    let rigs = project.characters.iter().filter(|c| c.physics.is_some()).count();
+    if rigs > 0 {
+        notes.push(format!(
+            "Physics: {rigs} rig(s) with bodies, joint limits and muscle presets; simulated at {:.0} Hz.",
+            project.physics.rate
+        ));
+    }
+    if counts.contains_key("Behaviour") {
+        notes.push("Behaviours (stagger, catch fall, ...) are kept but not simulated: endorphin's are protected.".into());
     }
     if skipped_joints > 0 {
         notes.push(format!("Skipped {skipped_joints} virtual-muscle helper joint(s)."));
@@ -192,11 +260,11 @@ pub fn import_character(path: &Path) -> Result<Import, IoError> {
     };
     let id = if is_rig {
         let mut joints = Vec::new();
-        add_joint(root, None, &mut joints, &mut skipped);
+        add_joint(root, None, &mut joints, &mut Vec::new(), &mut skipped);
         let skeleton = SkeletonRef { name: file_stem(path), source: None, joints };
         project.add_character("rig", kind, skeleton)
     } else {
-        add_character(&mut project, root, kind, &mut skipped)
+        add_character(&mut project, root, kind, true, &mut skipped)
     };
     if let Some(c) = project.characters.iter_mut().find(|c| c.id == id) {
         c.skeleton.source = Some(path.display().to_string());
@@ -221,8 +289,7 @@ pub fn import_pose(path: &Path, project: &Project) -> Result<PoseImport, IoError
     }
     if child(root, "DesiredPose").is_some() {
         return Err(IoError::Format(
-            "this pose stores muscle (effector) targets instead of joint transforms;              it will be supported together with physics"
-                .into(),
+            "this pose stores muscle (effector) targets instead of joint transforms, which NeuroMotion can't import yet".into(),
         ));
     }
     if root.attribute("refFrame").is_some_and(|f| !f.eq_ignore_ascii_case("parent")) {
@@ -244,10 +311,18 @@ pub fn import_pose(path: &Path, project: &Project) -> Result<PoseImport, IoError
         .filter(|c| matches(&c.skeleton) > 0)
         .ok_or_else(|| IoError::Format("none of the project's characters have this pose's joints".into()))?;
 
+    let channels = pose_channels(root, &character.skeleton);
+    Ok(PoseImport { character: character.id, name: file_stem(path), channels })
+}
+
+/// Converts a pose's per-joint transforms (`<Relationships>` under `pose`) into held
+/// channels relative to the skeleton's rest pose.
+fn pose_channels(pose: Node, skeleton: &SkeletonRef) -> Vec<Channel> {
     let mut channels = Vec::new();
-    for (name, rot, pos) in entries {
-        let Some(index) = character.skeleton.joint_index(name) else { continue };
-        let joint = &character.skeleton.joints[index];
+    for relationship in elements(child(pose, "Relationships")) {
+        let (Some(name), Some((rot, pos))) = (relationship.attribute("name"), transform(relationship)) else { continue };
+        let Some(index) = skeleton.joint_index(name) else { continue };
+        let joint = &skeleton.joints[index];
         let euler = relative_euler(joint, rot);
         let offset = pos - Vec3::from(joint.offset);
         for (property, value) in rotation_props().into_iter().zip(euler).chain(position_props().into_iter().zip(offset.to_array())) {
@@ -261,16 +336,17 @@ pub fn import_pose(path: &Path, project: &Project) -> Result<PoseImport, IoError
             }
         }
     }
-    Ok(PoseImport { character: character.id, name: file_stem(path), channels })
+    channels
 }
 
 // ---------------------------------------------------------------------------------
 // Characters
 
-fn add_character(project: &mut Project, node: Node, kind: CharacterKind, skipped: &mut usize) -> CharacterId {
+fn add_character(project: &mut Project, node: Node, kind: CharacterKind, isotropic: bool, skipped: &mut usize) -> CharacterId {
     let mut joints = Vec::new();
+    let mut nodes = Vec::new();
     if let Some(root) = child(node, "Skeleton") {
-        add_joint(root, None, &mut joints, skipped);
+        add_joint(root, None, &mut joints, &mut nodes, skipped);
     }
     let source = node.attribute("pathName").filter(|p| !p.is_empty()).map(str::to_owned);
     let rig = source
@@ -278,10 +354,22 @@ fn add_character(project: &mut Project, node: Node, kind: CharacterKind, skipped
         .map(|p| file_stem(Path::new(&p.replace('\\', "/"))))
         .unwrap_or_else(|| kind.label().to_owned());
     let name = node.attribute("name").unwrap_or("character");
-    project.add_character(name, kind, SkeletonRef { name: rig, source, joints })
+    let skeleton = SkeletonRef { name: rig, source, joints };
+    let physics = read_rig(node, &nodes, &skeleton, isotropic);
+    let id = project.add_character(name, kind, skeleton);
+    if let Some(c) = project.characters.iter_mut().find(|c| c.id == id) {
+        c.physics = physics;
+    }
+    id
 }
 
-fn add_joint(node: Node, parent: Option<usize>, joints: &mut Vec<Joint>, skipped: &mut usize) {
+fn add_joint<'a, 'i>(
+    node: Node<'a, 'i>,
+    parent: Option<usize>,
+    joints: &mut Vec<Joint>,
+    nodes: &mut Vec<Node<'a, 'i>>,
+    skipped: &mut usize,
+) {
     let name = node.attribute("name").unwrap_or("joint");
     // Virtual muscles are solver helpers linking distant bodies, not bones.
     if node.attribute("isVirtualMuscle") == Some("true") || name.contains("VirtualMuscle") {
@@ -295,10 +383,11 @@ fn add_joint(node: Node, parent: Option<usize>, joints: &mut Vec<Joint>, skipped
         offset: position.to_array(),
         rest_rotation: rotation.to_array(),
     });
+    nodes.push(node);
     let index = joints.len() - 1;
     // Skeletons nest joints in <ChildJoints>; rig templates nest rig nodes in <ChildNodes>.
     for c in elements(child(node, "ChildJoints")).chain(elements(child(node, "ChildNodes"))) {
-        add_joint(c, Some(index), joints, skipped);
+        add_joint(c, Some(index), joints, nodes, skipped);
     }
 }
 
@@ -477,7 +566,7 @@ impl Lanes {
             return lane.2;
         }
         let existing = self.lanes.iter().filter(|l| l.0 == character && l.1 == label).count();
-        let plural = if label == "Animation" { label.to_owned() } else { format!("{label}s") };
+        let plural = if matches!(label, "Animation" | "Start pose") { label.to_owned() } else { format!("{label}s") };
         let name = if existing == 0 { plural } else { format!("{plural} {}", existing + 1) };
         let id = project.add_track(character, &name);
         self.lanes.push((character, label, id, end));
@@ -533,11 +622,240 @@ fn event_settings(event: Node) -> BTreeMap<String, String> {
             }
         }
     }
+    // Vector settings stored as child elements (e.g. constraint strengths).
+    for c in elements(Some(event)) {
+        if let (Some(v), true) = (vec3(Some(c)), c.tag_name().name() != "TransformMatrix") {
+            let tag = c.tag_name().name();
+            let key = tag[..1].to_ascii_lowercase() + &tag[1..];
+            out.insert(key, format!("{}, {}, {}", format_float(v.x), format_float(v.y), format_float(v.z)));
+        }
+    }
     let targets: Vec<&str> = elements(child(event, "Objects")).filter_map(|o| o.text()).collect();
     if !targets.is_empty() {
         out.insert("targets".to_owned(), targets.join(", "));
     }
     out
+}
+
+// ---------------------------------------------------------------------------------
+// Physics
+
+/// Scene-wide settings: simulation rate, gravity, ground and contact materials.
+fn read_physics_settings(project: &mut Project, scene: Node, engine: Node) {
+    let settings = &mut project.physics;
+    if let Some(rate) = attr_f32(engine, "bsimulationFrameRate").filter(|r| *r > 0.0) {
+        settings.rate = rate;
+    }
+    if let Some(g) = vec3(child(engine, "Gravity")) {
+        settings.gravity = g.to_array();
+    }
+    settings.ground = (scene.attribute("useDefaultGround") != Some("false"))
+        .then(|| Ground { height: 0.0, material: "tarmac".into() });
+    let Some(options) = child(engine, "MaterialOptions") else { return };
+    let interactions: BTreeMap<String, Interaction> = elements(child(options, "MaterialInteractions"))
+        .filter_map(|i| {
+            Some((
+                i.attribute("name")?.to_owned(),
+                Interaction {
+                    restitution: number(i, "restitution").unwrap_or(0.2),
+                    friction: number(i, "friction").unwrap_or(100.0),
+                    adhesion: number(i, "maxAdhesiveForce").unwrap_or(0.0),
+                    softness: number(i, "softness").unwrap_or(0.0),
+                },
+            ))
+        })
+        .collect();
+    if !interactions.is_empty() {
+        settings.interactions = interactions;
+        settings.pairs = elements(child(options, "MaterialPairs"))
+            .filter_map(|p| {
+                Some((
+                    p.attribute("materialA")?.to_owned(),
+                    p.attribute("materialB")?.to_owned(),
+                    p.attribute("interaction")?.to_owned(),
+                ))
+            })
+            .collect();
+    }
+}
+
+/// Bodies, joints and muscle presets of a character (or prop, or environment).
+/// `joint_nodes[i]` is the XML element of skeleton joint `i`.
+fn read_rig(node: Node, joint_nodes: &[Node], skeleton: &SkeletonRef, isotropic: bool) -> Option<PhysicsRig> {
+    let body_of: Vec<Option<&str>> = joint_nodes.iter().map(|n| n.attribute("metaBody")).collect();
+    let mut bodies = Vec::new();
+    for mb in elements(child(node, "MetaBodies")).filter(|n| n.has_tag_name("MetaBody")) {
+        let Some(name) = mb.attribute("name") else { continue };
+        // A body belongs to the first (outermost) joint that names it; scenery pieces that
+        // no joint names hang from the root.
+        let Some(joint) = body_of.iter().position(|b| *b == Some(name)).or((!joint_nodes.is_empty()).then_some(0)) else { continue };
+        let (rotation, position) = transform(mb).unwrap_or((Quat::IDENTITY, Vec3::ZERO));
+        let (mass, inertia) = child(mb, "InertialBody")
+            .and_then(|ib| {
+                let geometry = geometry(child(ib, "Geometry")?)?;
+                let density = child(ib, "Inertia").and_then(|i| number(i, "density")).unwrap_or(1.0);
+                // endorphin densities are in g/cm^3.
+                let mass = density * 1000.0 * geometry.volume();
+                Some((mass, geometry.inertia(mass)))
+            })
+            .unwrap_or((1.0, [0.004; 3]));
+        let shapes = elements(Some(mb))
+            .filter(|n| n.has_tag_name("CollisionSurface"))
+            .filter_map(|cs| {
+                let (r, p) = transform(cs).unwrap_or((Quat::IDENTITY, Vec3::ZERO));
+                let flag = |name: &str| cs.attribute(name) != Some("false");
+                Some(ShapeDef {
+                    geometry: geometry(child(cs, "Geometry")?)?,
+                    frame: Frame { rotation: r.to_array(), position: p.to_array() },
+                    material: cs.attribute("material").unwrap_or("default").to_owned(),
+                    collides_with_parent: flag("collidesWithParent"),
+                    collides_with_siblings: flag("collidesWithSiblings"),
+                    collides_with_ancestors: flag("collidesWithAncestors"),
+                })
+            })
+            .collect();
+        bodies.push(BodyDef {
+            name: name.to_owned(),
+            joint,
+            frame: Frame { rotation: rotation.to_array(), position: position.to_array() },
+            mass,
+            inertia,
+            shapes,
+        });
+    }
+    if bodies.is_empty() {
+        return None;
+    }
+    let body_index = |name: &str| bodies.iter().position(|b| b.name == name);
+
+    let effector_of: BTreeMap<&str, &str> = node
+        .descendants()
+        .filter(|n| n.has_tag_name("Effector"))
+        .filter_map(|e| Some((e.attribute("jointName")?, e.attribute("name")?)))
+        .collect();
+
+    let mut joints = Vec::new();
+    for (j, jn) in joint_nodes.iter().enumerate() {
+        let tag = jn.tag_name().name();
+        if tag != "SkeletalJoint" && tag != "Hinge" {
+            continue;
+        }
+        let Some(body) = body_of[j].and_then(body_index) else { continue };
+        // The parent body is the nearest ancestor joint's body that isn't this one.
+        let mut ancestor = skeleton.joints[j].parent;
+        let mut parent_body = None;
+        while let Some(a) = ancestor {
+            if let Some(b) = body_of[a].and_then(body_index).filter(|b| *b != body) {
+                parent_body = Some(b);
+                break;
+            }
+            ancestor = skeleton.joints[a].parent;
+        }
+        let Some(parent_body) = parent_body else { continue };
+        let limit_frame = |tag: &str| {
+            child(*jn, tag)
+                .and_then(|f| basis(child(f, "TransformMatrix")?))
+                .unwrap_or(Quat::IDENTITY)
+                .to_array()
+        };
+        let (hard, soft, stiffness, damping) = if tag == "Hinge" {
+            hinge_limits(*jn)
+        } else {
+            let limits = |tag: &str| {
+                child(*jn, tag).map(|l| {
+                    Limits::from_sizes(
+                        number(l, "twistSize").unwrap_or(0.0),
+                        number(l, "swing1Size").unwrap_or(0.0),
+                        number(l, "swing2Size").unwrap_or(0.0),
+                    )
+                })
+            };
+            let hard = limits("HardLimits").unwrap_or(Limits::from_sizes(6.28, 6.0, 6.0));
+            let soft_node = child(*jn, "SoftLimits");
+            let avg = |a: &str, b: &str| {
+                soft_node.map_or(0.0, |s| (number(s, a).unwrap_or(0.0) + number(s, b).unwrap_or(0.0)) * 0.5)
+            };
+            (hard, limits("SoftLimits").unwrap_or(hard), avg("twistStiffness", "swingStiffness"), avg("twistDamping", "swingDamping"))
+        };
+        let name = skeleton.joints[j].name.clone();
+        joints.push(JointDef {
+            muscle: effector_of.get(name.as_str()).map_or_else(|| name.clone(), |e| (*e).to_owned()),
+            name,
+            joint: j,
+            body,
+            parent_body,
+            primary: limit_frame("PrimaryFrameOffset"),
+            secondary: limit_frame("SecondaryFrameOffset"),
+            hard,
+            soft,
+            soft_stiffness: stiffness,
+            soft_damping: damping,
+        });
+    }
+
+    let muscle_sets = elements(child(node, "Calibrations"))
+        .filter_map(|cal| {
+            let skeletal = elements(Some(cal))
+                .filter(|p| p.has_tag_name("SkeletalEffectorParameters"))
+                .filter_map(|p| {
+                    let gains = |axis: &str| Gains {
+                        stiffness: number(p, &format!("{axis}Stiffness")).unwrap_or(0.0),
+                        damping: number(p, &format!("{axis}Damping")).unwrap_or(0.0),
+                        force_limit: number(p, &format!("{axis}ForceLimit")).unwrap_or(0.0),
+                    };
+                    Some((p.attribute("name")?.to_owned(), MuscleGains { twist: gains("twist"), swing: gains("swing") }))
+                });
+            // 1-DOF effectors (finger hinges): gradient acts as stiffness, capped by the
+            // base force cap. Damping isn't stored; a tenth of the gradient keeps them calm.
+            let single = elements(Some(cal)).filter(|p| p.has_tag_name("EffectorParameters")).filter_map(|p| {
+                let value = |tag: &str| child(p, tag)?.text()?.trim().parse::<f32>().ok();
+                let gradient = value("Gradient").unwrap_or(1.0);
+                let g = Gains { stiffness: gradient, damping: gradient * 0.1, force_limit: value("BaseForceCap").unwrap_or(2.0) };
+                Some((p.attribute("name")?.to_owned(), MuscleGains { twist: g, swing: g }))
+            });
+            let muscles: BTreeMap<String, MuscleGains> = skeletal.chain(single).collect();
+            let fallback = *muscles.values().next()?;
+            Some(MuscleSet { name: cal.attribute("name")?.to_owned(), muscles, fallback })
+        })
+        .collect();
+
+    Some(PhysicsRig { bodies, joints, muscle_sets, isotropic_inertia: isotropic })
+}
+
+/// A hinge's (lower, upper) range, as twist limits with swing locked.
+fn hinge_limits(node: Node) -> (Limits, Limits, f32, f32) {
+    let bound = |tag: &str, key: &str| {
+        child(node, "JointLimits")
+            .and_then(|l| child(l, tag))
+            .and_then(|b| child(b, key))
+            .and_then(|v| v.text())
+            .and_then(|t| t.trim().parse::<f32>().ok())
+    };
+    let (lower, upper) = (bound("Lower", "Value").unwrap_or(-3.1), bound("Upper", "Value").unwrap_or(3.1));
+    let limits = Limits { twist_min: lower, twist_max: upper, swing1: 0.01, swing2: 0.01 };
+    (limits, limits, bound("Lower", "Stiffness").unwrap_or(0.0), bound("Lower", "Damping").unwrap_or(0.0))
+}
+
+fn geometry(g: Node) -> Option<Geometry> {
+    let p = |i: usize| number(g, &format!("param{i}"));
+    Some(match g.attribute("type")? {
+        "Sphere" => Geometry::Sphere { radius: p(0)? },
+        "Sphyl" => Geometry::Capsule { radius: p(0)?, length: p(1)? },
+        "Cylinder" => Geometry::Cylinder { radius: p(0)?, length: p(1)? },
+        "Cuboid" => Geometry::Box { size: [p(0)?, p(1)?, p(2)?] },
+        _ => return None,
+    })
+}
+
+/// A number stored either as a `b`-prefixed float bit pattern or as plain text.
+fn number(node: Node, name: &str) -> Option<f32> {
+    attr_f32(node, &format!("b{name}")).or_else(|| node.attribute(name)?.trim().parse().ok())
+}
+
+/// A `TransformMatrix`'s rotation only.
+fn basis(m: Node) -> Option<Quat> {
+    let basis = Mat3::from_cols(vec3(child(m, "Vi"))?, vec3(child(m, "Vj"))?, vec3(child(m, "Vk"))?);
+    Some(Quat::from_mat3(&basis).normalize())
 }
 
 // ---------------------------------------------------------------------------------

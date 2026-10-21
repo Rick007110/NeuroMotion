@@ -12,9 +12,10 @@ use eframe::egui::{
     self, Align2, Color32, CursorIcon, FontId, Mesh, PointerButton, Pos2, Rect, Sense, Stroke,
     vec2,
 };
-use glam::{EulerRot, Mat4, Quat, Vec3};
+use glam::{Mat4, Quat, Vec3};
 
-use crate::document::{CharacterKind, Pose, Project, SkeletonRef};
+use crate::document::physics::{Geometry, PhysicsRig};
+use crate::document::{CharacterKind, Pose, Project, SkeletonRef, world_transforms};
 
 const BG_TOP: Color32 = Color32::from_rgb(44, 48, 56);
 const BG_BOTTOM: Color32 = Color32::from_rgb(22, 24, 28);
@@ -26,11 +27,37 @@ const BONE_LEFT: Color32 = Color32::from_rgb(110, 178, 255);
 const BONE_RIGHT: Color32 = Color32::from_rgb(255, 150, 112);
 const TEXT: Color32 = Color32::from_rgb(200, 204, 210);
 const PROP: Color32 = Color32::from_rgb(196, 170, 120);
+const BODY_SIMULATED: Color32 = Color32::from_rgba_premultiplied(70, 40, 14, 70);
+const BODY_ANIMATED: Color32 = Color32::from_rgba_premultiplied(30, 40, 52, 60);
+const BODY_SCENERY: Color32 = Color32::from_rgba_premultiplied(40, 40, 40, 70);
+
+/// What to draw for one character this frame.
+pub struct CharacterView {
+    /// World position of every skeleton joint.
+    pub joints: Vec<Vec3>,
+    /// World transform of every physics body, if the character has a rig.
+    pub bodies: Option<Vec<(Quat, Vec3)>>,
+    /// Whether it is being simulated right now (drawn in a warmer colour).
+    pub simulated: bool,
+}
+
+impl CharacterView {
+    /// The animated view of a character: forward kinematics on its pose.
+    pub fn animated(skeleton: &SkeletonRef, rig: Option<&PhysicsRig>, pose: &Pose) -> Self {
+        let transforms = world_transforms(skeleton, pose);
+        Self {
+            joints: transforms.iter().map(|t| t.1).collect(),
+            bodies: rig.map(|rig| crate::physics::rig_bodies(rig, &transforms)),
+            simulated: false,
+        }
+    }
+}
 
 pub struct Viewport {
     pub camera: OrbitCamera,
     pub show_grid: bool,
     pub show_joint_names: bool,
+    pub show_bodies: bool,
     /// Re-aim the camera at everything in the scene on the next frame.
     pub frame_requested: bool,
 }
@@ -41,27 +68,29 @@ impl Default for Viewport {
             camera: OrbitCamera::default(),
             show_grid: true,
             show_joint_names: false,
+            show_bodies: true,
             frame_requested: true,
         }
     }
 }
 
 impl Viewport {
-    /// Draws every character of `project` in `poses` (one per character, in order) into
-    /// the remaining space of `ui`. `hud` lines are overlaid in the top-left corner.
-    pub fn show(&mut self, ui: &mut egui::Ui, project: &Project, poses: &[Pose], hud: &[String]) {
+    /// Draws every character of `project` as described by `views` (one per character, in
+    /// order) into the remaining space of `ui`. `hud` lines are overlaid top-left.
+    pub fn show(&mut self, ui: &mut egui::Ui, project: &Project, views: &[CharacterView], hud: &[String]) {
         let rect = ui.available_rect_before_wrap();
         let response = ui.allocate_rect(rect, Sense::click_and_drag());
         self.handle_input(ui, &response, rect);
 
-        let worlds: Vec<Vec<Vec3>> = project
-            .characters
-            .iter()
-            .zip(poses)
-            .map(|(c, pose)| forward_kinematics(&c.skeleton, pose))
-            .collect();
         if std::mem::take(&mut self.frame_requested) {
-            self.camera.frame(worlds.iter().flatten().copied());
+            // Frame the characters, not the (often huge) scenery.
+            let points = project
+                .characters
+                .iter()
+                .zip(views)
+                .filter(|(c, _)| c.kind != CharacterKind::Environment)
+                .flat_map(|(_, v)| v.joints.iter().copied());
+            self.camera.frame(points);
         }
 
         let painter = ui.painter_at(rect);
@@ -74,9 +103,24 @@ impl Viewport {
             paint_grid(&painter, &project_point);
         }
 
-        for (character, world) in project.characters.iter().zip(&worlds) {
+        if self.show_bodies {
+            let eye = self.camera.eye();
+            for (character, view) in project.characters.iter().zip(views) {
+                let (Some(rig), Some(bodies)) = (&character.physics, &view.bodies) else { continue };
+                let color = match (character.kind, view.simulated) {
+                    (CharacterKind::Environment, _) => BODY_SCENERY,
+                    (_, true) => BODY_SIMULATED,
+                    (_, false) => BODY_ANIMATED,
+                };
+                paint_bodies(&painter, &project_point, eye, rig, bodies, color);
+            }
+        }
+        for (character, view) in project.characters.iter().zip(views) {
+            if character.kind == CharacterKind::Environment {
+                continue;
+            }
             let is_prop = character.kind == CharacterKind::Prop;
-            self.paint_skeleton(&painter, &project_point, &character.skeleton, world, is_prop);
+            self.paint_skeleton(&painter, &project_point, &character.skeleton, &view.joints, is_prop);
         }
 
         paint_axis_gizmo(&painter, rect, &self.camera.view());
@@ -174,34 +218,68 @@ impl Viewport {
     }
 }
 
-/// World-space joint positions for a pose. Each joint's rotation is its rest rotation
-/// followed by the pose's local XYZ Euler angles; pose offsets add to the rest offsets.
+/// World-space joint positions for a pose.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn forward_kinematics(skeleton: &SkeletonRef, pose: &Pose) -> Vec<Vec3> {
-    let n = skeleton.joints.len();
-    let mut positions = vec![Vec3::ZERO; n];
-    let mut rotations = vec![Quat::IDENTITY; n];
-    for (i, joint) in skeleton.joints.iter().enumerate() {
-        let v = pose.joints.get(i).copied().unwrap_or([0.0; 6]);
-        let local = Quat::from_euler(
-            EulerRot::XYZ,
-            v[0].to_radians(),
-            v[1].to_radians(),
-            v[2].to_radians(),
-        );
-        let rest = Quat::from_array(joint.rest_rotation).normalize();
-        let offset = Vec3::from(joint.offset) + Vec3::new(v[3], v[4], v[5]);
-        match joint.parent.filter(|&p| p < i) {
-            Some(p) => {
-                positions[i] = positions[p] + rotations[p] * offset;
-                rotations[i] = rotations[p] * rest * local;
-            }
-            None => {
-                positions[i] = offset;
-                rotations[i] = rest * local;
+    world_transforms(skeleton, pose).into_iter().map(|(_, p)| p).collect()
+}
+
+/// Draws collision shapes as translucent silhouettes.
+fn paint_bodies(
+    painter: &egui::Painter,
+    project: &impl Fn(Vec3) -> Option<Pos2>,
+    eye: Vec3,
+    rig: &PhysicsRig,
+    bodies: &[(Quat, Vec3)],
+    color: Color32,
+) {
+    // On-screen radius of a world-space radius at a point, using a sideways offset.
+    let screen_radius = |p: Vec3, r: f32| -> Option<(Pos2, f32)> {
+        let side = (p - eye).cross(Vec3::Y).normalize_or_zero();
+        let side = if side == Vec3::ZERO { Vec3::X } else { side };
+        let c = project(p)?;
+        let e = project(p + side * r)?;
+        Some((c, c.distance(e)))
+    };
+    let edge = Stroke::new(1.0, color.gamma_multiply(1.8));
+    for (def, &(rotation, position)) in rig.bodies.iter().zip(bodies) {
+        for shape in &def.shapes {
+            let r = rotation * Quat::from_array(shape.frame.rotation).normalize();
+            let p = position + rotation * Vec3::from(shape.frame.position);
+            match shape.geometry {
+                Geometry::Sphere { radius } => {
+                    if let Some((c, sr)) = screen_radius(p, radius) {
+                        painter.circle(c, sr, color, edge);
+                    }
+                }
+                Geometry::Capsule { radius, length } | Geometry::Cylinder { radius, length } => {
+                    let half = if matches!(shape.geometry, Geometry::Capsule { .. }) { length * 0.5 } else { (length * 0.5 - radius).max(0.0) };
+                    let axis = r * Vec3::Z * half;
+                    if let (Some((a, ra)), Some((b, _))) = (screen_radius(p - axis, radius), screen_radius(p + axis, radius)) {
+                        painter.line_segment([a, b], Stroke::new(ra * 2.0, color));
+                        painter.circle(a, ra, color, Stroke::NONE);
+                        painter.circle(b, ra, color, Stroke::NONE);
+                    }
+                }
+                Geometry::Box { size } => {
+                    let h = Vec3::from(size) * 0.5;
+                    let corner = |i: usize| {
+                        let s = Vec3::new(
+                            if i & 1 == 0 { -1.0 } else { 1.0 },
+                            if i & 2 == 0 { -1.0 } else { 1.0 },
+                            if i & 4 == 0 { -1.0 } else { 1.0 },
+                        );
+                        project(p + r * (h * s))
+                    };
+                    for (i, j) in [(0, 1), (2, 3), (4, 5), (6, 7), (0, 2), (1, 3), (4, 6), (5, 7), (0, 4), (1, 5), (2, 6), (3, 7)] {
+                        if let (Some(a), Some(b)) = (corner(i), corner(j)) {
+                            painter.line_segment([a, b], edge);
+                        }
+                    }
+                }
             }
         }
     }
-    positions
 }
 
 fn paint_background(painter: &egui::Painter, rect: Rect) {

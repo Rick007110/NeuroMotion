@@ -2,6 +2,7 @@
 //! actions coming from menus, buttons and shortcuts.
 
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Align2, RichText, ViewportCommand};
 
@@ -9,10 +10,14 @@ use super::actions::Action;
 use super::selection::Selection;
 use super::timeline_panel::{self, TimelineState};
 use super::{inspector, shortcuts, theme};
-use crate::document::{ClipKind, ClipProps, Document, Project, sample};
+use crate::document::{ClipKind, ClipProps, Document, Project, SimLevel, sample};
 use crate::io;
+use crate::physics::Simulation;
 use crate::timeline::Playback;
-use crate::viewport::{OrbitCamera, Viewport};
+use crate::viewport::{CharacterView, OrbitCamera, Viewport};
+
+/// Time per UI frame spent advancing the simulation, so editing stays responsive.
+const SIMULATION_BUDGET: Duration = Duration::from_millis(12);
 
 /// How long an imported pose is held on the timeline, in frames.
 const POSE_CLIP_FRAMES: i32 = 30;
@@ -25,6 +30,9 @@ pub struct NeuroMotionApp {
     pub(super) show_timeline: bool,
     playback: Playback,
     timeline: TimelineState,
+    simulation: Simulation,
+    /// Whether the project needs physics, cached per document revision.
+    physics_needed: Option<(u64, bool)>,
     status: String,
     show_about: bool,
     /// Notes from the last import, shown until dismissed.
@@ -51,6 +59,8 @@ impl NeuroMotionApp {
             show_inspector: true,
             show_timeline: true,
             timeline: TimelineState::default(),
+            simulation: Simulation::default(),
+            physics_needed: None,
             status: "Placeholder project loaded. Press Space to play.".to_owned(),
             show_about: false,
             import_report: None,
@@ -75,6 +85,54 @@ impl NeuroMotionApp {
         self.selection = Selection::None;
         self.timeline.fit_requested = true;
         self.viewport.frame_requested = true;
+        self.simulation.reset();
+        self.physics_needed = None;
+    }
+
+    /// Keeps the simulation in step with the document, computing a little more each frame.
+    fn advance_simulation(&mut self, ctx: &egui::Context) {
+        let revision = self.doc.revision();
+        let needed = match self.physics_needed {
+            Some((r, needed)) if r == revision => needed,
+            _ => {
+                let needed = Simulation::is_needed(&self.doc.project);
+                self.physics_needed = Some((revision, needed));
+                needed
+            }
+        };
+        if !needed {
+            return;
+        }
+        // Any edit bumps the revision, which throws away stale frames.
+        self.simulation.sync(revision);
+        if !self.simulation.advance(&self.doc.project, Instant::now() + SIMULATION_BUDGET) {
+            ctx.request_repaint();
+        }
+    }
+
+    fn physics_on(&self) -> bool {
+        self.physics_needed.is_some_and(|(_, n)| n)
+    }
+
+    /// What the viewport shows for each character: the simulation where it has been
+    /// computed, otherwise the animation.
+    fn character_views(&self) -> Vec<CharacterView> {
+        let project = &self.doc.project;
+        let poses = project.evaluate(self.playback.playhead() as f32);
+        let simulated = self.physics_on().then(|| self.simulation.frame(self.playback.frame())).flatten();
+        project
+            .characters
+            .iter()
+            .enumerate()
+            .map(|(ci, character)| match simulated.and_then(|f| f.get(ci)).and_then(Option::as_ref) {
+                Some(frame) => CharacterView {
+                    joints: frame.joints.iter().map(|j| j.1).collect(),
+                    bodies: Some(frame.bodies.clone()),
+                    simulated: frame.level == SimLevel::Simulated,
+                },
+                None => CharacterView::animated(&character.skeleton, character.physics.as_ref(), &poses[ci]),
+            })
+            .collect()
     }
 
     fn run(&mut self, ctx: &egui::Context, action: Action) {
@@ -91,6 +149,10 @@ impl NeuroMotionApp {
             Action::OpenDemo => {
                 self.load(sample::placeholder_project(), None);
                 self.status = "Placeholder project loaded.".into();
+            }
+            Action::OpenPhysicsDemo => {
+                self.load(sample::physics_demo_project(), None);
+                self.status = "Physics demo loaded: press Space. The character is shoved at frame 45.".into();
             }
             Action::OpenProject => match self.queued_open.take() {
                 Some(path) => self.open_path(path),
@@ -340,6 +402,21 @@ impl NeuroMotionApp {
             };
             lines.push(format!("  {who:<12} {:<20} {kind}", clip.props.name));
         }
+        if self.physics_on() {
+            let (done, total) = self.simulation.progress();
+            if done < total {
+                lines.push(format!("physics: simulating {done}/{total} frames"));
+            } else {
+                lines.push("physics: up to date".to_owned());
+            }
+            if let Some(frame) = self.simulation.frame(self.playback.frame()) {
+                for (character, state) in project.characters.iter().zip(frame) {
+                    if let Some(state) = state.as_ref().filter(|_| character.kind != crate::document::CharacterKind::Environment) {
+                        lines.push(format!("  {:<12} {}", character.name, state.level.label().to_lowercase()));
+                    }
+                }
+            }
+        }
         lines
     }
 
@@ -420,6 +497,7 @@ impl eframe::App for NeuroMotionApp {
         // Shortcuts first, so their keys never reach widgets.
         let mut actions = shortcuts::collect(ctx);
         self.handle_dropped_files(ctx, &mut actions);
+        self.advance_simulation(ctx);
 
         if ctx.input(|i| i.viewport().close_requested()) && self.doc.is_dirty() && !self.close_confirmed {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
@@ -466,8 +544,8 @@ impl eframe::App for NeuroMotionApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
-                let poses = self.doc.project.evaluate(self.playback.playhead() as f32);
-                self.viewport.show(ui, &self.doc.project, &poses, &hud);
+                let views = self.character_views();
+                self.viewport.show(ui, &self.doc.project, &views, &hud);
             });
 
         self.windows(ctx, &mut actions);

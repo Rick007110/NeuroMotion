@@ -14,6 +14,7 @@ impl NeuroMotionApp {
                 item(ui, actions, Action::NewProject, "New Project", true);
                 item(ui, actions, Action::OpenProject, "Open…", true);
                 item(ui, actions, Action::OpenDemo, "Open Placeholder Demo", true);
+                item(ui, actions, Action::OpenPhysicsDemo, "Open Physics Demo", true);
                 item(ui, actions, Action::ImportPose, "Import Pose (.nma)…", true);
                 ui.separator();
                 item(ui, actions, Action::SaveProject, "Save", true);
@@ -40,6 +41,7 @@ impl NeuroMotionApp {
                 ui.separator();
                 ui.checkbox(&mut self.viewport.show_grid, "Ground Grid");
                 ui.checkbox(&mut self.viewport.show_joint_names, "Joint Names");
+                ui.checkbox(&mut self.viewport.show_bodies, "Physics Bodies");
                 item(ui, actions, Action::ResetCamera, "Reset Camera", true);
                 ui.separator();
                 item(ui, actions, Action::FitTimeline, "Fit Timeline to Range", true);
