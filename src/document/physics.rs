@@ -41,6 +41,9 @@ pub enum SimLevel {
 }
 
 impl SimLevel {
+    pub const ALL: [SimLevel; 4] =
+        [SimLevel::Animated, SimLevel::CollisionOnly, SimLevel::CollisionWithMomentum, SimLevel::Simulated];
+
     pub fn label(self) -> &'static str {
         match self {
             SimLevel::Animated => "Animated",

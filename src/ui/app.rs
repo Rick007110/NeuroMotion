@@ -12,7 +12,7 @@ use super::selection::Selection;
 use super::timeline_panel::{self, TimelineState};
 use super::{inspector, shortcuts, theme};
 use crate::document::{CharacterId, ClipKind, ClipProps, Document, Project, SimLevel, sample};
-use crate::io;
+use crate::io::{self, motion};
 use crate::physics::Simulation;
 use crate::timeline::Playback;
 use crate::viewport::{CharacterView, OrbitCamera, Viewport};
@@ -202,6 +202,7 @@ impl NeuroMotionApp {
                 }
                 None => self.status = "Select a clip to duplicate.".into(),
             },
+            Action::BakeSimulation => self.bake_simulation(),
             Action::Delete => self.delete_selection(),
             Action::Deselect => self.selection = Selection::None,
             Action::PlayPause => self.playback.toggle(range),
@@ -359,7 +360,56 @@ impl NeuroMotionApp {
                     self.selection = Selection::None;
                 }
             }
-            _ => self.status = "Select a clip or key to delete.".into(),
+            Selection::Track(track) => {
+                let character = self.doc.project.track(track).map(|t| t.character);
+                if self.doc.remove_track(track) {
+                    self.selection = character.map_or(Selection::None, Selection::Character);
+                }
+            }
+            _ => self.status = "Select a track, clip or key to delete.".into(),
+        }
+    }
+
+    /// Whether Edit → Bake Simulation applies to the current selection.
+    pub(super) fn can_bake(&self) -> bool {
+        let project = &self.doc.project;
+        self.physics_on()
+            && self.selected_character().and_then(|id| project.character(id)).is_some_and(|c| c.physics.is_some())
+    }
+
+    /// Replaces the selected character's simulation over the project range with keys.
+    fn bake_simulation(&mut self) {
+        let Some(id) = self.selected_character() else {
+            self.status = "Select a character (or one of its tracks or clips) to bake.".into();
+            return;
+        };
+        let project = &self.doc.project;
+        let Some(index) = project.character_index(id) else { return };
+        let name = project.characters[index].name.clone();
+        if !Simulation::is_needed(project) {
+            self.status = format!("{name} isn't simulated, so there's nothing to bake.");
+            return;
+        }
+        motion::finish(&mut self.simulation, project, self.doc.revision());
+        let range = project.settings.range;
+        let simulated = (range.start..=range.end).any(|f| {
+            let state = self.simulation.frame(f).and_then(|s| s.get(index)).and_then(Option::as_ref);
+            state.is_some_and(|s| s.level != SimLevel::Animated)
+        });
+        if !simulated {
+            self.status = format!("{name} is never simulated in the project range, so there's nothing to bake.");
+            return;
+        }
+        let motion = motion::sample(project, index, Some(&self.simulation));
+        match self.doc.bake_motion(id, &motion.frames) {
+            Some((_, clip)) => {
+                self.selection = Selection::Clip(clip);
+                self.status = format!(
+                    "Baked {} frames of {name} into keys on a new top track. Its physics events are off and it now starts animated.",
+                    motion.frames.len()
+                );
+            }
+            None => self.status = format!("Couldn't bake {name}."),
         }
     }
 

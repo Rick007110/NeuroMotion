@@ -38,6 +38,26 @@ File → Import → Motion Capture (.bvh). Keep **Scale** at 1 for a metres expo
 defaults for Forward and Up (`-Z`, `Y`) turn NeuroMotion's Y-up space into Blender's
 Z-up space.
 
+## Baking the simulation to keys
+
+**Edit → Bake Simulation** (with a character, or one of its tracks or clips, selected)
+turns that character's simulated motion over the project range into an ordinary motion
+clip, so it can be edited, layered and exported like any other animation:
+
+- A new track named **Baked** goes on top of the character's other tracks (the highest
+  blend layer, listed last under the character), with one clip covering the project
+  range, keyed on every frame: a rotation for every joint (relative to its rest
+  orientation, X/Y/Z like hand-made keys), the root's position, and the offset of any
+  other joint that moves by more than 1 mm.
+- The character then plays its keys: its starting level becomes *Animated* and its
+  event clips (simulation switches, forces, active poses, transitions, constraints, ...)
+  are disabled. Nothing is deleted; turn an event back on with its **Enabled** box.
+- The whole bake is a single undo step.
+
+Other characters no longer collide with a baked (animated) character. To keep it
+pushing them around, set its **Starts as** level (character inspector, Physics) to
+*Collision only* or *Collision with momentum*.
+
 ## Tests
 
 `src/io/bvh.rs` exports the placeholder project, the physics demo and a hand-made
@@ -45,3 +65,7 @@ skeleton with rotated rest frames (one joint sitting exactly at XYZ gimbal lock)
 reads each file back with an independent parser and checks forward-kinematics joint
 positions against the source. Errors are under 0.001 mm for keys and under 0.5 mm for
 the simulation (the simulation's tiny joint stretch is the difference).
+
+`src/document/tests.rs` bakes the placeholder animation and the physics demo's
+simulation, checks the keys alone reproduce every joint within 0.1 mm (keys) and 2 mm
+(simulation), and that one undo restores the project exactly.
