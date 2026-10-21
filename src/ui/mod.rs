@@ -2,6 +2,7 @@
 //!
 //! * [`app`] – window layout and action dispatch
 //! * [`menu`] – File / Edit / View / Help
+//! * [`export`] – the File → Export window
 //! * [`timeline_panel`] – transport, ruler, tracks, clips, keys
 //! * [`inspector`] – property editing for the current selection
 //! * [`shortcuts`] – the keyboard binding table
@@ -9,6 +10,7 @@
 
 mod actions;
 mod app;
+mod export;
 mod icons;
 mod inspector;
 mod menu;

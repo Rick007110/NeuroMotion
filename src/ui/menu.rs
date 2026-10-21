@@ -16,6 +16,9 @@ impl NeuroMotionApp {
                 item(ui, actions, Action::OpenDemo, "Open Placeholder Demo", true);
                 item(ui, actions, Action::OpenPhysicsDemo, "Open Physics Demo", true);
                 item(ui, actions, Action::ImportPose, "Import Pose (.nma)…", true);
+                ui.menu_button("Export", |ui| {
+                    item(ui, actions, Action::ExportBvh, "BVH…", true);
+                });
                 ui.separator();
                 item(ui, actions, Action::SaveProject, "Save", true);
                 item(ui, actions, Action::SaveProjectAs, "Save As…", true);

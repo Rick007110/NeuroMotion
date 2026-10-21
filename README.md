@@ -19,6 +19,8 @@ toward a modern physics engine that behaves like endorphin's and then goes furth
   ramps; step, linear and smooth curves.
 - **Undo/redo** on the document model, with each drag recorded as one step.
 - **Projects** saved as readable JSON (`.nmproj`), with versioned migrations.
+- **Export**: File → Export writes a character's motion (simulated or keyed) as BVH.
+  Details: [docs/export.md](docs/export.md).
 - **Opening endorphin files**:
 
   | File | Support |
@@ -97,13 +99,13 @@ cargo test -- --ignored
 |---|---|
 | `document` | Project data model, pose evaluation, undo/redo. No UI. |
 | `timeline` | Transport and time-to-pixel mapping. No drawing. |
-| `io` | Project files and endorphin importers |
+| `io` | Project files, endorphin importers and motion exporters |
 | `physics` | Rigid-body solver, collisions, and the timeline-driven simulation |
 | `viewport` | Camera and character preview |
 | `ui` | egui application shell, panels, menus, keyboard shortcuts (`ui/shortcuts.rs`) |
 
 Design notes: [docs/layout.md](docs/layout.md),
-[docs/project-format.md](docs/project-format.md).
+[docs/project-format.md](docs/project-format.md), [docs/export.md](docs/export.md).
 
 ## License
 
