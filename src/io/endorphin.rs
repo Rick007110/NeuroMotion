@@ -1,0 +1,800 @@
+//! Importers for endorphin 2.x files, so existing work opens in NeuroMotion.
+//!
+//! endorphin documents are zlib-compressed XML: `.ens` scenes, `.nmc` characters and
+//! props, `.nma` poses. Format details (see docs/endorphin-formats.md):
+//!
+//! * Attributes whose name starts with `b` and whose value is 8 hex digits hold a
+//!   float32 bit pattern (`bstrength="3dcccccd"` is 0.1).
+//! * A `TransformMatrix` is four vectors: the rotation basis `Vi`, `Vj`, `Vk` (matrix
+//!   columns) and the position `Vp`, all relative to the parent joint.
+//! * Animation keys are timed in seconds. Quaternion keys store w, x, y, z in the
+//!   `bx`, `by`, `bz`, `bw` attributes; rotations are full local joint orientations.
+//! * Scene frames run at the engine's `positionBufferFrameRate`.
+//!
+//! Animation becomes keyframed motion clips. Physics events (forces, behaviours,
+//! simulation switches, transitions, ...) become event clips whose settings are kept
+//! in [`Clip::source`](crate::document::Clip::source) for the physics system.
+
+use std::{collections::BTreeMap, fs, io::Read, path::Path};
+
+use flate2::read::ZlibDecoder;
+use glam::{EulerRot, Mat3, Quat, Vec3};
+use roxmltree::Node;
+
+use super::IoError;
+use crate::document::{
+    CharacterId, CharacterKind, Channel, ClipKind, ClipProps, FrameRange, Interp, Joint,
+    Keyframe, Project, ProjectSettings, Property, SkeletonRef,
+};
+
+/// An imported project plus human-readable notes on what was converted or left out.
+pub struct Import {
+    pub project: Project,
+    pub notes: Vec<String>,
+}
+
+/// A pose ready to be placed on the timeline as a held clip.
+pub struct PoseImport {
+    pub character: CharacterId,
+    pub name: String,
+    pub channels: Vec<Channel>,
+}
+
+pub fn import_scene(path: &Path) -> Result<Import, IoError> {
+    let text = read_document(path)?;
+    let xml = parse(&text)?;
+    let root = xml.root_element();
+    if !root.has_tag_name("Scene") {
+        return Err(IoError::Format("not an endorphin scene (.ens)".into()));
+    }
+
+    let engine = child(root, "Engine");
+    let fps = engine
+        .and_then(|e| attr_f32(e, "bpositionBufferFrameRate"))
+        .filter(|f| *f > 0.0)
+        .unwrap_or(60.0);
+    let mut project = Project::new(ProjectSettings {
+        name: file_stem(path),
+        fps,
+        range: FrameRange { start: 0, end: 1 },
+    });
+    let mut notes = Vec::new();
+    let mut skipped_joints = 0;
+
+    for node in elements(child(root, "Characters")) {
+        let kind = if node.attribute("typeName") == Some("animatableProp") {
+            CharacterKind::Prop
+        } else {
+            CharacterKind::Character
+        };
+        add_character(&mut project, node, kind, &mut skipped_joints);
+    }
+    if let Some(env) = child(root, "Environment") {
+        if child(env, "Skeleton").is_some() {
+            add_character(&mut project, env, CharacterKind::Environment, &mut skipped_joints);
+        }
+    }
+    if project.characters.is_empty() {
+        return Err(IoError::Format("the scene contains no characters".into()));
+    }
+
+    // Every timed element in the event sections becomes a clip.
+    let mut events: Vec<Node> = ["Events", "ForceEvents", "SecondaryBehaviours", "TertiaryBehaviours", "SeverBehaviourEvents"]
+        .into_iter()
+        .flat_map(|section| elements(child(root, section)))
+        .filter(|e| e.attribute("startFrameNumber").is_some())
+        .collect();
+    // Animation first so its tracks sit at the top of each character, then by kind.
+    events.sort_by_key(|e| {
+        let label = event_label(e.tag_name().name());
+        (label != "Animation", label, attr_i32(e, "priority").unwrap_or(0), attr_i32(e, "startFrameNumber").unwrap_or(0))
+    });
+
+    let mut lanes = Lanes::default();
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut missing_targets = 0;
+    let mut skipped_channels = 0;
+    let (mut first, mut last) = (i32::MAX, i32::MIN);
+    for event in events {
+        let Some(character) = event
+            .attribute("character")
+            .and_then(|name| project.character_by_name(name))
+            .cloned()
+        else {
+            missing_targets += 1;
+            continue;
+        };
+        let tag = event.tag_name().name();
+        let label = event_label(tag);
+        let start = attr_i32(&event, "startFrameNumber").unwrap_or(0);
+        let end = attr_i32(&event, "endFrameNumber").unwrap_or(start + 1).max(start + 1);
+        first = first.min(start);
+        last = last.max(end);
+
+        let (kind, channels) = if tag == "AnimationEvent" {
+            let channels = animation_channels(event, &character.skeleton, fps, &mut skipped_channels);
+            (ClipKind::Motion, channels)
+        } else {
+            (ClipKind::Event { event: label.to_owned() }, Vec::new())
+        };
+        let blend_in = attr_f32(event, "bentryBlendPeriod").map_or(0, |s| (s * fps).round() as i32);
+        let props = ClipProps {
+            name: event_name(event, label),
+            track: lanes.track(&mut project, character.id, label, start, end),
+            start,
+            duration: end - start,
+            blend_in: blend_in.clamp(0, end - start),
+            blend_out: 0,
+            weight: 1.0,
+            enabled: event.attribute("enabled") != Some("false"),
+        };
+        let id = project.add_clip(props, kind, channels);
+        if let Some(clip) = project.clip_mut(id) {
+            clip.source = event_settings(event);
+        }
+        *counts.entry(label).or_default() += 1;
+    }
+
+    let playback = engine.and_then(|e| child(e, "PlaybackRange")).and_then(|r| {
+        Some(FrameRange { start: attr_i32(&r, "start")?, end: attr_i32(&r, "end")? })
+    });
+    project.settings.range = match playback {
+        Some(range) if range.end > range.start => range,
+        _ if first < last => FrameRange { start: first.min(0), end: last },
+        _ => FrameRange { start: 0, end: (fps * 5.0) as i32 },
+    };
+
+    let people = project.characters.iter().filter(|c| c.kind == CharacterKind::Character).count();
+    notes.push(format!(
+        "Imported {} character(s) and {} prop/environment object(s) at {fps:.0} fps.",
+        people,
+        project.characters.len() - people
+    ));
+    for (label, n) in &counts {
+        notes.push(format!("{n} × {label}"));
+    }
+    if counts.keys().any(|l| *l != "Animation") {
+        notes.push("Physics events are kept as event clips with their original settings; they don't simulate yet.".into());
+    }
+    if skipped_joints > 0 {
+        notes.push(format!("Skipped {skipped_joints} virtual-muscle helper joint(s)."));
+    }
+    if skipped_channels > 0 {
+        notes.push(format!("Skipped {skipped_channels} animation channel(s) for joints the rig doesn't have."));
+    }
+    if missing_targets > 0 {
+        notes.push(format!("Skipped {missing_targets} event(s) aimed at objects that aren't characters."));
+    }
+    project.normalize_ids();
+    Ok(Import { project, notes })
+}
+
+/// Opens a character or prop file as a project with one empty track.
+pub fn import_character(path: &Path) -> Result<Import, IoError> {
+    let text = read_document(path)?;
+    let xml = parse(&text)?;
+    let root = xml.root_element();
+    // Motion-transfer rig templates are a bare <Skeleton> of rig nodes.
+    let is_rig = root.has_tag_name("Skeleton");
+    if !root.has_tag_name("Character") && !is_rig {
+        return Err(IoError::Format("not an endorphin character (.nmc)".into()));
+    }
+    let mut project = Project::new(ProjectSettings {
+        name: file_stem(path),
+        fps: 30.0,
+        range: FrameRange { start: 0, end: 150 },
+    });
+    let mut skipped = 0;
+    let kind = if root.attribute("typeName") == Some("animatableProp") || path_is_prop(path) {
+        CharacterKind::Prop
+    } else {
+        CharacterKind::Character
+    };
+    let id = if is_rig {
+        let mut joints = Vec::new();
+        add_joint(root, None, &mut joints, &mut skipped);
+        let skeleton = SkeletonRef { name: file_stem(path), source: None, joints };
+        project.add_character("rig", kind, skeleton)
+    } else {
+        add_character(&mut project, root, kind, &mut skipped)
+    };
+    if let Some(c) = project.characters.iter_mut().find(|c| c.id == id) {
+        c.skeleton.source = Some(path.display().to_string());
+    }
+    project.add_track(id, "Base");
+    let joints = project.characters[0].skeleton.joints.len();
+    let what = if is_rig { "motion-transfer rig".to_owned() } else { kind.label().to_lowercase() };
+    let mut notes = vec![format!("Imported {what} with {joints} joints.")];
+    if skipped > 0 {
+        notes.push(format!("Skipped {skipped} virtual-muscle helper joint(s)."));
+    }
+    Ok(Import { project, notes })
+}
+
+/// Reads a pose and converts it to channels for the best-matching character.
+pub fn import_pose(path: &Path, project: &Project) -> Result<PoseImport, IoError> {
+    let text = read_document(path)?;
+    let xml = parse(&text)?;
+    let root = xml.root_element();
+    if !root.has_tag_name("Pose") {
+        return Err(IoError::Format("not an endorphin pose (.nma)".into()));
+    }
+    if child(root, "DesiredPose").is_some() {
+        return Err(IoError::Format(
+            "this pose stores muscle (effector) targets instead of joint transforms;              it will be supported together with physics"
+                .into(),
+        ));
+    }
+    if root.attribute("refFrame").is_some_and(|f| !f.eq_ignore_ascii_case("parent")) {
+        return Err(IoError::Format("only poses stored relative to parent joints are supported".into()));
+    }
+    let entries: Vec<(&str, Quat, Vec3)> = elements(child(root, "Relationships"))
+        .filter_map(|r| {
+            let (rot, pos) = transform(r)?;
+            Some((r.attribute("name")?, rot, pos))
+        })
+        .collect();
+
+    // Prefer the character the pose names, otherwise whichever shares the most joints.
+    let matches = |skeleton: &SkeletonRef| entries.iter().filter(|(n, ..)| skeleton.joint_index(n).is_some()).count();
+    let named = root.attribute("character").and_then(|n| project.character_by_name(n));
+    let character = named
+        .filter(|c| matches(&c.skeleton) > 0)
+        .or_else(|| project.characters.iter().max_by_key(|c| matches(&c.skeleton)))
+        .filter(|c| matches(&c.skeleton) > 0)
+        .ok_or_else(|| IoError::Format("none of the project's characters have this pose's joints".into()))?;
+
+    let mut channels = Vec::new();
+    for (name, rot, pos) in entries {
+        let Some(index) = character.skeleton.joint_index(name) else { continue };
+        let joint = &character.skeleton.joints[index];
+        let euler = relative_euler(joint, rot);
+        let offset = pos - Vec3::from(joint.offset);
+        for (property, value) in rotation_props().into_iter().zip(euler).chain(position_props().into_iter().zip(offset.to_array())) {
+            let near_zero = if property.is_rotation() { value.abs() < 0.01 } else { value.abs() < 1e-4 };
+            if !near_zero {
+                channels.push(Channel {
+                    joint: name.to_owned(),
+                    property,
+                    keys: vec![Keyframe { frame: 0, value, interp: Interp::Linear }],
+                });
+            }
+        }
+    }
+    Ok(PoseImport { character: character.id, name: file_stem(path), channels })
+}
+
+// ---------------------------------------------------------------------------------
+// Characters
+
+fn add_character(project: &mut Project, node: Node, kind: CharacterKind, skipped: &mut usize) -> CharacterId {
+    let mut joints = Vec::new();
+    if let Some(root) = child(node, "Skeleton") {
+        add_joint(root, None, &mut joints, skipped);
+    }
+    let source = node.attribute("pathName").filter(|p| !p.is_empty()).map(str::to_owned);
+    let rig = source
+        .as_deref()
+        .map(|p| file_stem(Path::new(&p.replace('\\', "/"))))
+        .unwrap_or_else(|| kind.label().to_owned());
+    let name = node.attribute("name").unwrap_or("character");
+    project.add_character(name, kind, SkeletonRef { name: rig, source, joints })
+}
+
+fn add_joint(node: Node, parent: Option<usize>, joints: &mut Vec<Joint>, skipped: &mut usize) {
+    let name = node.attribute("name").unwrap_or("joint");
+    // Virtual muscles are solver helpers linking distant bodies, not bones.
+    if node.attribute("isVirtualMuscle") == Some("true") || name.contains("VirtualMuscle") {
+        *skipped += 1;
+        return;
+    }
+    let (rotation, position) = transform(node).unwrap_or((Quat::IDENTITY, Vec3::ZERO));
+    joints.push(Joint {
+        name: name.to_owned(),
+        parent,
+        offset: position.to_array(),
+        rest_rotation: rotation.to_array(),
+    });
+    let index = joints.len() - 1;
+    // Skeletons nest joints in <ChildJoints>; rig templates nest rig nodes in <ChildNodes>.
+    for c in elements(child(node, "ChildJoints")).chain(elements(child(node, "ChildNodes"))) {
+        add_joint(c, Some(index), joints, skipped);
+    }
+}
+
+// ---------------------------------------------------------------------------------
+// Animation
+
+#[derive(Default)]
+struct JointTrack {
+    rotation: Vec<(f32, Quat)>,
+    position: [Vec<(f32, f32)>; 3],
+}
+
+fn animation_channels(event: Node, skeleton: &SkeletonRef, fps: f32, skipped: &mut usize) -> Vec<Channel> {
+    let Some(animation) = child(event, "Animation") else { return Vec::new() };
+    let frame_offset = attr_i32(&event, "frameOffset").unwrap_or(0);
+
+    let mut tracks: BTreeMap<usize, JointTrack> = BTreeMap::new();
+    for channel in elements(Some(animation)) {
+        let Some(full) = channel.attribute("name") else { continue };
+        let mut parts = full.rsplit('.');
+        let (Some(property), Some(joint)) = (parts.next(), parts.next()) else { continue };
+        let Some(index) = skeleton.joint_index(joint) else {
+            *skipped += 1;
+            continue;
+        };
+        let track = tracks.entry(index).or_default();
+        let keys = elements(Some(channel));
+        match (channel.tag_name().name(), property) {
+            ("QuatChannel", _) => track.rotation = keys.filter_map(|k| {
+                let q = Quat::from_xyzw(attr_f32(k, "by")?, attr_f32(k, "bz")?, attr_f32(k, "bw")?, attr_f32(k, "bx")?);
+                Some((attr_f32(k, "bt")?, q.normalize()))
+            }).collect(),
+            ("Channel", "tx" | "ty" | "tz") => {
+                let axis = (property.as_bytes()[1] - b'x') as usize;
+                track.position[axis] = keys.filter_map(|k| Some((attr_f32(k, "bx")?, attr_f32(k, "by")?))).collect();
+            }
+            _ => *skipped += 1,
+        }
+    }
+
+    // The event's matrix places the whole animation in the scene: bake it into the root.
+    if let Some((place_rot, place_pos)) = transform(event) {
+        let is_identity = place_rot.angle_between(Quat::IDENTITY) < 1e-4 && place_pos.length() < 1e-5;
+        if let Some(root) = skeleton.joints.iter().position(|j| j.parent.is_none()).filter(|_| !is_identity) {
+            let joint = &skeleton.joints[root];
+            let track = tracks.entry(root).or_default();
+            if track.rotation.is_empty() {
+                track.rotation.push((0.0, Quat::from_array(joint.rest_rotation)));
+            }
+            for (axis, keys) in track.position.iter_mut().enumerate() {
+                if keys.is_empty() {
+                    keys.push((0.0, joint.offset[axis]));
+                }
+            }
+            for (_, q) in &mut track.rotation {
+                *q = (place_rot * *q).normalize();
+            }
+            let times = merged_times(&track.position);
+            let sampled: Vec<(f32, Vec3)> = times
+                .into_iter()
+                .map(|t| {
+                    let p = Vec3::new(sample_linear(&track.position[0], t), sample_linear(&track.position[1], t), sample_linear(&track.position[2], t));
+                    (t, place_rot * p + place_pos)
+                })
+                .collect();
+            for axis in 0..3 {
+                track.position[axis] = sampled.iter().map(|(t, p)| (*t, p[axis])).collect();
+            }
+        }
+    }
+
+    let to_frame = |t: f32| (t * fps).round() as i32 - frame_offset;
+    let mut channels = Vec::new();
+    for (index, track) in tracks {
+        let joint = &skeleton.joints[index];
+        if !track.rotation.is_empty() {
+            let mut previous = [0.0f32; 3];
+            let mut keys: [Vec<Keyframe>; 3] = Default::default();
+            for (i, (t, q)) in track.rotation.iter().enumerate() {
+                let mut euler = relative_euler(joint, *q);
+                if i > 0 {
+                    unwrap_degrees(&mut euler, previous);
+                }
+                previous = euler;
+                for axis in 0..3 {
+                    push_key(&mut keys[axis], to_frame(*t), euler[axis]);
+                }
+            }
+            for (property, keys) in rotation_props().into_iter().zip(keys) {
+                push_channel(&mut channels, &joint.name, property, keys, 0.01);
+            }
+        }
+        for (axis, property) in position_props().into_iter().enumerate() {
+            let mut keys = Vec::new();
+            for (t, value) in &track.position[axis] {
+                push_key(&mut keys, to_frame(*t), value - joint.offset[axis]);
+            }
+            push_channel(&mut channels, &joint.name, property, keys, 1e-4);
+        }
+    }
+    channels
+}
+
+/// XYZ Euler angles (degrees) that take a joint from its rest orientation to `full`.
+fn relative_euler(joint: &Joint, full: Quat) -> [f32; 3] {
+    let rest = Quat::from_array(joint.rest_rotation).normalize();
+    let (x, y, z) = (rest.inverse() * full).normalize().to_euler(EulerRot::XYZ);
+    [x.to_degrees(), y.to_degrees(), z.to_degrees()]
+}
+
+/// Shifts each angle by whole turns so it lands within 180° of the previous key,
+/// keeping curves continuous instead of jumping at ±180°.
+fn unwrap_degrees(angles: &mut [f32; 3], previous: [f32; 3]) {
+    for (a, p) in angles.iter_mut().zip(previous) {
+        *a -= ((*a - p) / 360.0).round() * 360.0;
+    }
+}
+
+fn push_key(keys: &mut Vec<Keyframe>, frame: i32, value: f32) {
+    let key = Keyframe { frame, value, interp: Interp::Linear };
+    match keys.last_mut() {
+        Some(last) if last.frame == frame => *last = key,
+        _ => keys.push(key),
+    }
+}
+
+/// Adds the channel unless every key is (near) zero, i.e. it never leaves the rest pose.
+fn push_channel(channels: &mut Vec<Channel>, joint: &str, property: Property, mut keys: Vec<Keyframe>, epsilon: f32) {
+    keys.sort_by_key(|k| k.frame);
+    keys.dedup_by_key(|k| k.frame);
+    if keys.iter().all(|k| k.value.abs() < epsilon) {
+        return;
+    }
+    channels.push(Channel { joint: joint.to_owned(), property, keys });
+}
+
+fn rotation_props() -> [Property; 3] {
+    [Property::RotX, Property::RotY, Property::RotZ]
+}
+
+fn position_props() -> [Property; 3] {
+    [Property::PosX, Property::PosY, Property::PosZ]
+}
+
+fn merged_times(channels: &[Vec<(f32, f32)>; 3]) -> Vec<f32> {
+    let mut times: Vec<f32> = channels.iter().flatten().map(|(t, _)| *t).collect();
+    times.sort_by(f32::total_cmp);
+    times.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+    times
+}
+
+fn sample_linear(keys: &[(f32, f32)], t: f32) -> f32 {
+    match keys.iter().position(|(kt, _)| *kt >= t) {
+        None => keys.last().map_or(0.0, |k| k.1),
+        Some(0) => keys[0].1,
+        Some(i) => {
+            let ((t0, v0), (t1, v1)) = (keys[i - 1], keys[i]);
+            v0 + (v1 - v0) * ((t - t0) / (t1 - t0).max(1e-9))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------
+// Events
+
+/// Groups events of one kind onto as few tracks per character as possible.
+#[derive(Default)]
+struct Lanes {
+    lanes: Vec<(CharacterId, &'static str, crate::document::TrackId, i32)>,
+}
+
+impl Lanes {
+    fn track(&mut self, project: &mut Project, character: CharacterId, label: &'static str, start: i32, end: i32) -> crate::document::TrackId {
+        if let Some(lane) = self.lanes.iter_mut().find(|l| l.0 == character && l.1 == label && l.3 <= start) {
+            lane.3 = end;
+            return lane.2;
+        }
+        let existing = self.lanes.iter().filter(|l| l.0 == character && l.1 == label).count();
+        let plural = if label == "Animation" { label.to_owned() } else { format!("{label}s") };
+        let name = if existing == 0 { plural } else { format!("{plural} {}", existing + 1) };
+        let id = project.add_track(character, &name);
+        self.lanes.push((character, label, id, end));
+        id
+    }
+}
+
+/// Friendly name for an endorphin event element.
+fn event_label(tag: &str) -> &'static str {
+    match tag {
+        "AnimationEvent" => "Animation",
+        "ForceEvent" => "Force",
+        "SecondaryBehaviour" => "Behaviour",
+        "TertiaryBehaviour" => "Constraint",
+        "IncarnationEvent" => "Simulation",
+        "DesiredPoseEvent" => "Active pose",
+        "TransitionEvent" => "Transition",
+        "RigEvent" => "Motion transfer",
+        "SeverEvent" => "Sever",
+        _ => "Event",
+    }
+}
+
+fn event_name(event: Node, label: &str) -> String {
+    ["displayName", "behaviourName", "name"]
+        .into_iter()
+        .find_map(|a| event.attribute(a).filter(|v| !v.is_empty()))
+        .unwrap_or(label)
+        .to_owned()
+}
+
+/// The event's own settings, decoded, minus what NeuroMotion already models.
+fn event_settings(event: Node) -> BTreeMap<String, String> {
+    const MODELLED: [&str; 10] = [
+        "name", "displayName", "startFrameNumber", "endFrameNumber", "character", "enabled",
+        "visible", "retailVersionVisible", "addToFrameBuffer", "animationVisible",
+    ];
+    let mut out = BTreeMap::new();
+    out.insert("endorphin.type".to_owned(), event.tag_name().name().to_owned());
+    for attr in event.attributes() {
+        if MODELLED.contains(&attr.name()) {
+            continue;
+        }
+        match decode_float_attr(attr.name(), attr.value()) {
+            Some((name, value)) => out.insert(name, format_float(value)),
+            None => out.insert(attr.name().to_owned(), attr.value().to_owned()),
+        };
+    }
+    if let Some(m) = child(event, "TransformMatrix") {
+        for axis in ["Vi", "Vj", "Vk", "Vp"] {
+            if let Some(v) = vec3(child(m, axis)) {
+                out.insert(format!("matrix.{axis}"), format!("{}, {}, {}", format_float(v.x), format_float(v.y), format_float(v.z)));
+            }
+        }
+    }
+    let targets: Vec<&str> = elements(child(event, "Objects")).filter_map(|o| o.text()).collect();
+    if !targets.is_empty() {
+        out.insert("targets".to_owned(), targets.join(", "));
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------------
+// Low-level helpers
+
+/// Reads an endorphin document, inflating it if compressed.
+pub fn read_document(path: &Path) -> Result<String, IoError> {
+    decode_document(&fs::read(path)?)
+}
+
+fn decode_document(bytes: &[u8]) -> Result<String, IoError> {
+    let mut text = String::new();
+    if ZlibDecoder::new(bytes).read_to_string(&mut text).is_ok() && text.trim_start().starts_with('<') {
+        return Ok(text);
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(text) if text.trim_start().starts_with('<') => Ok(text.to_owned()),
+        _ => Err(IoError::Format(
+            "this file isn't readable endorphin data. If it was exported with a password, \
+             re-export it from endorphin without one."
+                .into(),
+        )),
+    }
+}
+
+fn parse(text: &str) -> Result<roxmltree::Document<'_>, IoError> {
+    roxmltree::Document::parse(text).map_err(|e| IoError::Format(format!("invalid endorphin XML: {e}")))
+}
+
+fn child<'a, 'i>(node: Node<'a, 'i>, tag: &str) -> Option<Node<'a, 'i>> {
+    node.children().find(|c| c.has_tag_name(tag))
+}
+
+fn elements<'a, 'i>(node: Option<Node<'a, 'i>>) -> impl Iterator<Item = Node<'a, 'i>> {
+    node.into_iter().flat_map(|n| n.children()).filter(Node::is_element)
+}
+
+fn hex_f32(value: &str) -> Option<f32> {
+    (value.len() == 8).then(|| u32::from_str_radix(value, 16).ok().map(f32::from_bits)).flatten()
+}
+
+fn decode_float_attr(name: &str, value: &str) -> Option<(String, f32)> {
+    let rest = name.strip_prefix('b')?;
+    rest.chars().next().filter(char::is_ascii_lowercase)?;
+    Some((rest.to_owned(), hex_f32(value)?))
+}
+
+fn attr_f32(node: Node, name: &str) -> Option<f32> {
+    hex_f32(node.attribute(name)?)
+}
+
+fn attr_i32(node: &Node, name: &str) -> Option<i32> {
+    node.attribute(name)?.trim().parse().ok()
+}
+
+fn vec3(node: Option<Node>) -> Option<Vec3> {
+    let n = node?;
+    Some(Vec3::new(attr_f32(n, "bx")?, attr_f32(n, "by")?, attr_f32(n, "bz")?))
+}
+
+/// A node's `TransformMatrix` as rotation + position (relative to its parent).
+fn transform(node: Node) -> Option<(Quat, Vec3)> {
+    let m = child(node, "TransformMatrix")?;
+    let basis = Mat3::from_cols(vec3(child(m, "Vi"))?, vec3(child(m, "Vj"))?, vec3(child(m, "Vk"))?);
+    Some((Quat::from_mat3(&basis).normalize(), vec3(child(m, "Vp"))?))
+}
+
+fn format_float(v: f32) -> String {
+    if v.is_finite() { format!("{}", (v * 1e5).round() / 1e5) } else { v.to_string() }
+}
+
+fn file_stem(path: &Path) -> String {
+    path.file_stem().map_or_else(|| "Imported".to_owned(), |s| s.to_string_lossy().into_owned())
+}
+
+fn path_is_prop(path: &Path) -> bool {
+    path.components().any(|c| c.as_os_str().eq_ignore_ascii_case("Props"))
+}
+
+/// Joint-level checks against a hand-written scene (no endorphin install needed).
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hex(v: f32) -> String {
+        format!("{:08x}", v.to_bits())
+    }
+
+    fn matrix(cols: [[f32; 3]; 3], p: [f32; 3]) -> String {
+        let v = |tag: &str, x: [f32; 3]| format!(r#"<{tag} bx="{}" by="{}" bz="{}"/>"#, hex(x[0]), hex(x[1]), hex(x[2]));
+        format!("<TransformMatrix>{}{}{}{}</TransformMatrix>", v("Vi", cols[0]), v("Vj", cols[1]), v("Vk", cols[2]), v("Vp", p))
+    }
+
+    /// A two-joint character whose child bone points along the parent's local +X, with
+    /// the root rotated so local +X is world up (like endorphin's spine).
+    fn scene_xml() -> String {
+        let up = matrix([[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], [0.0, 1.0, 0.0]);
+        let ident = matrix([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], [0.5, 0.0, 0.0]);
+        let place = matrix([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], [2.0, 0.0, 0.0]);
+        // A key that rotates the child 90° about Z: w, x, y, z in bx, by, bz, bw.
+        let s = std::f32::consts::FRAC_1_SQRT_2;
+        format!(
+            r#"<?xml version="1.0"?>
+<Scene>
+  <Engine bpositionBufferFrameRate="{fps}"><PlaybackRange start="0" end="30"/></Engine>
+  <Characters>
+    <Character name="hero" typeName="skeletalCharacter2.5">
+      <Skeleton name="root">{up}<ChildJoints>
+        <SkeletalJoint name="Spine">{ident}</SkeletalJoint>
+        <SkeletalJoint name="LeftArmVirtualMuscle" isVirtualMuscle="true">{ident}</SkeletalJoint>
+      </ChildJoints></Skeleton>
+    </Character>
+  </Characters>
+  <Events>
+    <AnimationEvent name="1" displayName="Bend" startFrameNumber="10" endFrameNumber="40" character="hero" frameOffset="0" enabled="true" bstrength="{strength}">
+      {place}
+      <Animation refFrame="parent">
+        <QuatChannel name="hero.Joints.Spine.quat" type="linear">
+          <Key bt="{t0}" bx="{one}" by="{zero}" bz="{zero}" bw="{zero}"/>
+          <Key bt="{t1}" bx="{s}" by="{zero}" bz="{zero}" bw="{s}"/>
+        </QuatChannel>
+        <QuatChannel name="hero.Joints.Missing.quat" type="linear"><Key bt="{t0}" bx="{one}" by="{zero}" bz="{zero}" bw="{zero}"/></QuatChannel>
+      </Animation>
+    </AnimationEvent>
+  </Events>
+  <ForceEvents>
+    <ForceEvent name="Push" startFrameNumber="20" endFrameNumber="21" character="hero" brelativeAcceleration="{rel}">
+      <Objects><Object>hero.MetaBodies.Chest</Object></Objects>
+    </ForceEvent>
+  </ForceEvents>
+</Scene>"#,
+            fps = hex(30.0),
+            strength = hex(0.25),
+            rel = hex(0.2),
+            t0 = hex(0.0),
+            t1 = hex(1.0),
+            one = hex(1.0),
+            zero = hex(0.0),
+            s = hex(s),
+        )
+    }
+
+    fn import(xml: &str) -> Import {
+        let dir = std::env::temp_dir().join(format!("neuromotion-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("scene.ens");
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        std::io::Write::write_all(&mut encoder, xml.as_bytes()).unwrap();
+        fs::write(&path, encoder.finish().unwrap()).unwrap();
+        import_scene(&path).unwrap()
+    }
+
+    #[test]
+    fn scene_skeleton_and_settings() {
+        let Import { project, notes } = import(&scene_xml());
+        assert_eq!(project.settings.fps, 30.0);
+        assert_eq!(project.settings.range, FrameRange { start: 0, end: 30 });
+        let hero = &project.characters[0];
+        let names: Vec<_> = hero.skeleton.joints.iter().map(|j| j.name.as_str()).collect();
+        assert_eq!(names, ["root", "Spine"], "virtual muscles are skipped");
+        assert!(notes.iter().any(|n| n.contains("virtual-muscle")));
+
+        // The root's rest rotation maps its local +X to world up.
+        let rest = Quat::from_array(hero.skeleton.joints[0].rest_rotation);
+        assert!((rest * Vec3::X - Vec3::Y).length() < 1e-5);
+    }
+
+    #[test]
+    fn animation_becomes_relative_keys() {
+        let Import { project, .. } = import(&scene_xml());
+        let clip = project.clips.iter().find(|c| c.kind.is_motion()).unwrap();
+        assert_eq!((clip.props.start, clip.props.duration), (10, 30));
+        assert_eq!(clip.props.name, "Bend");
+        assert_eq!(clip.source.get("strength").map(String::as_str), Some("0.25"));
+
+        let rz = clip.channels.iter().find(|c| c.joint == "Spine" && c.property == Property::RotZ).unwrap();
+        assert_eq!(rz.keys.len(), 2);
+        assert_eq!(rz.keys[1].frame, 30, "1 s at 30 fps");
+        assert!((rz.keys[1].value - 90.0).abs() < 1e-3);
+
+        // The event's placement matrix lands on the root as a world offset.
+        let px = clip.channels.iter().find(|c| c.joint == "root" && c.property == Property::PosX).unwrap();
+        assert!((px.keys[0].value - 2.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn physics_events_keep_their_settings() {
+        let Import { project, .. } = import(&scene_xml());
+        let force = project.clips.iter().find(|c| !c.kind.is_motion()).unwrap();
+        assert_eq!(force.kind, ClipKind::Event { event: "Force".into() });
+        assert_eq!(force.source.get("relativeAcceleration").map(String::as_str), Some("0.2"));
+        assert_eq!(force.source.get("targets").map(String::as_str), Some("hero.MetaBodies.Chest"));
+        let track = project.track(force.props.track).unwrap();
+        assert_eq!(track.name, "Forces");
+    }
+
+    #[test]
+    fn rejects_unreadable_bytes() {
+        assert!(matches!(decode_document(&[0x1b, 0xd1, 0xd7, 0xee, 0x3e]), Err(IoError::Format(_))));
+    }
+
+    /// Imports every scene, character and pose shipped with a local endorphin install.
+    /// Run with `cargo test -- --ignored`; set `ENDORPHIN_DIR` if it isn't installed in
+    /// the default location.
+    #[test]
+    #[ignore = "needs a local endorphin 2.5 install"]
+    fn imports_every_bundled_file() {
+        let root = std::env::var("ENDORPHIN_DIR")
+            .unwrap_or_else(|_| r"C:\Program Files (x86)\NaturalMotion\endorphin 2.5.2".to_owned());
+        let mut files = Vec::new();
+        let mut stack = vec![std::path::PathBuf::from(root)];
+        while let Some(dir) = stack.pop() {
+            for entry in fs::read_dir(&dir).into_iter().flatten().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else {
+                    files.push(path);
+                }
+            }
+        }
+        let ext = |p: &Path, e: &str| p.extension().is_some_and(|x| x.eq_ignore_ascii_case(e));
+        let (mut ok, mut failed) = (0, Vec::new());
+        let standard = files
+            .iter()
+            .find(|p| p.ends_with("Standard Simulation Character.nmc"))
+            .expect("standard character");
+        let host = import_character(standard).unwrap().project;
+        for path in &files {
+            let result = if ext(path, "ens") {
+                import_scene(path).map(|i| (i.project.characters.len(), i.project.clips.len()))
+            } else if ext(path, "nmc") {
+                import_character(path).map(|i| (1, i.project.characters[0].skeleton.joints.len()))
+            } else if ext(path, "nma") {
+                import_pose(path, &host).map(|p| (1, p.channels.len()))
+            } else {
+                continue;
+            };
+            match result {
+                Ok(_) => ok += 1,
+                Err(e) => failed.push(format!("{}: {e}", path.display())),
+            }
+        }
+        println!("imported {ok} files; {} failed", failed.len());
+        for f in &failed {
+            println!("  {f}");
+        }
+        // Expected failures: password-protected (encrypted) tutorial scenes, and poses
+        // stored as muscle targets, which arrive with physics.
+        assert!(failed.iter().all(|f| f.contains("password") || f.contains("effector")), "{failed:#?}");
+        assert!(ok > 150);
+    }
+
+    #[test]
+    fn euler_unwrap_avoids_jumps() {
+        let mut a = [179.0, -170.0, 10.0];
+        unwrap_degrees(&mut a, [-179.0, 175.0, 0.0]);
+        assert_eq!(a, [-181.0, 190.0, 10.0]);
+    }
+}
