@@ -7,10 +7,11 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Align2, RichText, ViewportCommand};
 
 use super::actions::Action;
+use super::export::{ExportDialog, Format};
 use super::selection::Selection;
 use super::timeline_panel::{self, TimelineState};
 use super::{inspector, shortcuts, theme};
-use crate::document::{ClipKind, ClipProps, Document, Project, SimLevel, sample};
+use crate::document::{CharacterId, ClipKind, ClipProps, Document, Project, SimLevel, sample};
 use crate::io;
 use crate::physics::Simulation;
 use crate::timeline::Playback;
@@ -30,10 +31,10 @@ pub struct NeuroMotionApp {
     pub(super) show_timeline: bool,
     playback: Playback,
     timeline: TimelineState,
-    simulation: Simulation,
+    pub(super) simulation: Simulation,
     /// Whether the project needs physics, cached per document revision.
     physics_needed: Option<(u64, bool)>,
-    status: String,
+    pub(super) status: String,
     show_about: bool,
     /// Notes from the last import, shown until dismissed.
     import_report: Option<(String, Vec<String>)>,
@@ -44,6 +45,8 @@ pub struct NeuroMotionApp {
     pending_discard: Option<Action>,
     close_confirmed: bool,
     title: String,
+    /// The File → Export window, while it's open.
+    pub(super) export: Option<ExportDialog>,
 }
 
 impl NeuroMotionApp {
@@ -69,6 +72,7 @@ impl NeuroMotionApp {
             pending_discard: None,
             close_confirmed: false,
             title: String::new(),
+            export: None,
         };
         if let Some(path) = startup {
             app.open_path(path);
@@ -107,6 +111,16 @@ impl NeuroMotionApp {
         self.simulation.sync(revision);
         if !self.simulation.advance(&self.doc.project, Instant::now() + SIMULATION_BUDGET) {
             ctx.request_repaint();
+        }
+    }
+
+    /// The character the selection belongs to, if any.
+    pub(super) fn selected_character(&self) -> Option<CharacterId> {
+        let project = &self.doc.project;
+        match self.selection {
+            Selection::Character(id) => Some(id),
+            Selection::Track(id) => project.track(id).map(|t| t.character),
+            other => other.clip().and_then(|id| project.clip(id)).and_then(|c| project.clip_character(c)).map(|c| c.id),
         }
     }
 
@@ -159,6 +173,7 @@ impl NeuroMotionApp {
                 None => self.open(),
             },
             Action::ImportPose => self.import_pose(None),
+            Action::ExportBvh => self.open_export(Format::Bvh),
             Action::SaveProject => self.save(false),
             Action::SaveProjectAs => self.save(true),
             Action::Quit => {
@@ -549,6 +564,7 @@ impl eframe::App for NeuroMotionApp {
             });
 
         self.windows(ctx, &mut actions);
+        self.export_window(ctx);
         for action in actions {
             self.run(ctx, action);
         }

@@ -193,3 +193,42 @@ fn event_clips_do_not_change_the_pose() {
     );
     assert_eq!(project.evaluate(120.0), before);
 }
+
+#[test]
+fn euler_near_keeps_the_rotation_and_follows_the_previous_angles() {
+    use glam::{EulerRot, Quat};
+    let orders = [EulerRot::XYZ, EulerRot::XZY, EulerRot::YXZ, EulerRot::YZX, EulerRot::ZXY, EulerRot::ZYX];
+    let rebuild = |order, e: [f32; 3]| Quat::from_euler(order, e[0].to_radians(), e[1].to_radians(), e[2].to_radians());
+    for order in orders {
+        for (i, near) in [[0.0, 0.0, 0.0], [170.0, 100.0, -170.0], [720.0, -30.0, 15.0]].into_iter().enumerate() {
+            let q = Quat::from_euler(EulerRot::ZXY, 0.3 + i as f32, -1.2, 2.9).normalize();
+            let e = euler_near(q, order, near);
+            assert!(rebuild(order, e).angle_between(q) < 1e-3, "{order:?} doesn't rebuild the rotation");
+            // Equivalent angle sets differ by whole turns or the 180° flip; the nearest is chosen.
+            for (a, n) in e.iter().zip(near) {
+                assert!((a - n).abs() <= 270.0, "{order:?}: {e:?} is far from {near:?}");
+            }
+        }
+    }
+    // Turning steadily about X past 180° keeps counting instead of wrapping.
+    let mut previous = [0.0; 3];
+    for step in 1..=40 {
+        let angle = step as f32 * 10.0;
+        previous = euler_near(Quat::from_rotation_x(angle.to_radians()), EulerRot::XYZ, previous);
+        assert!((previous[0] - angle).abs() < 1e-2 && previous[1].abs() < 1e-2, "{previous:?} at {angle}°");
+    }
+}
+
+#[test]
+fn local_transforms_invert_world_transforms() {
+    let project = placeholder_project();
+    let skeleton = &project.characters[0].skeleton;
+    let pose = &project.evaluate(100.0)[0];
+    let local = local_transforms(skeleton, &world_transforms(skeleton, pose));
+    for (i, joint) in skeleton.joints.iter().enumerate() {
+        let expected = pose_local_rotation(joint.rest_rotation, pose.joints[i]);
+        assert!(local[i].0.angle_between(expected) < 1e-4, "{}", joint.name);
+        let offset = glam::Vec3::from(joint.offset) + glam::Vec3::new(pose.joints[i][3], pose.joints[i][4], pose.joints[i][5]);
+        assert!(local[i].1.distance(offset) < 1e-5, "{}", joint.name);
+    }
+}

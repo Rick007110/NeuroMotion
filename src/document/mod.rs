@@ -20,4 +20,4 @@ mod tests;
 pub use edit::{Document, Edit};
 pub use model::*;
 pub use physics::SimLevel;
-pub use pose::{Pose, local_rotation as pose_local_rotation, world_transforms};
+pub use pose::{Pose, euler_near, local_rotation as pose_local_rotation, local_transforms, world_transforms};
