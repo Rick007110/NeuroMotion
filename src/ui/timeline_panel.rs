@@ -118,7 +118,7 @@ pub fn show(
     let grid_painter = painter.with_clip_rect(lanes);
     for frame in visible_ticks(&view, lanes_left, lane_width, step) {
         let x = to_x(frame as f32);
-        grid_painter.line_segment([pos2(x, lanes.top()), pos2(x, lanes.bottom())], Stroke::new(1.0, theme::GRID));
+        grid_painter.line_segment([pos2(x, lanes.top()), pos2(x, lanes.bottom())], Stroke::new(1.0_f32, theme::GRID));
     }
 
     let mut y = body.top() - state.scroll_y;
@@ -170,12 +170,12 @@ pub fn show(
         }
         painter.with_clip_rect(body).line_segment(
             [row_rect.left_bottom(), row_rect.right_bottom()],
-            Stroke::new(1.0, Color32::from_black_alpha(60)),
+            Stroke::new(1.0_f32, Color32::from_black_alpha(60)),
         );
     }
 
     // Header column divider, out-of-range shading, ruler, then the playhead on top.
-    painter.line_segment([pos2(lanes_left, rect.top()), pos2(lanes_left, rect.bottom())], Stroke::new(1.0, Color32::from_black_alpha(120)));
+    painter.line_segment([pos2(lanes_left, rect.top()), pos2(lanes_left, rect.bottom())], Stroke::new(1.0_f32, Color32::from_black_alpha(120)));
     for shade in [
         Rect::from_min_max(pos2(lanes_left, ruler.top()), pos2(to_x(range.start as f32).clamp(lanes_left, rect.right()), rect.bottom())),
         Rect::from_min_max(pos2(to_x(range.end as f32).clamp(lanes_left, rect.right()), ruler.top()), rect.max),
@@ -429,10 +429,10 @@ fn track_lane(
                 pos2(to_x((props.end() - props.blend_out) as f32), held),
                 pos2(x1, bottom),
             ];
-            painter.add(Shape::line(envelope, Stroke::new(1.5, Color32::from_white_alpha(120))));
+            painter.add(Shape::line(envelope, Stroke::new(1.5_f32, Color32::from_white_alpha(120))));
         } else {
             painter.rect_filled(r, 4.0, fill.gamma_multiply(0.22));
-            painter.rect_stroke(r, 4.0, Stroke::new(1.0, fill), StrokeKind::Inside);
+            painter.rect_stroke(r, 4.0, Stroke::new(1.0_f32, fill), StrokeKind::Inside);
         }
         painter.with_clip_rect(r.intersect(lanes).shrink(1.0)).text(
             pos2(r.left() + 7.0, r.center().y),
@@ -442,9 +442,9 @@ fn track_lane(
             if props.enabled { Color32::WHITE } else { theme::DIM_TEXT },
         );
         if selected {
-            painter.rect_stroke(r, 4.0, Stroke::new(2.0, theme::SELECTED), StrokeKind::Inside);
+            painter.rect_stroke(r, 4.0, Stroke::new(2.0_f32, theme::SELECTED), StrokeKind::Inside);
         } else if response.hovered() {
-            painter.rect_stroke(r, 4.0, Stroke::new(1.0, Color32::from_white_alpha(80)), StrokeKind::Inside);
+            painter.rect_stroke(r, 4.0, Stroke::new(1.0_f32, Color32::from_white_alpha(80)), StrokeKind::Inside);
         }
 
         if response.hovered() {
@@ -560,7 +560,7 @@ fn channel_lane(
         let s = if response.hovered() || selected { KEY_SIZE + 1.0 } else { KEY_SIZE };
         let diamond = vec![center + vec2(0.0, -s), center + vec2(s, 0.0), center + vec2(0.0, s), center + vec2(-s, 0.0)];
         let fill = if selected { theme::SELECTED } else { theme::KEY };
-        painter.add(Shape::convex_polygon(diamond, fill, Stroke::new(1.0, Color32::from_black_alpha(160))));
+        painter.add(Shape::convex_polygon(diamond, fill, Stroke::new(1.0_f32, Color32::from_black_alpha(160))));
 
         if response.clicked() || response.drag_started() {
             *selection = Selection::Key { clip: clip_id, channel, frame: key.frame };
@@ -611,15 +611,15 @@ fn draw_ruler(
     if minor as f32 * view.px_per_frame >= 5.0 {
         for frame in visible_ticks(view, lanes_left, lane_width, minor) {
             let x = view.frame_to_x(frame as f32, lanes_left);
-            ruler_painter.line_segment([pos2(x, ruler.bottom() - 4.0), pos2(x, ruler.bottom())], Stroke::new(1.0, theme::DIM_TEXT.gamma_multiply(0.5)));
+            ruler_painter.line_segment([pos2(x, ruler.bottom() - 4.0), pos2(x, ruler.bottom())], Stroke::new(1.0_f32, theme::DIM_TEXT.gamma_multiply(0.5)));
         }
     }
     for frame in visible_ticks(view, lanes_left, lane_width, step) {
         let x = view.frame_to_x(frame as f32, lanes_left);
-        ruler_painter.line_segment([pos2(x, ruler.bottom() - 9.0), pos2(x, ruler.bottom())], Stroke::new(1.0, theme::DIM_TEXT));
+        ruler_painter.line_segment([pos2(x, ruler.bottom() - 9.0), pos2(x, ruler.bottom())], Stroke::new(1.0_f32, theme::DIM_TEXT));
         ruler_painter.text(pos2(x + 3.0, ruler.top() + 3.0), Align2::LEFT_TOP, frame.to_string(), FontId::monospace(10.5), theme::DIM_TEXT);
     }
-    painter.line_segment([ruler.left_bottom(), ruler.right_bottom()], Stroke::new(1.0, Color32::from_black_alpha(140)));
+    painter.line_segment([ruler.left_bottom(), ruler.right_bottom()], Stroke::new(1.0_f32, Color32::from_black_alpha(140)));
 
     let response = ui.interact(ruler, ui.id().with("ruler"), Sense::click_and_drag());
     if response.hovered() {
@@ -633,7 +633,7 @@ fn draw_playhead(painter: &Painter, rect: Rect, ruler: Rect, x: f32, frame: i32)
         return;
     }
     let painter = painter.with_clip_rect(Rect::from_min_max(pos2(ruler.left(), rect.top()), rect.max));
-    painter.line_segment([pos2(x, ruler.top()), pos2(x, rect.bottom())], Stroke::new(1.5, theme::PLAYHEAD));
+    painter.line_segment([pos2(x, ruler.top()), pos2(x, rect.bottom())], Stroke::new(1.5_f32, theme::PLAYHEAD));
     let label = frame.to_string();
     let width = 10.0 + 7.0 * label.len() as f32;
     let tag = Rect::from_min_size(pos2(x - width / 2.0, ruler.top() + 2.0), vec2(width, 15.0));

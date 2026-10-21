@@ -37,7 +37,7 @@ pub fn apply(ctx: &egui::Context) {
     visuals.window_fill = Color32::from_rgb(36, 38, 43);
     visuals.extreme_bg_color = Color32::from_rgb(20, 21, 24);
     visuals.selection.bg_fill = ACCENT.gamma_multiply(0.45);
-    visuals.selection.stroke = Stroke::new(1.0, ACCENT);
+    visuals.selection.stroke = Stroke::new(1.0_f32, ACCENT);
     visuals.hyperlink_color = ACCENT;
     ctx.set_visuals(visuals);
     ctx.style_mut(|style| {
