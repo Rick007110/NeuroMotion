@@ -60,9 +60,6 @@ Try **File → Open Physics Demo** and press Space. Design and status:
    animation, visual feedback on muscle effort, re-simulating only from the edited
    frame.
 
-Research notes on how endorphin's physics works:
-[docs/endorphin-physics.md](docs/endorphin-physics.md).
-
 ## Building and running
 
 You need [Rust](https://rustup.rs) (stable).
