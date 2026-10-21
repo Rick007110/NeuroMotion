@@ -34,6 +34,7 @@ impl NeuroMotionApp {
                 ui.separator();
                 item(ui, actions, Action::AddKey, "Add Key at Playhead", self.selection.channel().is_some());
                 item(ui, actions, Action::DuplicateClip, "Duplicate Clip", self.selection.clip().is_some());
+                item(ui, actions, Action::BakeSimulation, "Bake Simulation", self.can_bake());
                 item(ui, actions, Action::Delete, "Delete", self.selection.is_deletable());
                 item(ui, actions, Action::Deselect, "Select None", self.selection != Selection::None);
             });

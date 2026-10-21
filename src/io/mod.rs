@@ -188,6 +188,40 @@ mod tests {
         assert_eq!(migrated.evaluate(120.0), project.evaluate(120.0));
     }
 
+    /// A v2 file as older builds wrote it (no physics, no event settings) still opens.
+    #[test]
+    fn reads_v2_files_from_older_builds() {
+        let text = r#"{
+          "format": "neuromotion.project",
+          "version": 2,
+          "project": {
+            "settings": { "name": "Old", "fps": 30.0, "range": { "start": 0, "end": 60 } },
+            "characters": [{
+              "id": 1, "name": "character01", "kind": "character",
+              "skeleton": { "name": "Two bones", "source": null, "joints": [
+                { "name": "hips", "parent": null, "offset": [0.0, 0.95, 0.0] },
+                { "name": "spine", "parent": 0, "offset": [0.0, 0.12, 0.0], "rest_rotation": [0.0, 0.0, 0.0, 1.0] }
+              ] }
+            }],
+            "tracks": [ { "id": 2, "name": "Base", "character": 1, "muted": false } ],
+            "clips": [{
+              "id": 3,
+              "props": { "name": "Bend", "track": 2, "start": 0, "duration": 60, "blend_in": 0, "blend_out": 0, "weight": 1.0, "enabled": true },
+              "kind": "motion",
+              "channels": [ { "joint": "spine", "property": "rot_x", "keys": [ { "frame": 0, "value": 20.0, "interp": "smooth" } ] } ]
+            }],
+            "next_id": 4
+          }
+        }"#;
+        let project = from_str(text).unwrap();
+        assert_eq!(project.characters[0].default_level, crate::document::SimLevel::Animated);
+        assert!(project.characters[0].physics.is_none());
+        assert_eq!(project.evaluate(30.0)[0].joints[1][0], 20.0);
+        // Edits made by this build allocate ids past the loaded ones.
+        let mut doc = crate::document::Document::new(project);
+        assert!(doc.add_track(1, "Layer") > 3);
+    }
+
     #[test]
     fn rejects_foreign_and_future_files() {
         let text = to_string(&placeholder_project()).unwrap();

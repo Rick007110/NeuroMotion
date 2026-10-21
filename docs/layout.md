@@ -61,7 +61,8 @@ always clear what you're editing. Controls are grouped by what they affect:
 | Selection | Groups |
 |-----------|--------|
 | Nothing   | General · Time (fps, range) · Skeleton · Contents |
-| Track     | Track (name, mute) |
+| Character | Rig · Physics (bodies, starting simulation level) · Tracks (add a track) |
+| Track     | Track (name, mute) · delete track |
 | Clip      | Clip (name, enabled, track) · Timing (start, duration) · Blending (weight, blend in/out, live influence) · Channels |
 | Channel   | Channel (joint, property, live value) · Keys |
 | Key       | Key (frame, value, curve) · Belongs to (links back up) |
@@ -93,5 +94,5 @@ confirms what just happened without dialogs.
 All shortcuts live in one table, `BINDINGS` in `src/ui/shortcuts.rs`; Help → Keyboard
 Shortcuts lists them. Defaults: Ctrl+Z / Ctrl+Y undo/redo, Space play/pause, Shift+Space
 stop, ←/→ step a frame (Shift for 10), Home/End jump to range ends, K key the selected
-channel, Delete remove the selected clip or key, Ctrl+D duplicate a clip, F fit the
+channel, Delete remove the selected track, clip or key, Ctrl+D duplicate a clip, F fit the
 timeline. Single-key shortcuts are ignored while a text field has focus.

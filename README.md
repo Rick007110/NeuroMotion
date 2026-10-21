@@ -20,6 +20,7 @@ toward a modern physics engine that behaves like endorphin's and then goes furth
 - **Undo/redo** on the document model, with each drag recorded as one step.
 - **Projects** saved as readable JSON (`.nmproj`), with versioned migrations.
 - **Export**: File → Export writes a character's motion (simulated or keyed) as BVH.
+  **Edit → Bake Simulation** turns a character's simulation into ordinary keys.
   Details: [docs/export.md](docs/export.md).
 - **Opening endorphin files**:
 

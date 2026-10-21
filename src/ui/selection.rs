@@ -36,7 +36,7 @@ impl Selection {
     }
 
     pub fn is_deletable(self) -> bool {
-        matches!(self, Selection::Clip(_) | Selection::Key { .. })
+        matches!(self, Selection::Track(_) | Selection::Clip(_) | Selection::Key { .. })
     }
 
     /// Falls back to the nearest still-existing parent after undo/redo or deletion

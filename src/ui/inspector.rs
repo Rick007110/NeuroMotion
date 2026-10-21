@@ -8,7 +8,10 @@ use eframe::egui::{self, Color32, DragValue, Response, RichText, Slider, Ui};
 
 use super::selection::Selection;
 use super::theme::{self, grid, section};
-use crate::document::{CharacterId, ClipId, ClipKind, Document, Edit, Interp, TrackId};
+use crate::document::{CharacterId, ClipId, ClipKind, Document, Edit, Interp, SimLevel, TrackId};
+
+/// Text colour for destructive buttons.
+const DANGER: Color32 = Color32::from_rgb(240, 130, 120);
 
 /// Collects how this frame's widget interactions should be recorded in the history.
 #[derive(Default)]
@@ -46,7 +49,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, playhead
         .show(ui, |ui| match *selection {
             Selection::None => project_page(ui, doc, selection),
             Selection::Character(id) => character_page(ui, doc, selection, id),
-            Selection::Track(id) => track_page(ui, doc, id),
+            Selection::Track(id) => track_page(ui, doc, selection, id),
             Selection::Clip(id) => clip_page(ui, doc, selection, id, playhead),
             Selection::Channel { clip, channel } => {
                 channel_page(ui, doc, selection, clip, channel, playhead)
@@ -130,6 +133,8 @@ fn character_page(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, id
     let project = &doc.project;
     let Some(character) = project.character(id) else { return };
     let skeleton = &character.skeleton;
+    let mut level = character.default_level;
+    let mut add_track = false;
 
     heading(ui, character.kind.label().to_uppercase().as_str(), &character.name);
     section(ui, "Rig", |ui| {
@@ -171,7 +176,13 @@ fn character_page(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, id
                 ui.label(rig.joints.len().to_string());
                 ui.end_row();
                 ui.label("Starts as");
-                ui.label(character.default_level.label());
+                egui::ComboBox::from_id_salt("character_level")
+                    .selected_text(level.label())
+                    .show_ui(ui, |ui| {
+                        for option in SimLevel::ALL {
+                            ui.selectable_value(&mut level, option, option.label());
+                        }
+                    });
                 ui.end_row();
                 ui.label("Muscle presets");
                 ui.label(rig.muscle_sets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "));
@@ -188,10 +199,20 @@ fn character_page(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, id
                 ui.weak(format!("{} clips", project.clips_on_track(track.id).count()));
             });
         }
+        add_track = ui.button("Add track").on_hover_text("A new layer on top of the others").clicked();
     });
+
+    let before = character.default_level;
+    if level != before {
+        doc.apply("Change starting level", Edit::CharacterLevel { character: id, before, after: level }, false);
+    }
+    if add_track {
+        let name = format!("Track {}", doc.project.tracks_of(id).count() + 1);
+        *selection = Selection::Track(doc.add_track(id, &name));
+    }
 }
 
-fn track_page(ui: &mut Ui, doc: &mut Document, id: TrackId) {
+fn track_page(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, id: TrackId) {
     let Some(before) = doc.project.track(id).cloned() else { return };
     let clip_count = doc.project.clips_on_track(id).count();
     let mut t = before.clone();
@@ -213,6 +234,15 @@ fn track_page(ui: &mut Ui, doc: &mut Document, id: TrackId) {
     });
     let edit = (t != before).then(|| Edit::Track { id, before, after: t });
     g.commit(doc, "Edit track", edit);
+
+    ui.add_space(8.0);
+    let label = if clip_count == 0 { "Delete track".to_owned() } else { format!("Delete track and its {clip_count} clips") };
+    if ui.add(egui::Button::new(RichText::new(label).color(DANGER))).clicked() {
+        let character = doc.project.track(id).map(|t| t.character);
+        if doc.remove_track(id) {
+            *selection = character.map_or(Selection::None, Selection::Character);
+        }
+    }
 }
 
 fn clip_page(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, id: ClipId, playhead: f32) {
@@ -471,7 +501,7 @@ fn key_page(
         });
     });
     ui.add_space(8.0);
-    let delete = egui::Button::new(RichText::new("Delete key").color(Color32::from_rgb(240, 130, 120)));
+    let delete = egui::Button::new(RichText::new("Delete key").color(DANGER));
     if ui.add(delete).clicked() && doc.remove_key(clip_id, channel, frame) {
         *selection = Selection::Channel { clip: clip_id, channel };
     }
