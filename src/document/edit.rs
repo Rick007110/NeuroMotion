@@ -151,6 +151,8 @@ pub struct Document {
     undo: Vec<HistoryEntry>,
     redo: Vec<HistoryEntry>,
     dirty: bool,
+    /// Increases with every change, so caches (like the simulation) know to refresh.
+    revision: u64,
 }
 
 impl Document {
@@ -161,6 +163,7 @@ impl Document {
             undo: Vec::new(),
             redo: Vec::new(),
             dirty: false,
+            revision: 0,
         }
     }
 
@@ -183,6 +186,7 @@ impl Document {
         edit.apply(&mut self.project, true);
         self.redo.clear();
         self.dirty = true;
+        self.revision += 1;
 
         if let Some(top) = self.undo.last_mut() {
             if continuous && top.open && top.edit.absorb(&edit) {
@@ -213,6 +217,7 @@ impl Document {
         entry.edit.apply(&mut self.project, false);
         entry.open = false;
         self.dirty = true;
+        self.revision += 1;
         let label = entry.label.clone();
         self.redo.push(entry);
         Some(label)
@@ -223,6 +228,7 @@ impl Document {
         let entry = self.redo.pop()?;
         entry.edit.apply(&mut self.project, true);
         self.dirty = true;
+        self.revision += 1;
         let label = entry.label.clone();
         self.end_gesture();
         self.undo.push(entry);
@@ -243,6 +249,10 @@ impl Document {
 
     pub fn redo_label(&self) -> Option<&str> {
         self.redo.last().map(|e| e.label.as_str())
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn undo_depth(&self) -> usize {

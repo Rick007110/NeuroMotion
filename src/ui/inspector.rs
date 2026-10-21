@@ -158,6 +158,27 @@ fn character_page(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, id
                 }
             });
     });
+    if let Some(rig) = &character.physics {
+        section(ui, "Physics", |ui| {
+            grid(ui, "character_physics", |ui| {
+                ui.label("Bodies");
+                ui.label(rig.bodies.len().to_string());
+                ui.end_row();
+                ui.label("Mass");
+                ui.label(format!("{:.1} kg", rig.total_mass()));
+                ui.end_row();
+                ui.label("Joints");
+                ui.label(rig.joints.len().to_string());
+                ui.end_row();
+                ui.label("Starts as");
+                ui.label(character.default_level.label());
+                ui.end_row();
+                ui.label("Muscle presets");
+                ui.label(rig.muscle_sets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "));
+                ui.end_row();
+            });
+        });
+    }
     section(ui, "Tracks", |ui| {
         for track in project.tracks_of(id) {
             ui.horizontal(|ui| {

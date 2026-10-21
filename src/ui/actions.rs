@@ -6,6 +6,7 @@ pub enum Action {
     NewProject,
     OpenProject,
     OpenDemo,
+    OpenPhysicsDemo,
     ImportPose,
     SaveProject,
     SaveProjectAs,
@@ -37,6 +38,7 @@ impl Action {
             Action::NewProject => "New project",
             Action::OpenProject => "Open project",
             Action::OpenDemo => "Open placeholder demo",
+            Action::OpenPhysicsDemo => "Open physics demo",
             Action::ImportPose => "Import pose",
             Action::SaveProject => "Save",
             Action::SaveProjectAs => "Save as",
@@ -75,7 +77,7 @@ impl Action {
     pub fn discards_document(self) -> bool {
         matches!(
             self,
-            Action::NewProject | Action::OpenProject | Action::OpenDemo | Action::Quit
+            Action::NewProject | Action::OpenProject | Action::OpenDemo | Action::OpenPhysicsDemo | Action::Quit
         )
     }
 }

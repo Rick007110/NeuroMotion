@@ -4,11 +4,13 @@
 //! * [`pose`] – evaluating the blended pose at a frame
 //! * [`edit`] – undoable edits and the [`Document`] that records them
 //! * [`ops`] – higher-level edits (add/move/delete keys, delete clips)
+//! * [`physics`] – bodies, joints, muscles and materials (data only)
 //! * [`sample`] – built-in placeholder rig and demo animation
 
 mod edit;
 mod model;
 mod ops;
+pub mod physics;
 mod pose;
 pub mod sample;
 
@@ -17,4 +19,5 @@ mod tests;
 
 pub use edit::{Document, Edit};
 pub use model::*;
-pub use pose::Pose;
+pub use physics::SimLevel;
+pub use pose::{Pose, local_rotation as pose_local_rotation, world_transforms};

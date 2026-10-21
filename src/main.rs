@@ -3,12 +3,14 @@
 //! Module map:
 //! * `document` – project data model, pose evaluation, undo/redo (no UI)
 //! * `timeline` – transport/playhead and frame↔pixel mapping (no drawing)
-//! * `io`       – project file load/save
+//! * `io`       – project files and endorphin import
+//! * `physics`  – rigid-body simulation of characters
 //! * `viewport` – camera and character preview drawing
 //! * `ui`       – the egui application shell and panels
 
 mod document;
 mod io;
+mod physics;
 mod timeline;
 mod ui;
 mod viewport;

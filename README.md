@@ -6,9 +6,10 @@ NeuroMotion opens your existing endorphin scenes, characters and poses, and is b
 toward a modern physics engine that behaves like endorphin's and then goes further.
 
 > **Status: early development.** The editor, timeline, undo/redo and endorphin import
-> work today. Physics simulation is being built now: imported physics events (forces,
-> behaviours, simulation switches, transitions) show on the timeline with all their
-> settings, but don't simulate yet.
+> work. The physics engine runs imported endorphin characters with their own bodies,
+> joint limits and muscles; 8 of the 15 bundled sample scenes already simulate cleanly.
+> endorphin's *behaviours* (stagger, catch fall, ...) aren't recreated yet, so scenes
+> that rely on them behave like a limp character instead.
 
 ## What works
 
@@ -30,19 +31,34 @@ toward a modern physics engine that behaves like endorphin's and then goes furth
   password-protected scenes and one legacy pose format. Details:
   [docs/endorphin-formats.md](docs/endorphin-formats.md).
 
+## Physics
+
+NeuroMotion has its own physics engine, modelled on endorphin's so imported scenes
+behave the same way, then improved:
+
+- One rigid body per bone, with endorphin's masses and collision shapes; twist/swing
+  joint limits with soft zones; force-limited muscles with endorphin's presets
+  (Default, Normal, DesiredPoseCalibration, Strong, Weak); material pairs for friction
+  and bounce.
+- Per-character simulation levels (animated, collision only, collision with momentum,
+  simulated), momentum carried from animation into physics, push events, active poses,
+  active animations, lock/join constraints, and transitions back to animation.
+- **Improvements over endorphin:** no simulate/clear step (the timeline re-simulates
+  automatically, in the background, whenever you edit); deterministic results;
+  stiff muscles that can't explode; muscle targets kept inside joint limits.
+
+Try **File → Open Physics Demo** and press Space. Design and status:
+[docs/physics-design.md](docs/physics-design.md); research notes:
+[docs/endorphin-physics.md](docs/endorphin-physics.md).
+
 ## Roadmap
 
-1. **Physics core**: rigid bodies per bone, twist/swing joint limits, contacts and
-   friction, at a fixed 120 Hz, deterministic. Modelled on endorphin so imported
-   characters keep their masses, limits and muscle strengths.
-2. **Muscles**: force-limited joint drives that follow an animation or a target pose,
-   with endorphin's strength presets.
-3. **Timeline physics**: per-character simulation levels, momentum carried from
-   animation into physics, push events, transitions back to animation, and automatic
-   re-simulation when you edit (no manual simulate/clear step).
-4. **Behaviours**: controllers such as balance, stagger and catch-fall.
-5. **Beyond endorphin**: strength curves per body region, smoother hand-back to
-   animation, and visual feedback on muscle effort.
+1. Finish the sample-scene sweep: rope and ring scenes, multi-character joins, moving
+   scenery.
+2. **Behaviours**: original controllers for balance, stagger, catch-fall and more.
+3. **Beyond endorphin**: strength curves per body region, smoother hand-back to
+   animation, visual feedback on muscle effort, re-simulating only from the edited
+   frame.
 
 Research notes on how endorphin's physics works:
 [docs/endorphin-physics.md](docs/endorphin-physics.md).
@@ -70,8 +86,9 @@ Run the tests:
 cargo test
 ```
 
-If endorphin 2.5.2 is installed, this test imports every file it ships with. Set
-`ENDORPHIN_DIR` if it isn't in the default location.
+If endorphin 2.5.2 is installed, the ignored tests import every file it ships with
+and simulate every sample scene. Set `ENDORPHIN_DIR` if it isn't in the default
+location.
 
 ```bash
 cargo test -- --ignored
@@ -84,6 +101,7 @@ cargo test -- --ignored
 | `document` | Project data model, pose evaluation, undo/redo. No UI. |
 | `timeline` | Transport and time-to-pixel mapping. No drawing. |
 | `io` | Project files and endorphin importers |
+| `physics` | Rigid-body solver, collisions, and the timeline-driven simulation |
 | `viewport` | Camera and character preview |
 | `ui` | egui application shell, panels, menus, keyboard shortcuts (`ui/shortcuts.rs`) |
 

@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::physics::{PhysicsRig, PhysicsSettings, SimLevel};
+
 pub type CharacterId = u64;
 pub type TrackId = u64;
 pub type ClipId = u64;
@@ -19,6 +21,8 @@ pub struct Project {
     /// later tracks are layered over earlier ones.
     pub tracks: Vec<Track>,
     pub clips: Vec<Clip>,
+    #[serde(default)]
+    pub physics: PhysicsSettings,
     #[serde(default)]
     next_id: u64,
 }
@@ -51,6 +55,12 @@ pub struct Character {
     pub name: String,
     pub kind: CharacterKind,
     pub skeleton: SkeletonRef,
+    /// Physical body; characters without one are always animated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub physics: Option<PhysicsRig>,
+    /// Simulation level before any simulation event switches it.
+    #[serde(default)]
+    pub default_level: SimLevel,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -337,6 +347,7 @@ impl Project {
             characters: Vec::new(),
             tracks: Vec::new(),
             clips: Vec::new(),
+            physics: PhysicsSettings::default(),
             next_id: 1,
         }
     }
@@ -364,6 +375,8 @@ impl Project {
             name: name.to_owned(),
             kind,
             skeleton,
+            physics: None,
+            default_level: SimLevel::Animated,
         });
         id
     }
