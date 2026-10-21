@@ -999,9 +999,12 @@ mod tests {
     }
 
     fn import(xml: &str) -> Import {
+        // Tests run in parallel: each import gets its own file.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!("neuromotion-test-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("scene.ens");
+        let path = dir.join(format!("scene-{n}.ens"));
         let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
         std::io::Write::write_all(&mut encoder, xml.as_bytes()).unwrap();
         fs::write(&path, encoder.finish().unwrap()).unwrap();
