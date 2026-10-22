@@ -921,6 +921,23 @@ mod tests {
         assert!(height < 0.1, "dancer rests {height} m above the turntable");
     }
 
+    /// A rope hanging straight down from a Lock with a heavy weight on the end stays
+    /// still (with full joint warm starts it breathed until it exploded).
+    #[test]
+    fn hanging_weight_stays_still() {
+        for (tip_mass, seg_mass) in [(20.0, 0.15), (80.0, 0.15), (20.0, 0.05)] {
+            let mut p = new_scene("Hanging weight", 2.0);
+            let limits = Limits { twist_min: -0.5, twist_max: 0.5, swing1: 1.2, swing2: 1.2 };
+            let tip = Piece::at(Geometry::Sphere { radius: 0.15 }, tip_mass, Quat::IDENTITY, Vec3::new(0.0, -0.15, 0.0));
+            let rig = chain(Vec3::new(0.0, 4.0, 0.0), 8, 0.3, 0.02, seg_mass, Some(tip), limits, Gains { stiffness: 0.5, damping: 0.05, force_limit: 5.0 });
+            let rope = add_prop(&mut p, "rope", CharacterKind::Prop, rig, SimLevel::Simulated);
+            constrain(&mut p, rope, 0, 120, "Lock", &["rope.MetaBodies.seg0"], (STRONG, Vec3::ZERO));
+            let report = sweep(&p);
+            println!("weight {tip_mass} kg on {seg_mass} kg links: {report}");
+            assert!(report.held() && report.fastest < 2.0, "{report}");
+        }
+    }
+
     /// LockWithParent naming one body holds it to its parent body: a rope locked at the
     /// top, with its second segment locked to the first, keeps that bend.
     #[test]
