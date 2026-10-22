@@ -7,7 +7,8 @@
 //! velocity), or simulated (fully dynamic). Kinematic bodies always move with the
 //! animation's velocity, so switching to simulated carries the motion's momentum into
 //! physics. Simulated characters' muscles pull towards an active pose, an active
-//! animation, or the pose they had when simulation began (see docs/physics-design.md).
+//! animation, or the pose they had when simulation began (see docs/physics-design.md),
+//! and behaviours (balance, catch fall) adjust them as they go (docs/behaviours.md).
 //!
 //! Results are computed incrementally under a time budget so editing never blocks
 //! the UI, and recomputed from the start whenever the document changes.
@@ -16,6 +17,7 @@ use std::time::Instant;
 
 use glam::{Quat, Vec3};
 
+use super::behaviour::{Behaviour, Drive, Layout};
 use super::world::{Body, CollisionFlags, Joint, Lock, Motion, Muscle, Shape, World};
 use crate::document::physics::{Gains, MuscleGains, PhysicsRig, SimLevel};
 use crate::document::{CharacterKind, Clip, ClipKind, Pose, Project, world_transforms};
@@ -60,6 +62,8 @@ struct Binding {
     level: SimLevel,
     /// Muscle targets (joint local rotations) captured when simulation began.
     frozen: Vec<Quat>,
+    /// Where its limbs are, for behaviours (`None` if it isn't a biped).
+    layout: Option<Layout>,
 }
 
 /// A character's physics events, read from its clips.
@@ -75,6 +79,8 @@ struct Plan {
     poses: Vec<PoseTarget>,
     /// (start, end, strength) of clips whose animation the muscles follow.
     active: Vec<(i32, i32, f32)>,
+    /// (start, end, behaviour) of behaviour events NeuroMotion has a controller for.
+    behaviours: Vec<(i32, i32, Behaviour)>,
 }
 
 /// A lock/join constraint event, across characters.
@@ -314,6 +320,7 @@ fn build(project: &Project) -> Running {
             body_of_joint,
             level,
             frozen: local_rotations(skeleton, &poses[ci]),
+            layout: Layout::new(rig, skeleton),
         }));
     }
 
@@ -543,6 +550,12 @@ fn plan(project: &Project, character_index: usize) -> Plan {
                         .unwrap_or_default();
                     plan.forces.push((start, dv, bodies));
                 }
+                "Behaviour" => {
+                    let name = clip.source.get("behaviourName").unwrap_or(&clip.props.name);
+                    if let Some(behaviour) = Behaviour::from_name(name) {
+                        plan.behaviours.push((start, end, behaviour));
+                    }
+                }
                 "Active pose" => {
                     let skeleton = &character.skeleton;
                     let mut pose = Pose::rest(skeleton.joints.len());
@@ -710,14 +723,40 @@ fn set_muscles(world: &mut World, binding: &Binding, plan: &Plan, project: &Proj
         .rig
         .muscle_set(set_name)
         .or_else(|| binding.rig.muscle_sets.first());
-    for (j, jd) in binding.rig.joints.iter().enumerate() {
+    let joints = &binding.rig.joints;
+    let mut targets: Vec<Quat> = joints
+        .iter()
+        .map(|jd| {
+            pose_target
+                .and_then(|p| p.targets.get(jd.joint).copied().flatten())
+                .or_else(|| anim_locals.as_ref().map(|l| l[jd.joint]))
+                .unwrap_or(binding.frozen[jd.joint])
+        })
+        .collect();
+    let mut gains: Vec<MuscleGains> = joints
+        .iter()
+        .map(|jd| {
+            let g = set.map_or(DEFAULT_GAINS, |s| s.gains(&jd.muscle));
+            MuscleGains { twist: scale(g.twist, strength), swing: scale(g.swing, strength) }
+        })
+        .collect();
+    // The latest behaviour running now takes over from there.
+    let behaviour = plan.behaviours.iter().rev().find(|(s, e, _)| *s <= frame && frame < *e);
+    if let (Some(&(.., behaviour)), Some(layout)) = (behaviour, &binding.layout) {
+        let mut drive = Drive {
+            world,
+            first_body: binding.first_body,
+            first_joint: binding.first_joint,
+            rig: &binding.rig,
+            layout,
+            targets: &mut targets,
+            gains: &mut gains,
+        };
+        behaviour.drive(&mut drive);
+    }
+    for (j, (target, gains)) in targets.into_iter().zip(gains).enumerate() {
         let Some(joint) = world.joints.get_mut(binding.first_joint + j) else { break };
-        let target = pose_target
-            .and_then(|p| p.targets.get(jd.joint).copied().flatten())
-            .or_else(|| anim_locals.as_ref().map(|l| l[jd.joint]))
-            .unwrap_or(binding.frozen[jd.joint]);
-        let gains = set.map_or(DEFAULT_GAINS, |s| s.gains(&jd.muscle));
-        joint.muscle = Some(Muscle { target, twist: scale(gains.twist, strength), swing: scale(gains.swing, strength) });
+        joint.muscle = Some(Muscle { target, twist: gains.twist, swing: gains.swing });
     }
 }
 

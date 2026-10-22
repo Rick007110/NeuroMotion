@@ -398,7 +398,17 @@ fn person_rig() -> (SkeletonRef, PhysicsRig) {
 /// Adds the stand-in character with its feet at `at`, facing `yaw` degrees from +Z,
 /// held in a start pose (joint, property, value) for the whole scene.
 fn person(project: &mut Project, name: &str, at: Vec3, yaw: f32, pose: &[(&str, Property, f32)]) -> CharacterId {
-    let (skeleton, rig) = person_rig();
+    add_person(project, name, person_rig(), at, yaw, pose)
+}
+
+/// Adds the placeholder character itself, standing at `at`.
+fn placeholder(project: &mut Project, name: &str, at: Vec3, yaw: f32) -> CharacterId {
+    let skeleton = humanoid_skeleton();
+    let rig = humanoid_rig(&skeleton);
+    add_person(project, name, (skeleton, rig), at, yaw, &[])
+}
+
+fn add_person(project: &mut Project, name: &str, (skeleton, rig): (SkeletonRef, PhysicsRig), at: Vec3, yaw: f32, pose: &[(&str, Property, f32)]) -> CharacterId {
     let id = project.add_character(name, CharacterKind::Character, skeleton);
     let c = project.characters.iter_mut().find(|c| c.id == id).unwrap();
     c.physics = Some(rig);
@@ -548,6 +558,37 @@ fn body_pose(project: &Project, character: CharacterId, body: &str, frame: f32) 
     let rig = c.physics.as_ref().unwrap();
     let pose: Pose = project.evaluate(frame).swap_remove(ci);
     rig_bodies(rig, &world_transforms(&c.skeleton, &pose))[rig.body_index(body).unwrap()]
+}
+
+// ---------------------------------------------------------------------------------
+// Behaviour scenes
+
+fn behave(project: &mut Project, character: CharacterId, start: i32, end: i32, name: &str) {
+    event(project, character, "Behaviour", start, end - start, &[("behaviourName", name)]);
+}
+
+/// The placeholder stands; at 1 s its chest is pushed at `speed` m/s along `dir`.
+/// With `behaviour`, Balance runs throughout.
+pub fn balance_push(speed: f32, dir: Vec3, behaviour: bool) -> Project {
+    let mut p = new_scene("Balance", 4.0);
+    let id = placeholder(&mut p, "stander", Vec3::ZERO, 0.0);
+    if behaviour {
+        behave(&mut p, id, 0, 240, "Balance");
+    }
+    push(&mut p, id, 60, "stander.MetaBodies.chest", dir.normalize() * speed);
+    p
+}
+
+/// The placeholder is shoved over forwards at 0.5 s; with `behaviour`, CatchFall runs
+/// from the shove on.
+pub fn catch_fall_shove(shove: Vec3, behaviour: bool) -> Project {
+    let mut p = new_scene("Catch fall", 2.5);
+    let id = placeholder(&mut p, "faller", Vec3::ZERO, 0.0);
+    if behaviour {
+        behave(&mut p, id, 30, 150, "CatchFall");
+    }
+    push(&mut p, id, 30, "faller.MetaBodies.chest", shove);
+    p
 }
 
 // ---------------------------------------------------------------------------------
@@ -809,6 +850,8 @@ mod tests {
             "rotating_floor" => rotating_floor(),
             "turntable" => turntable(),
             "car_hit" => car_hit(),
+            "balance" => balance_push(1.5, Vec3::Z, true),
+            "catch_fall" => catch_fall_shove(Vec3::new(0.0, 0.0, 3.5), true),
             _ => panic!("set NM_TRACE to a stand-in's name"),
         };
         if describe_only {
@@ -913,6 +956,76 @@ mod tests {
     #[test]
     fn car_hit_keeps_joints_together() {
         check(car_hit());
+    }
+}
+
+#[cfg(test)]
+mod behaviour_tests {
+    use super::*;
+
+    /// Lowest height of the named bodies' centres over a frame range.
+    fn lowest(project: &Project, sim: &Simulation, bodies: &[&str], frames: std::ops::RangeInclusive<i32>) -> f32 {
+        let rig = project.characters[0].physics.as_ref().unwrap();
+        let mut low = f32::MAX;
+        for frame in frames {
+            let cf = sim.frame(frame).unwrap()[0].as_ref().unwrap();
+            for name in bodies {
+                low = low.min(cf.bodies[rig.body_index(name).unwrap()].1.y);
+            }
+        }
+        low
+    }
+
+    #[test]
+    fn balance_keeps_the_placeholder_upright_after_a_push() {
+        // Backwards, the capture point leaves the placeholder's short heel (6 cm behind
+        // the ankle): that takes a step, which Balance doesn't do yet.
+        for (behaviour, dir) in [(true, Vec3::Z), (true, Vec3::X), (true, -Vec3::X), (false, Vec3::Z)] {
+            let project = balance_push(1.5, dir, behaviour);
+            let (sim, _) = simulate(&project);
+            // Standing, the head's centre is at 1.7 m and the hips' at 1.0 m; check the
+            // 3 s after the push.
+            let head = lowest(&project, &sim, &["head"], 60..=240);
+            let hips = lowest(&project, &sim, &["hips"], 60..=240);
+            println!("balance {behaviour}, push 1.5 m/s along {dir}: head down to {head:.2} m, hips {hips:.2} m");
+            if behaviour {
+                assert!(head > 1.45 && hips > 0.8, "fell pushed along {dir}: head {head}, hips {hips}");
+            } else {
+                assert!(head < 1.0, "limp character should fall: head {head}");
+            }
+        }
+    }
+
+    /// The first frame each part comes within 4 cm of the ground (`None`: never).
+    fn first_touch(project: &Project, sim: &Simulation, parts: &[(&str, f32)]) -> Option<i32> {
+        let rig = project.characters[0].physics.as_ref().unwrap();
+        let range = project.settings.range;
+        (range.start..=range.end).find(|&frame| {
+            let cf = sim.frame(frame).unwrap()[0].as_ref().unwrap();
+            parts.iter().any(|&(name, radius)| cf.bodies[rig.body_index(name).unwrap()].1.y < radius + 0.04)
+        })
+    }
+
+    #[test]
+    fn catch_fall_lands_on_the_hands_first() {
+        let shoves = [Vec3::new(0.0, 0.0, 3.5), Vec3::new(0.0, 0.0, 5.0), Vec3::new(2.5, 0.0, 2.5), Vec3::new(3.5, 0.0, 0.0), Vec3::new(0.0, 0.0, -3.5)];
+        let cases = shoves.iter().map(|&s| (s, true)).chain([(shoves[0], false)]);
+        for (shove, behaviour) in cases {
+            let project = catch_fall_shove(shove, behaviour);
+            let (sim, _) = simulate(&project);
+            let hands = first_touch(&project, &sim, &[("l_wrist", 0.035), ("r_wrist", 0.035)]);
+            let head = first_touch(&project, &sim, &[("head", 0.1)]);
+            let chest = first_touch(&project, &sim, &[("chest", 0.12)]);
+            println!("catch fall {behaviour}, shoved {shove}: hands {hands:?}, head {head:?}, chest {chest:?}");
+            let first = |a: Option<i32>, b: Option<i32>| a.is_some_and(|a| b.is_none_or(|b| a < b));
+            let hands_first = first(hands, head) && first(hands, chest);
+            if behaviour {
+                assert!(hands_first, "shoved {shove}: hands {hands:?}, head {head:?}, chest {chest:?}");
+            } else {
+                // Shoved forwards, a limp character lands on its face.
+                assert!(!hands_first, "a limp fall shouldn't land on the hands first");
+            }
+        }
     }
 }
 

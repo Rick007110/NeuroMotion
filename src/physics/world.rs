@@ -32,6 +32,8 @@ const RESTITUTION_THRESHOLD: f32 = 0.5;
 /// mass it actually moves. endorphin's presets are tuned for whole limbs; on very light
 /// parts (fingers, hands) the same gains would ring far faster than the solver can
 /// follow. Capping here leaves torso and limb muscles untouched (they sit at 3-15 Hz).
+/// A body resting on the ground or scenery counts as immovable for the cap: a planted
+/// foot's ankle muscle moves the whole body above it, not the foot.
 const MAX_SPRING_HERTZ: f32 = 30.0;
 
 /// Scales stiffness and damping down together so the spring's natural frequency on an
@@ -300,6 +302,8 @@ struct JointRows {
     k_pa: Mat3,
     k_ap: Mat3,
     angular_schur: Mat3,
+    /// The same with grounded bodies held still, for capping muscle springs.
+    cap_schur: Mat3,
     limits: Vec<AngularRow>,
     muscle: Option<MuscleBlock>,
 }
@@ -487,7 +491,17 @@ impl World {
             .collect();
 
         let mut contacts = self.find_contacts(&sb, h);
-        let mut joints = self.prepare_joints(&sb, h);
+        let mut grounded = vec![false; self.bodies.len()];
+        for c in contacts.iter().filter(|c| c.separation < 0.01) {
+            let held = |i: usize| i == STATIC || !self.bodies[i].is_dynamic();
+            if held(c.a) && c.b != STATIC {
+                grounded[c.b] = true;
+            }
+            if held(c.b) && c.a != STATIC {
+                grounded[c.a] = true;
+            }
+        }
+        let mut joints = self.prepare_joints(&sb, h, &grounded);
         let mut locks = self.prepare_locks(&sb, h);
 
         // Warm start.
@@ -590,7 +604,18 @@ impl World {
     // -----------------------------------------------------------------------------
     // Joints
 
-    fn prepare_joints(&self, sb: &[SolverBody], h: f32) -> Vec<JointRows> {
+    fn prepare_joints(&self, sb: &[SolverBody], h: f32, grounded: &[bool]) -> Vec<JointRows> {
+        // Anchor effective mass, anchor-angle couplings and angular Schur complement.
+        let blocks = |sa: SolverBody, sbb: SolverBody, ra: Vec3, rb: Vec3| {
+            let k = Mat3::from_diagonal(Vec3::splat(sa.inv_mass + sbb.inv_mass))
+                - skew(ra) * sa.inv_i * skew(ra)
+                - skew(rb) * sbb.inv_i * skew(rb);
+            let point_mass = if k.determinant().abs() > 1e-12 { k.inverse() } else { Mat3::ZERO };
+            let (sra, srb) = (skew(ra), skew(rb));
+            let k_pa = -(sra * sa.inv_i + srb * sbb.inv_i);
+            let k_ap = sa.inv_i * sra + sbb.inv_i * srb;
+            (point_mass, k_pa, k_ap, sa.inv_i + sbb.inv_i - k_ap * point_mass * k_pa)
+        };
         let mut out = Vec::new();
         for (index, joint) in self.joints.iter().enumerate() {
             let (a, b) = (joint.parent, joint.child);
@@ -601,13 +626,9 @@ impl World {
             let ra = ba.rotation * joint.anchor_parent;
             let rb = bb.rotation * joint.anchor_child;
             let (sa, sbb) = (sb[a], sb[b]);
-            let k = Mat3::from_diagonal(Vec3::splat(sa.inv_mass + sbb.inv_mass))
-                - skew(ra) * sa.inv_i * skew(ra)
-                - skew(rb) * sbb.inv_i * skew(rb);
-            let point_mass = if k.determinant().abs() > 1e-12 { k.inverse() } else { Mat3::ZERO };
-            let (sra, srb) = (skew(ra), skew(rb));
-            let k_pa = -(sra * sa.inv_i + srb * sbb.inv_i);
-            let k_ap = sa.inv_i * sra + sbb.inv_i * srb;
+            let (point_mass, k_pa, k_ap, angular_schur) = blocks(sa, sbb, ra, rb);
+            let still = |s: SolverBody, i: usize| if grounded[i] { SolverBody { inv_mass: 0.0, inv_i: Mat3::ZERO, ..s } } else { s };
+            let cap_schur = if grounded[a] || grounded[b] { blocks(still(sa, a), still(sbb, b), ra, rb).3 } else { angular_schur };
             let mut rows = JointRows {
                 joint: index,
                 a,
@@ -619,7 +640,8 @@ impl World {
                 point_impulse: joint.warm_point,
                 k_pa,
                 k_ap,
-                angular_schur: sa.inv_i + sbb.inv_i - k_ap * point_mass * k_pa,
+                angular_schur,
+                cap_schur,
                 limits: Vec::new(),
                 muscle: None,
             };
@@ -727,7 +749,7 @@ impl World {
                 continue;
             }
             let axis = frame.col(k);
-            let (stiffness, damping) = cap_spring(gains.stiffness, gains.damping, axis.dot(rows.angular_schur * axis));
+            let (stiffness, damping) = cap_spring(gains.stiffness, gains.damping, axis.dot(rows.cap_schur * axis));
             let denom = damping + h * stiffness;
             gamma[k] = 1.0 / (h * denom);
             bias[k] = -(stiffness / denom) * error_world.dot(axis);

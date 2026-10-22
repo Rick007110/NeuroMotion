@@ -123,6 +123,16 @@ The scenes with props, several characters and moving scenery taught four more:
    often boxes, and so are floors and balconies, so without box-box contacts feet sank
    into them. A flat cylinder (a turntable) collided as a sphere of its radius.
 
+Making characters balance (docs/behaviours.md) added a ninth:
+
+9. **The spring cap counts grounded bodies as immovable.** The 30 Hz cap estimates the
+   mass a muscle moves from the two bodies it joins. For an ankle that is a 1.1 kg
+   foot, so its muscle was capped at about 270 N·m/rad, too weak to hold a standing
+   body up (each ankle needs ~370). A planted foot is held by the ground, and its ankle
+   moves the body above it. Bodies touching the ground or scenery now count as
+   immovable for the cap (only for the cap; the solve itself is unchanged). Standing
+   characters with strong presets now hold their stance.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates the first two seconds of
@@ -144,7 +154,7 @@ with endorphin.
 
 | Result | Scenes |
 |---|---|
-| Clean (last checked before the fixes above) | Arrows, Car Crash, Catch Run, Multi Martial, Stagger Walk, Sword Play, Trapeze, Walk With Gun |
+| Clean before lessons 5-9; re-check, and look at anyone standing with a strong preset or running Balance or CatchFall | Arrows, Car Crash, Catch Run, Multi Martial, Stagger Walk, Sword Play, Trapeze, Walk With Gun |
 | Re-check: stand-in passes | Tackle (lessons 5, 7), Balcony (7, 8), Catch Rope, Gymnast Rings, Bendy Stick, Heli Leap (5, 6), Rotating Floor (6, 8) |
 | Re-check: not reproduced | Car Hit (6 cm stretch): the stand-in takes a 15 m/s hit with 3 cm |
 
@@ -161,13 +171,14 @@ What each stand-in reproduces:
 | Rotating Floor | No ground; a thin collision-only slab spinning and rocking | sinks through | rides it |
 | Turntable | No ground; a flat cylinder spinning | floats 0.9 m above it | rests on it |
 
-Behaviours are not recreated, so scenes that depend on them (e.g. Stagger Walk's
-stagger) simulate as if the character went limp.
+Of endorphin's behaviours, Balance and CatchFall now have controllers of their own
+(docs/behaviours.md). Scenes that depend on others (e.g. Stagger Walk's stagger)
+simulate as if the character went limp.
 
 ## Not yet
 
-- Behaviours (stagger, catch fall, …). endorphin's are vendor-protected, so these need
-  original designs.
+- Behaviours beyond Balance and CatchFall (stagger, writhe, …), and stepping.
+  endorphin's are vendor-protected, so these need original designs.
 - Sever events.
 - Virtual-muscle reach springs.
 - Exact cylinders: long ones have rounded ends, flat ones a rounded rim.
