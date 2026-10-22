@@ -7,11 +7,13 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Align2, RichText, ViewportCommand};
 
 use super::actions::Action;
+use super::export::{ExportDialog, Format};
 use super::selection::Selection;
 use super::timeline_panel::{self, TimelineState};
 use super::{inspector, shortcuts, theme};
-use crate::document::{ClipKind, ClipProps, Document, Project, SimLevel, sample};
-use crate::io;
+use crate::document::events::{self, NewClip};
+use crate::document::{CharacterId, ClipKind, ClipProps, Document, Edit, Project, SimLevel, TrackId, sample, world_transforms};
+use crate::io::{self, motion};
 use crate::physics::Simulation;
 use crate::timeline::Playback;
 use crate::viewport::{CharacterView, OrbitCamera, Viewport};
@@ -30,10 +32,10 @@ pub struct NeuroMotionApp {
     pub(super) show_timeline: bool,
     playback: Playback,
     timeline: TimelineState,
-    simulation: Simulation,
+    pub(super) simulation: Simulation,
     /// Whether the project needs physics, cached per document revision.
     physics_needed: Option<(u64, bool)>,
-    status: String,
+    pub(super) status: String,
     show_about: bool,
     /// Notes from the last import, shown until dismissed.
     import_report: Option<(String, Vec<String>)>,
@@ -44,6 +46,8 @@ pub struct NeuroMotionApp {
     pending_discard: Option<Action>,
     close_confirmed: bool,
     title: String,
+    /// The File → Export window, while it's open.
+    pub(super) export: Option<ExportDialog>,
 }
 
 impl NeuroMotionApp {
@@ -69,6 +73,7 @@ impl NeuroMotionApp {
             pending_discard: None,
             close_confirmed: false,
             title: String::new(),
+            export: None,
         };
         if let Some(path) = startup {
             app.open_path(path);
@@ -107,6 +112,16 @@ impl NeuroMotionApp {
         self.simulation.sync(revision);
         if !self.simulation.advance(&self.doc.project, Instant::now() + SIMULATION_BUDGET) {
             ctx.request_repaint();
+        }
+    }
+
+    /// The character the selection belongs to, if any.
+    pub(super) fn selected_character(&self) -> Option<CharacterId> {
+        let project = &self.doc.project;
+        match self.selection {
+            Selection::Character(id) => Some(id),
+            Selection::Track(id) => project.track(id).map(|t| t.character),
+            other => other.clip().and_then(|id| project.clip(id)).and_then(|c| project.clip_character(c)).map(|c| c.id),
         }
     }
 
@@ -159,6 +174,8 @@ impl NeuroMotionApp {
                 None => self.open(),
             },
             Action::ImportPose => self.import_pose(None),
+            Action::ExportBvh => self.open_export(Format::Bvh),
+            Action::ExportFbx => self.open_export(Format::Fbx),
             Action::SaveProject => self.save(false),
             Action::SaveProjectAs => self.save(true),
             Action::Quit => {
@@ -187,6 +204,9 @@ impl NeuroMotionApp {
                 }
                 None => self.status = "Select a clip to duplicate.".into(),
             },
+            Action::AddClip { kind, at } => self.add_clip(kind, at),
+            Action::CapturePose(clip) => self.capture_pose(clip),
+            Action::BakeSimulation => self.bake_simulation(),
             Action::Delete => self.delete_selection(),
             Action::Deselect => self.selection = Selection::None,
             Action::PlayPause => self.playback.toggle(range),
@@ -344,7 +364,120 @@ impl NeuroMotionApp {
                     self.selection = Selection::None;
                 }
             }
-            _ => self.status = "Select a clip or key to delete.".into(),
+            Selection::Track(track) => {
+                let character = self.doc.project.track(track).map(|t| t.character);
+                if self.doc.remove_track(track) {
+                    self.selection = character.map_or(Selection::None, Selection::Character);
+                }
+            }
+            _ => self.status = "Select a track, clip or key to delete.".into(),
+        }
+    }
+
+    /// The character new clips go to: the selected one, else the first that isn't scenery.
+    pub(super) fn target_character(&self) -> Option<CharacterId> {
+        let project = &self.doc.project;
+        self.selected_character().or_else(|| {
+            let first = project.characters.iter().find(|c| c.kind != crate::document::CharacterKind::Environment);
+            first.or(project.characters.first()).map(|c| c.id)
+        })
+    }
+
+    /// Adds a clip on a track at a frame, or for the selected character at the playhead.
+    fn add_clip(&mut self, kind: NewClip, at: Option<(TrackId, i32)>) {
+        let project = &self.doc.project;
+        let (character, track, frame) = match at {
+            Some((track, frame)) => (project.track(track).map(|t| t.character), Some(track), frame),
+            None => {
+                let track = match self.selection {
+                    Selection::Track(id) => Some(id),
+                    _ => None,
+                };
+                (self.target_character(), track, self.playback.frame())
+            }
+        };
+        let Some(index) = character.and_then(|id| project.character_index(id)) else {
+            self.status = "There is no character to add a clip to.".into();
+            return;
+        };
+        let owner = &project.characters[index];
+        if kind.needs_physics() && owner.physics.is_none() {
+            self.status = format!("{} has no physics body, so a {} event would do nothing.", owner.name, kind.label().to_lowercase());
+            return;
+        }
+        let pose = (kind == NewClip::ActivePose).then(|| self.displayed_pose(index));
+        if let Some(clip) = self.doc.add_new_clip(kind, owner.id, track, frame, pose.as_deref()) {
+            self.selection = Selection::Clip(clip);
+            self.status = match kind {
+                NewClip::ActivePose => format!("Added an active pose holding the pose at frame {}.", self.playback.frame()),
+                _ => format!("Added {} at frame {frame}.", kind.label().to_lowercase()),
+            };
+        }
+    }
+
+    /// Replaces an active pose's held pose with the one at the playhead.
+    fn capture_pose(&mut self, clip: crate::document::ClipId) {
+        let project = &self.doc.project;
+        let Some(c) = project.clip(clip) else { return };
+        let Some(index) = project.clip_character(c).and_then(|ch| project.character_index(ch.id)) else { return };
+        let channels = events::pose_channels(&project.characters[index], &self.displayed_pose(index));
+        let edit = Edit::ClipChannels { clip, before: c.channels.clone(), after: channels };
+        self.doc.apply("Capture pose", edit, false);
+        self.status = format!("Captured the pose at frame {}.", self.playback.frame());
+    }
+
+    /// A character's joints as the viewport shows them at the playhead: simulated where
+    /// the simulation has reached, otherwise animated.
+    fn displayed_pose(&self, index: usize) -> Vec<(glam::Quat, glam::Vec3)> {
+        let project = &self.doc.project;
+        let frame = self.playback.frame();
+        let simulated = self.physics_on().then(|| self.simulation.frame(frame)).flatten();
+        match simulated.and_then(|f| f.get(index)).and_then(Option::as_ref) {
+            Some(state) => state.joints.clone(),
+            None => world_transforms(&project.characters[index].skeleton, &project.evaluate(frame as f32)[index]),
+        }
+    }
+
+    /// Whether Edit → Bake Simulation applies to the current selection.
+    pub(super) fn can_bake(&self) -> bool {
+        let project = &self.doc.project;
+        self.physics_on()
+            && self.selected_character().and_then(|id| project.character(id)).is_some_and(|c| c.physics.is_some())
+    }
+
+    /// Replaces the selected character's simulation over the project range with keys.
+    fn bake_simulation(&mut self) {
+        let Some(id) = self.selected_character() else {
+            self.status = "Select a character (or one of its tracks or clips) to bake.".into();
+            return;
+        };
+        let project = &self.doc.project;
+        let Some(index) = project.character_index(id) else { return };
+        let name = project.characters[index].name.clone();
+        if !Simulation::is_needed(project) {
+            self.status = format!("{name} isn't simulated, so there's nothing to bake.");
+            return;
+        }
+        motion::finish(&mut self.simulation, project, self.doc.revision());
+        let range = project.settings.range;
+        let simulated = (range.start..=range.end).any(|f| {
+            let state = self.simulation.frame(f).and_then(|s| s.get(index)).and_then(Option::as_ref);
+            state.is_some_and(|s| s.level != SimLevel::Animated)
+        });
+        if !simulated {
+            self.status = format!("{name} is never simulated in the project range, so there's nothing to bake.");
+            return;
+        }
+        let motion = motion::sample(project, index, Some(&self.simulation));
+        match self.doc.bake_motion(id, &motion.frames) {
+            Some((_, clip)) => {
+                self.selection = Selection::Clip(clip);
+                self.status = format!(
+                    "Baked {} frames of {name} into keys on a new top track. Its physics events are off and it now starts animated.",
+                    motion.frames.len()
+                );
+            }
+            None => self.status = format!("Couldn't bake {name}."),
         }
     }
 
@@ -537,7 +670,7 @@ impl eframe::App for NeuroMotionApp {
                 .min_width(240.0)
                 .show(ctx, |ui| {
                     let playhead = self.playback.playhead() as f32;
-                    inspector::show(ui, &mut self.doc, &mut self.selection, playhead)
+                    inspector::show(ui, &mut self.doc, &mut self.selection, playhead, &mut actions)
                 });
         }
         let hud = self.hud_lines();
@@ -549,6 +682,7 @@ impl eframe::App for NeuroMotionApp {
             });
 
         self.windows(ctx, &mut actions);
+        self.export_window(ctx);
         for action in actions {
             self.run(ctx, action);
         }

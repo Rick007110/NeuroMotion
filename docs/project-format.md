@@ -47,9 +47,9 @@ Pretty-printed JSON, chosen over RON because every language and diff tool reads 
   a clear message, older versions are the hook for future migrations.
 - Each track animates one character (`character`); per character, track order is blend
   order (first = bottom layer).
-- `kind` is `"motion"` (keyed channels) or `{"event": {"event": "Force"}}` for events
-  imported from other tools. Clips may carry a `source` map of imported settings that
-  NeuroMotion doesn't model yet.
+- `kind` is `"motion"` (keyed channels) or `{"event": {"event": "Force"}}` for physics
+  events. Clips may carry a `source` map of settings: an event's physics settings, under
+  the keys listed in [events.md](events.md), plus anything else an importer kept.
 - `rest_rotation` is the joint's rest orientation relative to its parent (`[x, y, z, w]`);
   rotation channels are applied on top of it.
 - Version 1 files (single top-level `skeleton`) are migrated automatically on load.

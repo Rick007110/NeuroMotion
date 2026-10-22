@@ -69,7 +69,7 @@ fn paint(p: &Painter, r: Rect, icon: Icon, color: eframe::egui::Color32) {
         Icon::Loop => {
             let c = r.center();
             let radius = r.height() * 0.5;
-            p.circle_stroke(c, radius, Stroke::new(1.6, color));
+            p.circle_stroke(c, radius, Stroke::new(1.6_f32, color));
             let tip = pos2(c.x + radius, c.y);
             fill(vec![tip + vec2(-3.5, -1.0), tip + vec2(3.5, -1.0), tip + vec2(0.0, 3.5)]);
         }

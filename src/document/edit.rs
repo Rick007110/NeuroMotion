@@ -4,9 +4,11 @@
 //! both the before and after state of what it touches, so undo and redo are the same
 //! operation run in opposite directions. The UI never mutates the project directly.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use super::model::{Clip, ClipId, ClipProps, Keyframe, Project, ProjectSettings, Track, TrackId};
+use super::model::{CharacterId, Channel, Clip, ClipId, ClipProps, Keyframe, Project, ProjectSettings, Track, TrackId};
+use super::physics::SimLevel;
 
 pub const UNDO_LIMIT: usize = 500;
 
@@ -33,6 +35,18 @@ pub enum Edit {
         before: Vec<Keyframe>,
         after: Vec<Keyframe>,
     },
+    /// Replaces a clip's settings (an event's physics settings).
+    ClipSource {
+        clip: ClipId,
+        before: BTreeMap<String, String>,
+        after: BTreeMap<String, String>,
+    },
+    /// Replaces a clip's whole channel list (e.g. an active pose recaptured).
+    ClipChannels {
+        clip: ClipId,
+        before: Vec<Channel>,
+        after: Vec<Channel>,
+    },
     InsertClip {
         index: usize,
         clip: Clip,
@@ -41,6 +55,24 @@ pub enum Edit {
         index: usize,
         clip: Clip,
     },
+    /// Adds a track at `index` in the project's track list. Its clips are separate edits.
+    InsertTrack {
+        index: usize,
+        track: Track,
+    },
+    /// Removes an (empty) track; remove its clips first, in the same [`Edit::Batch`].
+    RemoveTrack {
+        index: usize,
+        track: Track,
+    },
+    /// The simulation level a character starts at.
+    CharacterLevel {
+        character: CharacterId,
+        before: SimLevel,
+        after: SimLevel,
+    },
+    /// Several edits as one undo step: applied in order, undone in reverse order.
+    Batch(Vec<Edit>),
 }
 
 impl Edit {
@@ -60,6 +92,16 @@ impl Edit {
             Edit::ClipProps { clip, before, after } => {
                 if let Some(c) = project.clip_mut(*clip) {
                     c.props = pick(before, after, forward).clone();
+                }
+            }
+            Edit::ClipSource { clip, before, after } => {
+                if let Some(c) = project.clip_mut(*clip) {
+                    c.source = pick(before, after, forward).clone();
+                }
+            }
+            Edit::ClipChannels { clip, before, after } => {
+                if let Some(c) = project.clip_mut(*clip) {
+                    c.channels = pick(before, after, forward).clone();
                 }
             }
             Edit::ChannelKeys {
@@ -84,6 +126,27 @@ impl Edit {
                     project.clips.remove(i);
                 }
             }
+            Edit::InsertTrack { index, track } | Edit::RemoveTrack { index, track } => {
+                let inserting = matches!(self, Edit::InsertTrack { .. }) == forward;
+                if inserting {
+                    let at = (*index).min(project.tracks.len());
+                    project.tracks.insert(at, track.clone());
+                } else if let Some(i) = project.track_index(track.id) {
+                    project.tracks.remove(i);
+                }
+            }
+            Edit::CharacterLevel { character, before, after } => {
+                if let Some(c) = project.characters.iter_mut().find(|c| c.id == *character) {
+                    c.default_level = *pick(before, after, forward);
+                }
+            }
+            Edit::Batch(edits) => {
+                if forward {
+                    edits.iter().for_each(|e| e.apply(project, true));
+                } else {
+                    edits.iter().rev().for_each(|e| e.apply(project, false));
+                }
+            }
         }
     }
 
@@ -93,7 +156,12 @@ impl Edit {
             Edit::Track { before, after, .. } => before == after,
             Edit::ClipProps { before, after, .. } => before == after,
             Edit::ChannelKeys { before, after, .. } => before == after,
+            Edit::CharacterLevel { before, after, .. } => before == after,
+            Edit::ClipSource { before, after, .. } => before == after,
+            Edit::ClipChannels { before, after, .. } => before == after,
             Edit::InsertClip { .. } | Edit::RemoveClip { .. } => false,
+            Edit::InsertTrack { .. } | Edit::RemoveTrack { .. } => false,
+            Edit::Batch(edits) => edits.iter().all(Edit::is_noop),
         }
     }
 
@@ -114,6 +182,13 @@ impl Edit {
             (
                 Edit::ClipProps { clip, after, .. },
                 Edit::ClipProps { clip: other, after: next, .. },
+            ) if *clip == *other => {
+                *after = next.clone();
+                true
+            }
+            (
+                Edit::ClipSource { clip, after, .. },
+                Edit::ClipSource { clip: other, after: next, .. },
             ) if *clip == *other => {
                 *after = next.clone();
                 true
