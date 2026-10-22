@@ -36,6 +36,8 @@ character, with its endorphin name kept (`character01`, `prop01`, `background`) 
 events refer to characters by name. Joints keep their real names, offsets and rest
 orientations. Virtual-muscle helper joints are left out: they are solver links between
 distant body parts, not bones, and the import report says how many were skipped.
+Each character's own `TransformMatrix` is where it sits in the world (Catch Rope's
+runner starts on a roof 15.8 m up, the gymnast hangs 1.7 m up); see *Starting poses*.
 
 **Animation events** become motion clips on an *Animation* track:
 
@@ -50,10 +52,22 @@ distant body parts, not bones, and the import report says how many were skipped.
 
 **Starting poses.** Each character's placement and pose at the start of the scene
 (the scene's `<Poses>` section) becomes a held *Start pose* clip on the bottom track.
+The pose's root is relative to the character's placement, so the two are combined.
 It isn't used as a muscle target.
 
+**Scene animation.** The scene's own `<Animation>` section keys characters outside
+any event: a prop driven along a path (Car Hit's car, Car Crash's carrier box), a
+rotating floor, a run-up, poses set by hand. Its channels are named after the
+character they key, and are relative to its placement like the start pose. Each
+character with keys gets one held *Scene animation* clip for the whole scene, above
+its start pose and below its animation events; it isn't a muscle target either.
+Camera channels are left out.
+
 **Physics.** Each character's bodies, collision shapes, joint limits and muscle
-presets are imported into its physics rig. The scene's simulation rate, gravity,
+presets are imported into its physics rig. A collision surface with no geometry of
+its own collides with the body's mass shape: that is how props ("environment mass
+objects have a collision object by default"), ropes and other rigs built in endorphin
+get collision. The scene's simulation rate, gravity,
 ground and material table become the project's physics settings. Characters and the
 environment start *simulated*, as endorphin does. The environment's pieces without an
 inertial body (the background) have no mass and stay fixed; its props with one are
@@ -84,7 +98,14 @@ These are what the importer relies on:
   the position. It is always relative to the parent joint.
 - Skeletons nest joints in `<ChildJoints>`. Rig templates nest `<RigNode>`s in
   `<ChildNodes>`.
-- Animation channels are named `<character>.Joints.<joint>.<quat|tx|ty|tz>`.
+- Animation channels are named `<character>.Joints.<joint>.<quat|tx|ty|tz>` (or
+  `<character>.<joint>.<...>`, mostly in the scene's own `<Animation>`).
+- A character's `TransformMatrix` places it in the world; its start pose's root (in
+  `<Poses>`, `refFrame="Parent"`) and its keys in the scene's `<Animation>`
+  (`refFrame="parent"`) are relative to it. An animation event's matrix places that
+  event's animation in the world. Car Crash's carrier box shows the composition is
+  real: placed 14.4 m along Z, its start pose sits 14.4 m back along Z (it ends up
+  below the ground, where it isn't simulated).
   - Key time is in seconds (`bt` on quaternion keys, `bx` on scalar keys).
   - Quaternion keys store w, x, y and z in `bx`, `by`, `bz` and `bw`. Each is the
     joint's full local orientation.

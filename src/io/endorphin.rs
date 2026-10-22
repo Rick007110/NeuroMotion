@@ -113,9 +113,18 @@ pub fn import_scene(path: &Path) -> Result<Import, IoError> {
         .and_then(|r| attr_i32(&r, "start"))
         .unwrap_or(0);
     let mut start_poses = 0;
+    // Where each character sits in the world: a start pose's root is relative to it (the
+    // gymnast hangs 1.7 m up, Catch Rope's runner starts on a roof 15.8 m up). Animation
+    // events carry their own placement in the world.
+    let placement = |name: &str| {
+        elements(child(root, "Characters"))
+            .chain(child(root, "Environment"))
+            .find(|n| n.attribute("name") == Some(name))
+            .and_then(transform)
+    };
     for pose in elements(child(root, "Poses")) {
         let Some(character) = pose.attribute("character").and_then(|n| project.character_by_name(n)).cloned() else { continue };
-        let channels = pose_channels(pose, &character.skeleton);
+        let channels = pose_channels(pose, &character.skeleton, placement(&character.name));
         if channels.is_empty() {
             continue;
         }
@@ -140,6 +149,45 @@ pub fn import_scene(path: &Path) -> Result<Import, IoError> {
     let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
     let mut missing_targets = 0;
     let mut skipped_channels = 0;
+
+    // Keys the scene holds outside events: a prop driven along a path, a runner's run-up,
+    // a rotating floor, poses set by hand. They're relative to each character's placement,
+    // like its start pose. One clip per character for the whole scene, above the start
+    // pose and below animation events; like the start pose, not a muscle target.
+    let mut scene_animations = 0;
+    if let Some(animation) = child(root, "Animation") {
+        for character in project.characters.clone() {
+            let channels = animation_channels(
+                animation,
+                Some(&character.name),
+                0,
+                placement(&character.name),
+                &character.skeleton,
+                fps,
+                &mut skipped_channels,
+            );
+            if channels.is_empty() {
+                continue;
+            }
+            let track = lanes.track(&mut project, character.id, "Scene animation", i32::MIN, i32::MIN);
+            let props = ClipProps {
+                name: "Scene animation".to_owned(),
+                track,
+                start: 0,
+                duration: 1_000_000,
+                blend_in: 0,
+                blend_out: 0,
+                weight: 1.0,
+                enabled: true,
+            };
+            let id = project.add_clip(props, ClipKind::Motion, channels);
+            if let Some(clip) = project.clip_mut(id) {
+                clip.source.insert("active".into(), "false".into());
+                clip.source.insert("endorphin.type".into(), "Animation".into());
+            }
+            scene_animations += 1;
+        }
+    }
     let (mut first, mut last) = (i32::MAX, i32::MIN);
     for event in events {
         let Some(character) = event
@@ -158,12 +206,15 @@ pub fn import_scene(path: &Path) -> Result<Import, IoError> {
         last = last.max(end);
 
         let (kind, channels) = if tag == "AnimationEvent" {
-            let channels = animation_channels(event, &character.skeleton, fps, &mut skipped_channels);
+            let channels = child(event, "Animation").map_or_else(Vec::new, |animation| {
+                let offset = attr_i32(&event, "frameOffset").unwrap_or(0);
+                animation_channels(animation, None, offset, transform(event), &character.skeleton, fps, &mut skipped_channels)
+            });
             (ClipKind::Motion, channels)
         } else {
             // Active poses carry their target pose as held channels.
             let channels = child(event, "Pose")
-                .map(|pose| pose_channels(pose, &character.skeleton))
+                .map(|pose| pose_channels(pose, &character.skeleton, None))
                 .unwrap_or_default();
             (ClipKind::Event { event: label.to_owned() }, channels)
         };
@@ -210,6 +261,9 @@ pub fn import_scene(path: &Path) -> Result<Import, IoError> {
     }
     if start_poses > 0 {
         notes.push(format!("{start_poses} starting pose(s) placed as held clips under each character's animation."));
+    }
+    if scene_animations > 0 {
+        notes.push(format!("{scene_animations} character(s) keyed in the scene itself, outside events: a Scene animation clip each."));
     }
     let rigs = project.characters.iter().filter(|c| c.physics.is_some()).count();
     if rigs > 0 {
@@ -308,18 +362,35 @@ pub fn import_pose(path: &Path, project: &Project) -> Result<PoseImport, IoError
         .filter(|c| matches(&c.skeleton) > 0)
         .ok_or_else(|| IoError::Format("none of the project's characters have this pose's joints".into()))?;
 
-    let channels = pose_channels(root, &character.skeleton);
+    let channels = pose_channels(root, &character.skeleton, None);
     Ok(PoseImport { character: character.id, name: file_stem(path), channels })
 }
 
 /// Converts a pose's per-joint transforms (`<Relationships>` under `pose`) into held
-/// channels relative to the skeleton's rest pose.
-fn pose_channels(pose: Node, skeleton: &SkeletonRef) -> Vec<Channel> {
+/// channels relative to the skeleton's rest pose. `placement`, where the character sits
+/// in the world, goes under its roots.
+fn pose_channels(pose: Node, skeleton: &SkeletonRef, placement: Option<(Quat, Vec3)>) -> Vec<Channel> {
+    let mut transforms: Vec<(usize, Quat, Vec3)> = elements(child(pose, "Relationships"))
+        .filter_map(|r| {
+            let (rot, pos) = transform(r)?;
+            Some((skeleton.joint_index(r.attribute("name")?)?, rot, pos))
+        })
+        .collect();
+    // Roots sit at `placement`, at rest where the pose doesn't move them.
+    if let Some((place_rot, place_pos)) = placement {
+        for (index, joint) in skeleton.joints.iter().enumerate().filter(|(_, j)| j.parent.is_none()) {
+            if !transforms.iter().any(|t| t.0 == index) {
+                transforms.push((index, Quat::from_array(joint.rest_rotation).normalize(), Vec3::from(joint.offset)));
+            }
+        }
+        for (_, rot, pos) in transforms.iter_mut().filter(|t| skeleton.joints[t.0].parent.is_none()) {
+            (*rot, *pos) = (place_rot * *rot, place_pos + place_rot * *pos);
+        }
+    }
     let mut channels = Vec::new();
-    for relationship in elements(child(pose, "Relationships")) {
-        let (Some(name), Some((rot, pos))) = (relationship.attribute("name"), transform(relationship)) else { continue };
-        let Some(index) = skeleton.joint_index(name) else { continue };
+    for (index, rot, pos) in transforms {
         let joint = &skeleton.joints[index];
+        let name = joint.name.as_str();
         let euler = relative_euler(joint, rot);
         let offset = pos - Vec3::from(joint.offset);
         for (property, value) in rotation_props().into_iter().zip(euler).chain(position_props().into_iter().zip(offset.to_array())) {
@@ -397,13 +468,22 @@ struct JointTrack {
     position: [Vec<(f32, f32)>; 3],
 }
 
-fn animation_channels(event: Node, skeleton: &SkeletonRef, fps: f32, skipped: &mut usize) -> Vec<Channel> {
-    let Some(animation) = child(event, "Animation") else { return Vec::new() };
-    let frame_offset = attr_i32(&event, "frameOffset").unwrap_or(0);
-
+/// Channels from an `<Animation>` element: an animation event's (`owner` `None`), or the
+/// scene's own, where each channel name starts with the character it keys (`owner`).
+/// `placement` places the root in the world: the event's matrix, or the character's.
+fn animation_channels(
+    animation: Node,
+    owner: Option<&str>,
+    frame_offset: i32,
+    placement: Option<(Quat, Vec3)>,
+    skeleton: &SkeletonRef,
+    fps: f32,
+    skipped: &mut usize,
+) -> Vec<Channel> {
     let mut tracks: BTreeMap<usize, JointTrack> = BTreeMap::new();
     for channel in elements(Some(animation)) {
         let Some(full) = channel.attribute("name") else { continue };
+        let Some(full) = owner.map_or(Some(full), |o| full.strip_prefix(o).and_then(|rest| rest.strip_prefix('.'))) else { continue };
         let mut parts = full.rsplit('.');
         let (Some(property), Some(joint)) = (parts.next(), parts.next()) else { continue };
         let Some(index) = skeleton.joint_index(joint) else {
@@ -425,10 +505,12 @@ fn animation_channels(event: Node, skeleton: &SkeletonRef, fps: f32, skipped: &m
         }
     }
 
-    // The event's matrix places the whole animation in the scene: bake it into the root.
-    if let Some((place_rot, place_pos)) = transform(event) {
+    // The placement puts the whole animation in the scene: bake it into the root. The
+    // scene's own keys leave a root they don't key to the start pose.
+    if let Some((place_rot, place_pos)) = placement {
         let is_identity = place_rot.angle_between(Quat::IDENTITY) < 1e-4 && place_pos.length() < 1e-5;
-        if let Some(root) = skeleton.joints.iter().position(|j| j.parent.is_none()).filter(|_| !is_identity) {
+        let root = skeleton.joints.iter().position(|j| j.parent.is_none());
+        if let Some(root) = root.filter(|r| !is_identity && (owner.is_none() || tracks.contains_key(r))) {
             let joint = &skeleton.joints[root];
             let track = tracks.entry(root).or_default();
             if track.rotation.is_empty() {
@@ -563,7 +645,7 @@ impl Lanes {
             return lane.2;
         }
         let existing = self.lanes.iter().filter(|l| l.0 == character && l.1 == label).count();
-        let plural = if matches!(label, "Animation" | "Start pose") { label.to_owned() } else { format!("{label}s") };
+        let plural = if matches!(label, "Animation" | "Start pose" | "Scene animation") { label.to_owned() } else { format!("{label}s") };
         let name = if existing == 0 { plural } else { format!("{plural} {}", existing + 1) };
         let id = project.add_track(character, &name);
         self.lanes.push((character, label, id, end));
@@ -700,10 +782,15 @@ fn read_rig(node: Node, joint_nodes: &[Node], skeleton: &SkeletonRef, isotropic:
         let shapes = elements(Some(mb))
             .filter(|n| n.has_tag_name("CollisionSurface"))
             .filter_map(|cs| {
-                let (r, p) = transform(cs).unwrap_or((Quat::IDENTITY, Vec3::ZERO));
+                // A collision surface without geometry of its own collides with the body's
+                // mass shape: how endorphin gives props ("environment mass objects have a
+                // collision object by default"), ropes and other rigs made in it collision.
+                let shape = child(cs, "Geometry").or_else(|| child(mb, "InertialBody").and_then(|ib| child(ib, "Geometry")));
+                let placed = if child(cs, "Geometry").is_some() { cs } else { child(mb, "InertialBody")? };
+                let (r, p) = transform(placed).unwrap_or((Quat::IDENTITY, Vec3::ZERO));
                 let flag = |name: &str| cs.attribute(name) != Some("false");
                 Some(ShapeDef {
-                    geometry: geometry(child(cs, "Geometry")?)?,
+                    geometry: geometry(shape?)?,
                     frame: Frame { rotation: r.to_array(), position: p.to_array() },
                     material: cs.attribute("material").unwrap_or("default").to_owned(),
                     collides_with_parent: flag("collidesWithParent"),
@@ -1051,6 +1138,79 @@ mod tests {
         assert_eq!(force.source.get("targets").map(String::as_str), Some("hero.MetaBodies.Chest"));
         let track = project.track(force.props.track).unwrap();
         assert_eq!(track.name, "Forces");
+    }
+
+    /// A crate placed at (3, 2, 0) and turned 90° about Y, with a start pose, a mass
+    /// object whose collision surface has no geometry of its own, and keys in the scene's
+    /// own animation (plus a camera's, which no character owns).
+    fn crate_scene_xml() -> String {
+        let turned = matrix([[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]], [3.0, 2.0, 0.0]);
+        let rest = matrix([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], [0.0, 0.0, 0.0]);
+        let posed = matrix([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], [0.0, 1.0, 0.5]);
+        let key = |t: f32, v: f32| format!(r#"<Key bx="{}" by="{}"/>"#, hex(t), hex(v));
+        format!(
+            r#"<?xml version="1.0"?>
+<Scene>
+  <Engine bpositionBufferFrameRate="{fps}"><PlaybackRange start="0" end="30"/></Engine>
+  <Characters>
+    <Character name="crate" typeName="animatableProp">
+      {turned}
+      <MetaBodies>
+        <MetaBody name="rootMB">{rest}
+          <CollisionSurface collidesWithParent="true" collidesWithSiblings="true" collidesWithAncestors="true"/>
+          <InertialBody><Geometry type="Cuboid" bparam0="{x}" bparam1="{y}" bparam2="{z}"/><Inertia density="1.0"/></InertialBody>
+        </MetaBody>
+      </MetaBodies>
+      <Skeleton name="root" metaBody="rootMB">{rest}</Skeleton>
+    </Character>
+  </Characters>
+  <Poses>
+    <Pose character="crate" refFrame="Parent"><Relationships><Relationship name="root">{posed}</Relationship></Relationships></Pose>
+  </Poses>
+  <Animation refFrame="parent">
+    <Channel name="crate.root.tx" type="linear">{tx0}{tx1}</Channel>
+    <Channel name="crate.root.ty" type="linear">{ty0}{ty1}</Channel>
+    <Channel name="crate.root.tz" type="linear">{tz0}{tz1}</Channel>
+    <Channel name="Camera01.tx" type="linear">{tx0}</Channel>
+  </Animation>
+</Scene>"#,
+            fps = hex(30.0),
+            x = hex(0.4),
+            y = hex(0.2),
+            z = hex(0.6),
+            tx0 = key(0.0, 0.0),
+            tx1 = key(1.0, 2.0),
+            ty0 = key(0.0, 1.0),
+            ty1 = key(1.0, 1.0),
+            tz0 = key(0.0, 0.5),
+            tz1 = key(1.0, 0.5),
+        )
+    }
+
+    #[test]
+    fn placement_mass_object_collision_and_scene_keys() {
+        let Import { project, notes } = import(&crate_scene_xml());
+        let shapes = &project.characters[0].physics.as_ref().unwrap().bodies[0].shapes;
+        assert!(
+            matches!(shapes.as_slice(), [ShapeDef { geometry: Geometry::Box { size: [0.4, 0.2, 0.6] }, .. }]),
+            "a collision surface without geometry collides with the mass object: {shapes:?}"
+        );
+
+        // The start pose's root sits in the character's placement: (0, 1, 0.5) turned
+        // 90° about Y is (0.5, 1, 0), plus (3, 2, 0).
+        let root_at = |name: &str, key: usize| {
+            let clip = project.clips.iter().find(|c| c.props.name == name).unwrap();
+            let axis = |p: Property| clip.channels.iter().find(|c| c.joint == "root" && c.property == p).map_or(0.0, |c| c.keys[key].value);
+            Vec3::new(axis(Property::PosX), axis(Property::PosY), axis(Property::PosZ))
+        };
+        assert!(root_at("Start pose", 0).distance(Vec3::new(3.5, 3.0, 0.0)) < 1e-4, "{}", root_at("Start pose", 0));
+
+        // The scene's own keys become a held clip, placed the same way: x = 2 at 1 s is
+        // 2 m along the turned crate's -Z.
+        assert!(root_at("Scene animation", 0).distance(Vec3::new(3.5, 3.0, 0.0)) < 1e-4);
+        assert!(root_at("Scene animation", 1).distance(Vec3::new(3.5, 3.0, -2.0)) < 1e-4, "{}", root_at("Scene animation", 1));
+        assert_eq!(project.clips.iter().filter(|c| c.props.name == "Scene animation").count(), 1, "the camera's keys are left out");
+        assert!(notes.iter().any(|n| n.contains("keyed in the scene")));
     }
 
     #[test]
