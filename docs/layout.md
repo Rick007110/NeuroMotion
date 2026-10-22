@@ -51,6 +51,9 @@ keeps the playhead visually close to the pose it is driving. Inside the panel:
   stays clean.
 - The ruler and empty lane space both scrub. Frames outside the project range are
   shaded so the working range is obvious.
+- Right-click is for adding and removing: on a lane it adds a clip or event at that
+  frame; on a track or character name it adds or deletes tracks; on a clip it
+  duplicates, disables or deletes it.
 
 **Inspector on the right.** Your eye and pointer are usually on the viewport or the
 timeline, so the inspector sits beside them rather than between them. A vertical strip
@@ -64,6 +67,7 @@ always clear what you're editing. Controls are grouped by what they affect:
 | Character | Rig · Physics (bodies, starting simulation level) · Tracks (add a track) |
 | Track     | Track (name, mute) · delete track |
 | Clip      | Clip (name, enabled, track) · Timing (start, duration) · Blending (weight, blend in/out, live influence) · Channels |
+| Event     | Clip · Timing · the event's own settings (see [events.md](events.md)) |
 | Channel   | Channel (joint, property, live value) · Keys |
 | Key       | Key (frame, value, curve) · Belongs to (links back up) |
 
@@ -71,9 +75,10 @@ Every edit in the inspector goes through the document's undo history; dragging a
 records one undo step per drag, not one per frame.
 
 **Menu bar on top.** File, Edit, View and Help are the conventional home for commands
-that don't belong to one panel: file handling, undo/redo, deleting, panel visibility.
-Each menu item shows its keyboard shortcut, read from the same table the key handler
-uses (`src/ui/shortcuts.rs`), so the menus never disagree with the keys.
+that don't belong to one panel: file handling and export, undo/redo, adding clips and
+events, baking, deleting, panel visibility. Each menu item shows its keyboard
+shortcut, read from the same table the key handler uses (`src/ui/shortcuts.rs`), so
+the menus never disagree with the keys.
 
 **Status line at the very bottom.** One quiet line for the file path, an unsaved-changes
 marker, the last action's result (e.g. "Undid: Move clip") and the transport state. It

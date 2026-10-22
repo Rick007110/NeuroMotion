@@ -401,3 +401,201 @@ fn baking_the_physics_demo_turns_it_into_keys() {
     assert_eq!(content(&doc.project), content(&original));
     assert!(Simulation::is_needed(&doc.project));
 }
+
+fn run_simulation(project: &Project) -> crate::physics::Simulation {
+    let mut sim = crate::physics::Simulation::default();
+    sim.sync(1);
+    while !sim.advance(project, std::time::Instant::now() + std::time::Duration::from_secs(60)) {}
+    sim
+}
+
+fn body_position(project: &Project, sim: &crate::physics::Simulation, frame: i32, body: &str) -> glam::Vec3 {
+    let rig = project.characters[0].physics.as_ref().unwrap();
+    sim.frame(frame).unwrap()[0].as_ref().unwrap().bodies[rig.body_index(body).unwrap()].1
+}
+
+#[test]
+fn event_settings_read_back_what_they_write() {
+    use events::*;
+    let mut s = std::collections::BTreeMap::new();
+    for option in SimLevel::ALL {
+        set_level(&mut s, keys::PHYSICS_LEVEL, option);
+        assert_eq!(level(&s, keys::PHYSICS_LEVEL), Some(option));
+        assert_eq!(SimLevel::from_endorphin(option.endorphin_name()), Some(option));
+    }
+    set_number(&mut s, keys::STRENGTH, 0.25);
+    assert_eq!(s[keys::STRENGTH], "0.25");
+    set_vector(&mut s, keys::VELOCITY, glam::Vec3::new(0.4, 0.6, -3.5));
+    assert_eq!(s[keys::VELOCITY], "0.4, 0.6, -3.5");
+    assert_eq!(vector(&s, keys::VELOCITY), Some(glam::Vec3::new(0.4, 0.6, -3.5)));
+
+    let targets_in = vec![
+        BodyRef { character: "hero".into(), body: "Chest".into() },
+        BodyRef { character: "villain".into(), body: "Right Hand".into() },
+    ];
+    set_targets(&mut s, &targets_in);
+    assert_eq!(s[keys::TARGETS], "hero.MetaBodies.Chest, villain.MetaBodies.Right Hand");
+    assert_eq!(targets(&s), targets_in);
+    set_targets(&mut s, &[]);
+    assert!(!s.contains_key(keys::TARGETS));
+
+    for lock in LockType::ALL {
+        assert_eq!(LockType::from_endorphin(lock.endorphin_name()), Some(lock));
+    }
+    for (speed, heading, elevation) in [(3.0, 180.0, 10.0), (1.5, -90.0, -20.0), (7.0, 45.0, 60.0)] {
+        let (s2, h2, e2) = push_parts(push(speed, heading, elevation));
+        assert!((s2 - speed).abs() < 1e-4 && (h2 - heading).abs() < 1e-3 && (e2 - elevation).abs() < 1e-3);
+    }
+    // Heading 0 pushes along +Z, 90 along +X.
+    assert!(push(1.0, 0.0, 0.0).distance(glam::Vec3::Z) < 1e-6);
+    assert!(push(1.0, 90.0, 0.0).distance(glam::Vec3::X) < 1e-6);
+}
+
+#[test]
+fn new_clips_go_on_their_own_track_in_one_undo_step() {
+    let mut doc = Document::new(placeholder_project());
+    let original = doc.project.clone();
+    let character = doc.project.characters[0].id;
+    let clip = doc.add_new_clip(events::NewClip::Force, character, None, 30, None).unwrap();
+    let track = doc.project.clip(clip).unwrap().props.track;
+    assert_eq!(doc.project.track(track).unwrap().name, "Forces");
+    assert_eq!(doc.undo_depth(), 1);
+    // The next force joins that track instead of making another.
+    let second = doc.add_new_clip(events::NewClip::Force, character, None, 60, None).unwrap();
+    assert_eq!(doc.project.clip(second).unwrap().props.track, track);
+    // An explicit track wins.
+    let base = doc.project.tracks[0].id;
+    let third = doc.add_new_clip(events::NewClip::Motion, character, Some(base), 10, None).unwrap();
+    assert_eq!(doc.project.clip(third).unwrap().props.track, base);
+    assert!(doc.project.clip(third).unwrap().kind.is_motion());
+    for _ in 0..3 {
+        doc.undo();
+    }
+    assert_eq!(content(&doc.project), content(&original));
+}
+
+#[test]
+fn source_and_channel_edits_undo() {
+    let mut doc = Document::new(sample::physics_demo_project());
+    let push = doc.project.clips.iter().find(|c| c.props.name == "Shove").unwrap().clone();
+    let mut after = push.source.clone();
+    events::set_number(&mut after, events::keys::STRENGTH, 2.0);
+    // A drag folds into one entry.
+    doc.apply("Edit event settings", Edit::ClipSource { clip: push.id, before: push.source.clone(), after: after.clone() }, true);
+    let mut later = after.clone();
+    events::set_number(&mut later, events::keys::STRENGTH, 3.0);
+    doc.apply("Edit event settings", Edit::ClipSource { clip: push.id, before: after, after: later.clone() }, true);
+    doc.end_gesture();
+    assert_eq!(doc.undo_depth(), 1);
+    assert_eq!(doc.project.clip(push.id).unwrap().source, later);
+    doc.undo();
+    assert_eq!(doc.project.clip(push.id).unwrap().source, push.source);
+
+    let channels = vec![Channel { joint: "hips".into(), property: Property::RotX, keys: vec![] }];
+    doc.apply("Capture pose", Edit::ClipChannels { clip: push.id, before: vec![], after: channels.clone() }, false);
+    assert_eq!(doc.project.clip(push.id).unwrap().channels, channels);
+    doc.undo();
+    assert!(doc.project.clip(push.id).unwrap().channels.is_empty());
+}
+
+/// Rebuilding the physics demo's events in the editor gives exactly the same simulation,
+/// so the settings use the keys the simulation reads.
+#[test]
+fn editor_events_simulate_like_imported_ones() {
+    let demo = sample::physics_demo_project();
+    let mut doc = Document::new(placeholder_project());
+    doc.project.settings.range = demo.settings.range;
+    doc.project.clips.retain(|c| c.props.name != "Wave");
+    let character = doc.project.characters[0].id;
+    assert!(!crate::physics::Simulation::is_needed(&doc.project));
+
+    let simulate = doc.add_new_clip(events::NewClip::Simulation, character, None, 45, None).unwrap();
+    let push = doc.add_new_clip(events::NewClip::Force, character, None, 45, None).unwrap();
+    // Match the demo's shove: same velocity change, into the chest.
+    let before = doc.project.clip(push).unwrap().source.clone();
+    let mut after = before.clone();
+    events::set_vector(&mut after, events::keys::VELOCITY, glam::Vec3::new(0.4, 0.6, -3.5));
+    events::set_targets(&mut after, &[events::BodyRef { character: "character01".into(), body: "chest".into() }]);
+    doc.apply("Edit event settings", Edit::ClipSource { clip: push, before, after }, false);
+    assert_eq!(doc.project.clip(simulate).unwrap().source.get("physicsLevel").map(String::as_str), Some("FullPhysics"));
+
+    let (ours, theirs) = (run_simulation(&doc.project), run_simulation(&demo));
+    for frame in [44, 46, 80, 150] {
+        for body in ["hips", "chest", "head", "r_wrist"] {
+            let (a, b) = (body_position(&doc.project, &ours, frame, body), body_position(&demo, &theirs, frame, body));
+            assert!(a.distance(b) < 1e-5, "{body} differs at frame {frame}: {a} vs {b}");
+        }
+    }
+    assert!(body_position(&doc.project, &ours, 150, "chest").y < 0.6, "the push knocks the character down");
+}
+
+#[test]
+fn transition_brings_the_character_back_to_its_keys() {
+    let mut doc = Document::new(sample::physics_demo_project());
+    let character = doc.project.characters[0].id;
+    let transition = doc.add_new_clip(events::NewClip::Transition, character, None, 90, None).unwrap();
+    let end = doc.project.clip(transition).unwrap().props.end();
+    let sim = run_simulation(&doc.project);
+    let state = |f: i32| sim.frame(f).unwrap()[0].as_ref().unwrap().clone();
+    assert_eq!(state(80).level, SimLevel::Simulated);
+    assert_eq!(state(end + 5).level, SimLevel::Animated);
+    let skeleton = &doc.project.characters[0].skeleton;
+    let keys = world_transforms(skeleton, &doc.project.evaluate((end + 5) as f32)[0]);
+    for (a, b) in state(end + 5).joints.iter().zip(&keys) {
+        assert!(a.1.distance(b.1) < 1e-3, "back on the keys after the transition");
+    }
+}
+
+#[test]
+fn active_pose_holds_the_captured_pose() {
+    let project = placeholder_project();
+    let character = &project.characters[0];
+    let pose = world_transforms(&character.skeleton, &project.evaluate(120.0)[0]);
+    let channels = events::pose_channels(character, &pose);
+    assert_eq!(channels.len(), character.skeleton.joints.len() * 3);
+    assert!(channels.iter().all(|c| c.property.is_rotation() && c.keys.len() == 1));
+    // The channels rebuild the captured rotations.
+    let mut held = Pose::rest(character.skeleton.joints.len());
+    for c in &channels {
+        held.joints[character.skeleton.joint_index(&c.joint).unwrap()][c.property.index()] = c.keys[0].value;
+    }
+    let rebuilt = world_transforms(&character.skeleton, &held);
+    for (a, b) in rebuilt.iter().zip(&pose) {
+        assert!(a.0.angle_between(b.0) < 1e-3);
+    }
+
+    // In the demo, holding a standing pose keeps the chest higher than going limp.
+    let mut doc = Document::new(sample::physics_demo_project());
+    let limp = run_simulation(&doc.project);
+    let id = doc.project.characters[0].id;
+    let standing = world_transforms(&doc.project.characters[0].skeleton, &doc.project.evaluate(0.0)[0]);
+    let clip = doc.add_new_clip(events::NewClip::ActivePose, id, None, 45, Some(&standing)).unwrap();
+    let mut props = doc.project.clip(clip).unwrap().props.clone();
+    let before = props.clone();
+    props.duration = 105;
+    doc.apply("Edit clip", Edit::ClipProps { clip, before, after: props }, false);
+    let held = run_simulation(&doc.project);
+    let chest = |sim, f| body_position(&doc.project, sim, f, "chest");
+    assert_ne!(chest(&held, 100), chest(&limp, 100), "the active pose changes the simulation");
+}
+
+#[test]
+fn constraint_locks_a_body_in_place() {
+    let mut doc = Document::new(sample::physics_demo_project());
+    let id = doc.project.characters[0].id;
+    let lock = doc.add_new_clip(events::NewClip::Constraint, id, None, 50, None).unwrap();
+    let source = &doc.project.clip(lock).unwrap().source;
+    assert_eq!(source.get("lockType").map(String::as_str), Some("Lock"));
+    assert_eq!(source.get("targets").map(String::as_str), Some("character01.MetaBodies.hips"));
+    let mut props = doc.project.clip(lock).unwrap().props.clone();
+    let before = props.clone();
+    props.duration = 100;
+    doc.apply("Edit clip", Edit::ClipProps { clip: lock, before, after: props }, false);
+
+    let free = run_simulation(&sample::physics_demo_project());
+    let locked = run_simulation(&doc.project);
+    let hips = |sim, f| body_position(&doc.project, sim, f, "hips");
+    let drift = hips(&locked, 140).distance(hips(&locked, 51));
+    let fall = hips(&free, 140).distance(hips(&free, 51));
+    assert!(drift < 0.05 && fall > 0.2, "locked hips moved {drift} m, free hips {fall} m");
+}

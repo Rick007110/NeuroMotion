@@ -17,6 +17,9 @@ toward a modern physics engine that behaves like endorphin's and then goes furth
   scrubbing and transport, an inspector for whatever is selected, and a menu bar.
 - **Animation**: keyframed clips layered per track with weights and blend-in/out
   ramps; step, linear and smooth curves.
+- **Physics events**: add simulation switches, pushes, transitions back to animation,
+  active poses and constraints from the timeline (right-click a track) or Edit → Add,
+  and edit them in the inspector. Details: [docs/events.md](docs/events.md).
 - **Undo/redo** on the document model, with each drag recorded as one step.
 - **Projects** saved as readable JSON (`.nmproj`), with versioned migrations.
 - **Export**: File → Export writes a character's motion (simulated or keyed) as BVH or
@@ -51,7 +54,9 @@ behave the same way, then improved:
   automatically, in the background, whenever you edit); deterministic results;
   stiff muscles that can't explode; muscle targets kept inside joint limits.
 
-Try **File → Open Physics Demo** and press Space. Design and status:
+Try **File → Open Physics Demo** and press Space, or knock the placeholder character
+over yourself: right-click a track at some frame and add a Simulation event, then a
+Force event at the same frame. Design and status:
 [docs/physics-design.md](docs/physics-design.md); research notes:
 [docs/endorphin-physics.md](docs/endorphin-physics.md).
 
@@ -109,7 +114,8 @@ cargo test -- --ignored
 | `ui` | egui application shell, panels, menus, keyboard shortcuts (`ui/shortcuts.rs`) |
 
 Design notes: [docs/layout.md](docs/layout.md),
-[docs/project-format.md](docs/project-format.md), [docs/export.md](docs/export.md).
+[docs/project-format.md](docs/project-format.md), [docs/export.md](docs/export.md),
+[docs/events.md](docs/events.md).
 
 ## License
 

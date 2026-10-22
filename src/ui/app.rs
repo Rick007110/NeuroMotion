@@ -11,7 +11,8 @@ use super::export::{ExportDialog, Format};
 use super::selection::Selection;
 use super::timeline_panel::{self, TimelineState};
 use super::{inspector, shortcuts, theme};
-use crate::document::{CharacterId, ClipKind, ClipProps, Document, Project, SimLevel, sample};
+use crate::document::events::{self, NewClip};
+use crate::document::{CharacterId, ClipKind, ClipProps, Document, Edit, Project, SimLevel, TrackId, sample, world_transforms};
 use crate::io::{self, motion};
 use crate::physics::Simulation;
 use crate::timeline::Playback;
@@ -203,6 +204,8 @@ impl NeuroMotionApp {
                 }
                 None => self.status = "Select a clip to duplicate.".into(),
             },
+            Action::AddClip { kind, at } => self.add_clip(kind, at),
+            Action::CapturePose(clip) => self.capture_pose(clip),
             Action::BakeSimulation => self.bake_simulation(),
             Action::Delete => self.delete_selection(),
             Action::Deselect => self.selection = Selection::None,
@@ -368,6 +371,70 @@ impl NeuroMotionApp {
                 }
             }
             _ => self.status = "Select a track, clip or key to delete.".into(),
+        }
+    }
+
+    /// The character new clips go to: the selected one, else the first that isn't scenery.
+    pub(super) fn target_character(&self) -> Option<CharacterId> {
+        let project = &self.doc.project;
+        self.selected_character().or_else(|| {
+            let first = project.characters.iter().find(|c| c.kind != crate::document::CharacterKind::Environment);
+            first.or(project.characters.first()).map(|c| c.id)
+        })
+    }
+
+    /// Adds a clip on a track at a frame, or for the selected character at the playhead.
+    fn add_clip(&mut self, kind: NewClip, at: Option<(TrackId, i32)>) {
+        let project = &self.doc.project;
+        let (character, track, frame) = match at {
+            Some((track, frame)) => (project.track(track).map(|t| t.character), Some(track), frame),
+            None => {
+                let track = match self.selection {
+                    Selection::Track(id) => Some(id),
+                    _ => None,
+                };
+                (self.target_character(), track, self.playback.frame())
+            }
+        };
+        let Some(index) = character.and_then(|id| project.character_index(id)) else {
+            self.status = "There is no character to add a clip to.".into();
+            return;
+        };
+        let owner = &project.characters[index];
+        if kind.needs_physics() && owner.physics.is_none() {
+            self.status = format!("{} has no physics body, so a {} event would do nothing.", owner.name, kind.label().to_lowercase());
+            return;
+        }
+        let pose = (kind == NewClip::ActivePose).then(|| self.displayed_pose(index));
+        if let Some(clip) = self.doc.add_new_clip(kind, owner.id, track, frame, pose.as_deref()) {
+            self.selection = Selection::Clip(clip);
+            self.status = match kind {
+                NewClip::ActivePose => format!("Added an active pose holding the pose at frame {}.", self.playback.frame()),
+                _ => format!("Added {} at frame {frame}.", kind.label().to_lowercase()),
+            };
+        }
+    }
+
+    /// Replaces an active pose's held pose with the one at the playhead.
+    fn capture_pose(&mut self, clip: crate::document::ClipId) {
+        let project = &self.doc.project;
+        let Some(c) = project.clip(clip) else { return };
+        let Some(index) = project.clip_character(c).and_then(|ch| project.character_index(ch.id)) else { return };
+        let channels = events::pose_channels(&project.characters[index], &self.displayed_pose(index));
+        let edit = Edit::ClipChannels { clip, before: c.channels.clone(), after: channels };
+        self.doc.apply("Capture pose", edit, false);
+        self.status = format!("Captured the pose at frame {}.", self.playback.frame());
+    }
+
+    /// A character's joints as the viewport shows them at the playhead: simulated where
+    /// the simulation has reached, otherwise animated.
+    fn displayed_pose(&self, index: usize) -> Vec<(glam::Quat, glam::Vec3)> {
+        let project = &self.doc.project;
+        let frame = self.playback.frame();
+        let simulated = self.physics_on().then(|| self.simulation.frame(frame)).flatten();
+        match simulated.and_then(|f| f.get(index)).and_then(Option::as_ref) {
+            Some(state) => state.joints.clone(),
+            None => world_transforms(&project.characters[index].skeleton, &project.evaluate(frame as f32)[index]),
         }
     }
 
@@ -603,7 +670,7 @@ impl eframe::App for NeuroMotionApp {
                 .min_width(240.0)
                 .show(ctx, |ui| {
                     let playhead = self.playback.playhead() as f32;
-                    inspector::show(ui, &mut self.doc, &mut self.selection, playhead)
+                    inspector::show(ui, &mut self.doc, &mut self.selection, playhead, &mut actions)
                 });
         }
         let hud = self.hud_lines();

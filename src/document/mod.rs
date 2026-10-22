@@ -5,11 +5,13 @@
 //! * [`edit`] – undoable edits and the [`Document`] that records them
 //! * [`ops`] – higher-level edits (add/move/delete keys, clips and tracks; baking)
 //! * [`bake`] – turning world-space motion (the simulation's) back into keys
+//! * [`events`] – physics events (simulation, force, ...) and their typed settings
 //! * [`physics`] – bodies, joints, muscles and materials (data only)
 //! * [`sample`] – built-in placeholder rig and demo animation
 
 mod bake;
 mod edit;
+pub mod events;
 mod model;
 mod ops;
 pub mod physics;
