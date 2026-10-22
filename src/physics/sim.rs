@@ -650,23 +650,27 @@ fn step_frame(project: &Project, running: &mut Running) -> Frame {
                 set_muscles(&mut running.world, binding, &running.plans[ci], project, ci, &poses[ci], frame);
             } else {
                 // Move kinematic bodies onto the animation, with matching velocity.
-                for (bi, body) in binding.rig.bodies.iter().enumerate() {
-                    let (jr, jp) = targets[body.joint];
-                    let fr = Quat::from_array(body.frame.rotation).normalize();
-                    let (rot, pos) = ((jr * fr).normalize(), jp + jr * Vec3::from(body.frame.position));
-                    let b = &mut running.world.bodies[binding.first_body + bi];
-                    if pos.distance(b.position) > JUMP {
-                        // A cut, or snapping back from simulation: place it, don't fling it.
-                        (b.position, b.rotation) = (pos, rot);
-                        (b.linear_velocity, b.angular_velocity) = (Vec3::ZERO, Vec3::ZERO);
-                        continue;
+                let bodies = binding.first_body..binding.first_body + binding.rig.bodies.len();
+                let moves: Vec<(Quat, Vec3, Vec3, Vec3)> = rig_bodies(&binding.rig, &targets)
+                    .into_iter()
+                    .zip(&running.world.bodies[bodies.clone()])
+                    .map(|((rot, pos), b)| {
+                        let mut dq = rot * b.rotation.inverse();
+                        if dq.w < 0.0 {
+                            dq = -dq;
+                        }
+                        (rot, pos, (pos - b.position) / dt, dq.to_scaled_axis() / dt)
+                    })
+                    .collect();
+                // A cut, or snapping back from simulation: place the whole character, don't
+                // fling it (or what it holds or touches).
+                let jump = moves.iter().any(|&(.., v, w)| v.length() * dt > JUMP || w.length() * dt > JUMP_TURN);
+                for (b, (rot, pos, v, w)) in running.world.bodies[bodies].iter_mut().zip(moves) {
+                    if jump {
+                        (b.position, b.rotation, b.linear_velocity, b.angular_velocity) = (pos, rot, Vec3::ZERO, Vec3::ZERO);
+                    } else {
+                        (b.linear_velocity, b.angular_velocity) = (v, w);
                     }
-                    b.linear_velocity = (pos - b.position) / dt;
-                    let mut dq = rot * b.rotation.inverse();
-                    if dq.w < 0.0 {
-                        dq = -dq;
-                    }
-                    b.angular_velocity = dq.to_scaled_axis() / dt;
                 }
                 let joints = binding.first_joint..binding.first_joint + binding.rig.joints.len();
                 for joint in &mut running.world.joints[joints] {
@@ -695,9 +699,11 @@ fn step_frame(project: &Project, running: &mut Running) -> Frame {
     record(project, running, running.frame as f32)
 }
 
-/// A keyed body moving further than this in one physics tick (60 m/s at 120 Hz) is
-/// jumping, not moving, and is placed without velocity.
+/// A keyed body moving further (m) or turning further (rad) than this in one physics
+/// tick (60 m/s or 120 rad/s at 120 Hz) is jumping, not moving, and its character is
+/// placed without velocity.
 const JUMP: f32 = 0.5;
+const JUMP_TURN: f32 = 1.0;
 
 /// Points each simulated joint's muscle at this frame's target pose.
 fn set_muscles(world: &mut World, binding: &Binding, plan: &Plan, project: &Project, ci: usize, anim: &Pose, frame: i32) {

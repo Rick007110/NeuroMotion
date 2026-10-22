@@ -107,6 +107,13 @@ pub fn with_ground(shape: &Placed, height: f32, margin: f32, out: &mut Vec<Conta
             for (i, p) in rim(rotation, center, core).into_iter().enumerate() {
                 push(p, radius, i as u8);
             }
+            // A tilted or upright disc (a wheel) rests on the lowest point of its rim,
+            // which usually falls between the samples.
+            let axis = rotation * Vec3::Z;
+            let down = axis * axis.y - Vec3::Y;
+            if down.length() > 0.1 {
+                push(center + down.normalize() * core, radius, RIM_POINTS as u8);
+            }
         }
     }
 }
@@ -155,10 +162,15 @@ pub fn between(a: &Placed, b: &Placed, margin: f32, out: &mut Vec<Contact>) {
             disc_vs_box(rotation, center, core, radius, br, bc, half, margin, out);
         }
         (Form::Disc { rotation: ra, center: ca, core: ka, radius: rad_a }, Form::Disc { rotation: rb, center: cb, core: kb, radius: rad_b }) => {
-            // Each rim against the other disc.
+            // Each rim against the other disc, and the closest points of the two cores.
             for (i, p) in rim(rb, cb, kb).into_iter().enumerate() {
                 point_vs_disc(p, rad_b, ra, ca, ka, rad_a, margin, i as u8, out);
             }
+            let mut q = cb;
+            for _ in 0..6 {
+                q = closest_on_disc(closest_on_disc(q, ra, ca, ka), rb, cb, kb);
+            }
+            point_vs_disc(q, rad_b, ra, ca, ka, rad_a, margin, (2 * RIM_POINTS) as u8, out);
             let mut found = Vec::new();
             for (i, p) in rim(ra, ca, ka).into_iter().enumerate() {
                 point_vs_disc(p, rad_a, rb, cb, kb, rad_b, margin, (RIM_POINTS + i) as u8, &mut found);
@@ -221,8 +233,8 @@ fn swept_vs_disc(s0: Vec3, s1: Vec3, r: f32, rotation: Quat, center: Vec3, core:
     }
 }
 
-/// Box is A, disc is B: the box's corners against the disc, and the disc's rim and
-/// centre against the box.
+/// Box is A, disc is B: the box's corners against the disc, and the disc's rim, centre
+/// and point nearest the box against the box.
 #[allow(clippy::too_many_arguments)]
 fn disc_vs_box(rotation: Quat, center: Vec3, core: f32, radius: f32, box_rotation: Quat, box_center: Vec3, half: Vec3, margin: f32, out: &mut Vec<Contact>) {
     let mut found = Vec::new();
@@ -230,7 +242,14 @@ fn disc_vs_box(rotation: Quat, center: Vec3, core: f32, radius: f32, box_rotatio
         point_vs_disc(corner, 0.0, rotation, center, core, radius, margin, i as u8, &mut found);
     }
     out.extend(found.into_iter().map(|c| Contact { normal: -c.normal, ..c }));
-    let points = rim(rotation, center, core).into_iter().chain([center]);
+    // The disc point nearest the box, by alternating projections (both are convex):
+    // catches a box passing under the disc away from the rim samples and the centre.
+    let mut nearest = center;
+    for _ in 0..6 {
+        let local = box_rotation.inverse() * (nearest - box_center);
+        nearest = closest_on_disc(box_center + box_rotation * local.clamp(-half, half), rotation, center, core);
+    }
+    let points = rim(rotation, center, core).into_iter().chain([center, nearest]);
     for (i, p) in points.enumerate() {
         let mut one = Vec::new();
         swept_vs_box(p, p, radius, box_rotation, box_center, half, margin, &mut one);
@@ -581,14 +600,39 @@ mod tests {
         out.clear();
         between(&disc, &sphere(0.1, Vec3::new(2.15, 0.09, 0.0)), 0.02, &mut out);
         assert!(out.is_empty());
-        // A box foot on it touches at its corners; the disc lying on the ground touches
-        // around its rim.
+        // A box foot on it touches at its four bottom corners (and the disc point nearest
+        // it); the disc lying on the ground touches around its rim.
         out.clear();
         between(&disc, &cuboid([0.1, 0.06, 0.24], Quat::IDENTITY, Vec3::new(0.5, 0.025, 0.0)), 0.02, &mut out);
-        assert_eq!(out.len(), 4);
+        assert_eq!(out.len(), 5);
+        assert!(out.iter().all(|c| (c.normal - Vec3::Y).length() < 1e-4));
         out.clear();
         with_ground(&Placed { position: Vec3::new(0.0, 0.1, 0.0), ..disc }, 0.0, 0.01, &mut out);
         assert_eq!(out.len(), RIM_POINTS);
+    }
+
+    /// An upright disc (a wheel) rests on the lowest point of its rim, between samples,
+    /// and a disc lying across a long beam away from its centre still lands on it.
+    #[test]
+    fn discs_touch_between_rim_samples() {
+        let wheel = Placed {
+            geometry: Geometry::Cylinder { radius: 0.5, length: 0.1 },
+            rotation: Quat::from_rotation_y(0.3),
+            position: Vec3::new(0.0, 0.5, 0.0),
+        };
+        let mut out = Vec::new();
+        with_ground(&wheel, 0.0, 0.01, &mut out);
+        assert!(out.iter().any(|c| c.separation.abs() < 1e-4), "{out:?}");
+
+        let disc = Placed {
+            geometry: Geometry::Cylinder { radius: 2.0, length: 0.2 },
+            rotation: Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
+            position: Vec3::new(0.0, 0.09, 0.0),
+        };
+        let beam = cuboid([10.0, 0.2, 0.2], Quat::IDENTITY, Vec3::new(0.0, -0.1, 1.2));
+        out.clear();
+        between(&beam, &disc, 0.02, &mut out);
+        assert!(out.iter().any(|c| (c.normal - Vec3::Y).length() < 1e-4 && c.separation < 0.0), "{out:?}");
     }
 
     #[test]
