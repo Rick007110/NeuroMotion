@@ -3,10 +3,11 @@
 //! A `.nmproj` file is pretty-printed JSON: a small envelope (format tag + version)
 //! around the serialized [`Project`]. The version lets later builds migrate old files.
 //! [`open`] also accepts endorphin files, see [`endorphin`]. Motion leaves NeuroMotion
-//! through the exporters: [`bvh`] (and [`motion`], which they share).
+//! through the exporters: [`bvh`] and [`fbx`] (and [`motion`], which they share).
 
 pub mod bvh;
 pub mod endorphin;
+pub mod fbx;
 pub mod motion;
 
 use std::{fmt, fs, path::Path};

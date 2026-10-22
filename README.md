@@ -19,7 +19,8 @@ toward a modern physics engine that behaves like endorphin's and then goes furth
   ramps; step, linear and smooth curves.
 - **Undo/redo** on the document model, with each drag recorded as one step.
 - **Projects** saved as readable JSON (`.nmproj`), with versioned migrations.
-- **Export**: File → Export writes a character's motion (simulated or keyed) as BVH.
+- **Export**: File → Export writes a character's motion (simulated or keyed) as BVH or
+  FBX, checked against Blender's importers.
   **Edit → Bake Simulation** turns a character's simulation into ordinary keys.
   Details: [docs/export.md](docs/export.md).
 - **Opening endorphin files**:
@@ -85,6 +86,8 @@ Run the tests:
 ```bash
 cargo test
 ```
+
+To check exports in Blender, see [docs/export.md](docs/export.md#checking-exports-in-blender).
 
 If endorphin 2.5.2 is installed, the ignored tests import every file it ships with
 and simulate every sample scene. Set `ENDORPHIN_DIR` if it isn't in the default

@@ -15,6 +15,8 @@ use crate::physics::Simulation;
 /// One character's motion over the project range.
 pub struct Motion {
     pub fps: f32,
+    /// Timeline frame of `frames[0]` (the project range start).
+    pub start: i32,
     /// World rotation and position of every skeleton joint, one entry per frame.
     pub frames: Vec<Vec<(Quat, Vec3)>>,
     /// Whether the frames came from the simulation rather than the keys.
@@ -88,7 +90,7 @@ pub fn sample(project: &Project, character: usize, simulation: Option<&Simulatio
             }
         })
         .collect();
-    Motion { fps: project.settings.fps, frames, simulated }
+    Motion { fps: project.settings.fps, start: range.start, frames, simulated }
 }
 
 /// A joint's motion as exporters write it: full local rotations (rest included) as
@@ -175,4 +177,74 @@ pub fn export_names(skeleton: &SkeletonRef) -> Vec<String> {
             name
         })
         .collect()
+}
+
+/// Sample exports for checking in other tools. `cargo test -- --ignored export_samples`
+/// writes BVH and FBX files of the built-in projects (and of an endorphin scene, if
+/// `NEUROMOTION_SAMPLE_SCENE` names one) to `target/export-samples` (or
+/// `NEUROMOTION_EXPORT_DIR`), each with a `.json` of the joint positions it should
+/// produce. `tools/blender_check.py` imports them into Blender and compares.
+#[cfg(test)]
+mod samples {
+    use std::path::PathBuf;
+
+    use serde_json::json;
+
+    use super::*;
+    use crate::document::CharacterKind;
+    use crate::document::sample::{physics_demo_project, placeholder_project};
+    use crate::io::{bvh, fbx};
+
+    #[test]
+    #[ignore = "writes files for checking exports in Blender, see tools/blender_check.py"]
+    fn export_samples() {
+        let dir = std::env::var("NEUROMOTION_EXPORT_DIR").map_or_else(|_| PathBuf::from("target/export-samples"), PathBuf::from);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut projects = vec![
+            ("placeholder".to_owned(), placeholder_project()),
+            ("physics-demo".to_owned(), physics_demo_project()),
+            ("rotated-rest".to_owned(), crate::io::bvh::tests::rotated_rest_project()),
+        ];
+        if let Ok(scene) = std::env::var("NEUROMOTION_SAMPLE_SCENE") {
+            let path = PathBuf::from(&scene);
+            let name = path.file_stem().unwrap().to_string_lossy().replace(' ', "-");
+            projects.push((name, crate::io::endorphin::import_scene(&path).unwrap().project));
+        }
+        for (name, project) in projects {
+            let simulation = simulate(&project);
+            for (ci, character) in project.characters.iter().enumerate() {
+                if character.kind == CharacterKind::Environment || character.skeleton.joints.is_empty() {
+                    continue;
+                }
+                let motion = sample(&project, ci, simulation.as_ref());
+                let skeleton = &character.skeleton;
+                let base = format!("{name}-{}", character.name.replace(' ', "-"));
+                let file = |suffix: &str| dir.join(format!("{base}{suffix}"));
+                bvh::save(&file(".bvh"), skeleton, &motion, Units::Metres).unwrap();
+                bvh::save(&file("-cm.bvh"), skeleton, &motion, Units::Centimetres).unwrap();
+                fbx::save(&file(".fbx"), skeleton, &motion, Units::Metres, fbx::Encoding::Binary).unwrap();
+                fbx::save(&file("-cm.fbx"), skeleton, &motion, Units::Centimetres, fbx::Encoding::Binary).unwrap();
+                fbx::save(&file("-ascii.fbx"), skeleton, &motion, Units::Metres, fbx::Encoding::Ascii).unwrap();
+
+                // Joint positions (metres, Y up) at a few frames, by exported joint name.
+                let last = motion.frames.len() - 1;
+                let checked: Vec<usize> = [0, last / 4, last / 2, 3 * last / 4, last].into_iter().collect();
+                let names = export_names(skeleton);
+                let joints: serde_json::Map<String, serde_json::Value> = names
+                    .iter()
+                    .enumerate()
+                    .map(|(j, n)| (n.clone(), json!(checked.iter().map(|&f| motion.frames[f][j].1.to_array()).collect::<Vec<_>>())))
+                    .collect();
+                let reference = json!({
+                    "fps": motion.fps,
+                    "start": motion.start,
+                    "frames": checked,
+                    "simulated": motion.simulated,
+                    "joints": joints,
+                });
+                std::fs::write(file(".json"), serde_json::to_string_pretty(&reference).unwrap()).unwrap();
+                println!("wrote {}", file("").display());
+            }
+        }
+    }
 }
