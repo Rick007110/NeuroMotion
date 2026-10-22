@@ -48,6 +48,12 @@ fn cap_spring(stiffness: f32, damping: f32, inv_mass: f32) -> (f32, f32) {
     (max_stiffness, damping * scale)
 }
 const MAX_ANGULAR_SPEED: f32 = 100.0;
+/// Share of last substep's joint anchor impulses applied up front. With all of it, a
+/// chain of light links holding a heavy load (a rope or strap with a weight on it,
+/// hanging straight) breathes: every link stretches and squeezes together, more each
+/// time, until it explodes. Four fifths keeps it still. Locks and muscles start from
+/// their full impulse; locks need it to hold heavy loads up.
+const WARM_START: f32 = 0.8;
 const STATIC: usize = usize::MAX;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -239,7 +245,8 @@ pub struct World {
     /// `interactions[a * material_count + b]`.
     interactions: Vec<Interaction>,
     contact_cache: HashMap<(u32, u32, u8), [f32; 3]>,
-    lock_cache: HashMap<(usize, usize), [f32; 6]>,
+    /// Keyed by (anchor, body, how many earlier locks hold the same pair).
+    lock_cache: HashMap<(usize, usize, usize), [f32; 6]>,
     /// Whether each body was dynamic last substep, to spot switches.
     was_dynamic: Vec<bool>,
 }
@@ -339,6 +346,7 @@ struct LockBlock {
     /// Impulse caps (strength × h); 0 on free axes.
     bound: [f32; 6],
     impulse: [f32; 6],
+    key: (usize, usize, usize),
 }
 
 struct ContactRow {
@@ -569,7 +577,7 @@ impl World {
         }
         self.lock_cache.clear();
         for l in &locks {
-            self.lock_cache.insert((l.a, l.b), l.impulse);
+            self.lock_cache.insert(l.key, l.impulse);
         }
     }
 
@@ -583,7 +591,7 @@ impl World {
             let shapes = &self.shapes;
             let switched_shape = |s: u32| shapes.get(s as usize).and_then(|s| s.body).is_some_and(|b| switched[b]);
             self.contact_cache.retain(|&(a, b, _), _| !switched_shape(a) && !switched_shape(b));
-            self.lock_cache.retain(|&(a, b), _| !(a != STATIC && switched[a]) && !switched[b]);
+            self.lock_cache.retain(|&(a, b, _), _| !(a != STATIC && switched[a]) && !switched[b]);
             for joint in self.joints.iter_mut().filter(|j| switched[j.parent] || switched[j.child]) {
                 joint.warm_point = Vec3::ZERO;
                 joint.warm_muscle = [0.0; 3];
@@ -627,8 +635,14 @@ impl World {
             let rb = bb.rotation * joint.anchor_child;
             let (sa, sbb) = (sb[a], sb[b]);
             let (point_mass, k_pa, k_ap, angular_schur) = blocks(sa, sbb, ra, rb);
-            let still = |s: SolverBody, i: usize| if grounded[i] { SolverBody { inv_mass: 0.0, inv_i: Mat3::ZERO, ..s } } else { s };
-            let cap_schur = if grounded[a] || grounded[b] { blocks(still(sa, a), still(sbb, b), ra, rb).3 } else { angular_schur };
+            // Only when one side is grounded: a foot and toe both on the ground are still
+            // just a foot and a toe.
+            let still = |s: SolverBody| SolverBody { inv_mass: 0.0, inv_i: Mat3::ZERO, ..s };
+            let cap_schur = match (grounded[a], grounded[b]) {
+                (true, false) => blocks(still(sa), sbb, ra, rb).3,
+                (false, true) => blocks(sa, still(sbb), ra, rb).3,
+                _ => angular_schur,
+            };
             let mut rows = JointRows {
                 joint: index,
                 a,
@@ -637,7 +651,7 @@ impl World {
                 rb,
                 point_error: (bb.position + rb) - (ba.position + ra),
                 point_mass,
-                point_impulse: joint.warm_point,
+                point_impulse: joint.warm_point * WARM_START,
                 k_pa,
                 k_ap,
                 angular_schur,
@@ -817,9 +831,13 @@ impl World {
 
     fn prepare_locks(&self, sb: &[SolverBody], h: f32) -> Vec<LockBlock> {
         let mut out = Vec::new();
+        let mut seen: HashMap<(usize, usize), usize> = HashMap::new();
         for lock in &self.locks {
             let b = lock.body;
             let a = lock.anchor.unwrap_or(STATIC);
+            let nth = seen.entry((a, b)).or_default();
+            let key = (a, b, *nth);
+            *nth += 1;
             if !self.bodies[b].is_dynamic() && lock.anchor.is_none_or(|a| !self.bodies[a].is_dynamic()) {
                 continue;
             }
@@ -868,21 +886,33 @@ impl World {
                 }
             }
             let Some(inv_k) = invert6(k) else { continue };
-            let mut impulse = self.lock_cache.get(&(a, b)).copied().unwrap_or([0.0; 6]);
+            let mut impulse = self.lock_cache.get(&key).copied().unwrap_or([0.0; 6]);
             for (i, bound) in impulse.iter_mut().zip(bound) {
                 *i = i.clamp(-bound, bound);
             }
             let mut error = [0.0f32; 6];
             error[..3].copy_from_slice(&position_error.to_array());
             error[3..].copy_from_slice(&rotation_error.to_array());
-            out.push(LockBlock { a, b, ra, frame, error, inv_k, bound, impulse });
+            out.push(LockBlock { a, b, ra, frame, error, inv_k, bound, impulse, key });
         }
         out
     }
 
-    /// Body pairs held together by a lock; they don't collide with each other.
+    /// Body pairs held together by locks, which don't collide with each other: each
+    /// locked body and its anchor, and bodies locked to the same anchor (two hands
+    /// clasped around someone).
     fn locked_pairs(&self) -> Vec<(usize, usize)> {
-        self.locks.iter().filter_map(|l| Some((l.anchor?.min(l.body), l.anchor?.max(l.body)))).collect()
+        let pair = |a: usize, b: usize| (a.min(b), a.max(b));
+        let mut out: Vec<(usize, usize)> = self.locks.iter().filter_map(|l| Some(pair(l.anchor?, l.body))).collect();
+        for (i, l) in self.locks.iter().enumerate() {
+            let Some(anchor) = l.anchor else { continue };
+            for m in &self.locks[i + 1..] {
+                if m.anchor == Some(anchor) && m.body != l.body {
+                    out.push(pair(l.body, m.body));
+                }
+            }
+        }
+        out
     }
 
     // -----------------------------------------------------------------------------
@@ -1514,6 +1544,42 @@ mod chain_tests {
             }
         }
         fastest
+    }
+
+    /// Light links hanging straight down under a heavy load: every link stretches and
+    /// squeezes in step if joint warm starts overshoot.
+    #[test]
+    fn loaded_vertical_chain_stays_still() {
+        for load in [10.0, 80.0] {
+            let mut w = World::new(Vec3::new(0.0, -9.81, 0.0), ContactModel::ForceCapped);
+            w.set_materials(1, |_, _| Interaction { restitution: 0.0, friction: 100.0, adhesion: 0.0, softness: 0.0 });
+            let free = Limits { twist_min: -0.5, twist_max: 0.5, swing1: 1.2, swing2: 1.2 };
+            for k in 0..8usize {
+                let mass = if k == 7 { load } else { 0.1 };
+                let inertia = 0.4 * mass * 0.09 * 0.09;
+                w.bodies.push(Body {
+                    position: Vec3::new(0.0, 5.0 - 0.2 * k as f32, 0.0),
+                    rotation: Quat::IDENTITY,
+                    linear_velocity: Vec3::ZERO,
+                    angular_velocity: Vec3::ZERO,
+                    inv_mass: 1.0 / mass,
+                    inv_inertia: Vec3::splat(1.0 / inertia),
+                    motion: if k == 0 { Motion::Kinematic { momentum: 0.0 } } else { Motion::Dynamic },
+                    group: 0,
+                    parent: k.checked_sub(1),
+                });
+                if k > 0 {
+                    w.joints.push(Joint::new(k - 1, k, Vec3::new(0.0, -0.1, 0.0), Vec3::new(0.0, 0.1, 0.0), Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY, free, free, 0.0, 0.0));
+                }
+            }
+            let mut fastest = 0.0f32;
+            for _ in 0..360 {
+                w.step(1.0 / 120.0);
+                fastest = w.bodies.iter().map(|b| b.linear_velocity.length()).fold(fastest, f32::max);
+            }
+            let bottom = w.bodies[7].position.y;
+            assert!(fastest < 1.0 && (bottom - 3.6).abs() < 0.1, "load {load}: fastest {fastest}, bottom at {bottom}");
+        }
     }
 
     #[test]
