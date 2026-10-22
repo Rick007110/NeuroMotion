@@ -6,6 +6,8 @@
 
 use eframe::egui::{self, Color32, DragValue, Response, RichText, Slider, Ui};
 
+use super::actions::Action;
+use super::event_inspector;
 use super::selection::Selection;
 use super::theme::{self, grid, section};
 use crate::document::{CharacterId, ClipId, ClipKind, Document, Edit, Interp, SimLevel, TrackId};
@@ -15,25 +17,25 @@ const DANGER: Color32 = Color32::from_rgb(240, 130, 120);
 
 /// Collects how this frame's widget interactions should be recorded in the history.
 #[derive(Default)]
-struct Gesture {
+pub(super) struct Gesture {
     continuous: bool,
     finished: bool,
 }
 
 impl Gesture {
     /// Drag widgets: every step of a drag folds into one undo entry.
-    fn drag(&mut self, r: &Response) {
+    pub(super) fn drag(&mut self, r: &Response) {
         self.continuous |= r.dragged();
         self.finished |= r.drag_stopped();
     }
 
     /// Text fields: typing folds into one entry until focus leaves the field.
-    fn text(&mut self, r: &Response) {
+    pub(super) fn text(&mut self, r: &Response) {
         self.continuous |= r.has_focus();
         self.finished |= r.lost_focus();
     }
 
-    fn commit(self, doc: &mut Document, label: &str, edit: Option<Edit>) {
+    pub(super) fn commit(self, doc: &mut Document, label: &str, edit: Option<Edit>) {
         if let Some(edit) = edit {
             doc.apply(label, edit, self.continuous);
         }
@@ -43,14 +45,14 @@ impl Gesture {
     }
 }
 
-pub fn show(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, playhead: f32) {
+pub fn show(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, playhead: f32, actions: &mut Vec<Action>) {
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| match *selection {
             Selection::None => project_page(ui, doc, selection),
             Selection::Character(id) => character_page(ui, doc, selection, id),
             Selection::Track(id) => track_page(ui, doc, selection, id),
-            Selection::Clip(id) => clip_page(ui, doc, selection, id, playhead),
+            Selection::Clip(id) => clip_page(ui, doc, selection, id, playhead, actions),
             Selection::Channel { clip, channel } => {
                 channel_page(ui, doc, selection, clip, channel, playhead)
             }
@@ -245,7 +247,7 @@ fn track_page(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, id: Tr
     }
 }
 
-fn clip_page(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, id: ClipId, playhead: f32) {
+fn clip_page(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, id: ClipId, playhead: f32, actions: &mut Vec<Action>) {
     let Some(clip) = doc.project.clip(id) else { return };
     let before = clip.props.clone();
     let kind = clip.kind.clone();
@@ -324,7 +326,9 @@ fn clip_page(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, id: Cli
             ui.end_row();
         });
     });
-    section(ui, "Blending", |ui| {
+    // Events don't blend into the pose, so blending only applies to motion clips.
+    let blends = kind.is_motion();
+    blends.then(|| section(ui, "Blending", |ui| {
         grid(ui, "clip_blend", |ui| {
             ui.label("Weight");
             g.drag(&ui.add(Slider::new(&mut p.weight, 0.0..=1.0)));
@@ -339,15 +343,19 @@ fn clip_page(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, id: Cli
             ui.add(egui::ProgressBar::new(influence).text(format!("{:.0}%", influence * 100.0)));
             ui.end_row();
         });
-    });
+    }));
     p.blend_in = p.blend_in.min(p.duration);
     p.blend_out = p.blend_out.min(p.duration);
     let edit = (p != before).then(|| Edit::ClipProps { clip: id, before, after: p });
     g.commit(doc, "Edit clip", edit);
 
+    if let ClipKind::Event { event } = &kind {
+        event_inspector::show(ui, doc, id, event, actions);
+        return;
+    }
     if !source.is_empty() {
         section(ui, "Imported settings", |ui| {
-            ui.weak("Kept from the source file for the physics system; not simulated yet.");
+            ui.weak("Kept from the imported file.");
             egui::Grid::new("clip_source").striped(true).num_columns(2).show(ui, |ui| {
                 for (key, value) in &source {
                     ui.label(key);
@@ -356,9 +364,6 @@ fn clip_page(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, id: Cli
                 }
             });
         });
-    }
-    if !kind.is_motion() {
-        return;
     }
     section(ui, "Channels", |ui| {
         for (i, (label, keys)) in channels.iter().enumerate() {

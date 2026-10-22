@@ -12,6 +12,7 @@ use eframe::egui::{
 
 use super::actions::Action;
 use super::icons::{self, Icon};
+use super::menu::add_clip_items;
 use super::selection::Selection;
 use super::shortcuts;
 use super::theme;
@@ -33,6 +34,8 @@ pub struct TimelineState {
     last_width: f32,
     scroll_y: f32,
     drag: Option<Drag>,
+    /// Timeline frame under the pointer when a lane's context menu opened.
+    menu_frame: i32,
 }
 
 impl Default for TimelineState {
@@ -44,6 +47,7 @@ impl Default for TimelineState {
             last_width: 0.0,
             scroll_y: 0.0,
             drag: None,
+            menu_frame: 0,
         }
     }
 }
@@ -159,8 +163,19 @@ pub fn show(
                 if lane_response.clicked() {
                     *selection = Selection::None;
                 }
-                track_header(ui, &header_painter, header.intersect(body), header, doc, selection, index, id);
-                track_lane(ui, &lane_painter, lane, lanes, &view, lanes_left, state, doc, selection, index, id);
+                // Right-click: add a clip where the pointer is. The playhead moves there
+                // too, so an active pose captures the pose at its own start.
+                if lane_response.secondary_clicked() {
+                    if let Some(pos) = lane_response.interact_pointer_pos() {
+                        state.menu_frame = view.x_to_frame(pos.x, lanes_left).round() as i32;
+                        playback.pause();
+                        playback.seek(state.menu_frame as f64, range);
+                    }
+                }
+                let frame = state.menu_frame;
+                lane_response.context_menu(|ui| track_menu(ui, doc, selection, actions, id, Some(frame)));
+                track_header(ui, &header_painter, header.intersect(body), header, doc, selection, actions, index, id);
+                track_lane(ui, &lane_painter, lane, lanes, &view, lanes_left, state, doc, selection, actions, index, id);
             }
             Row::Channel { clip, channel } => {
                 lane_painter.rect_filled(lane, 0.0, theme::CHANNEL_BG);
@@ -319,22 +334,56 @@ fn character_header(
     painter: &Painter,
     visible: Rect,
     header: Rect,
-    doc: &Document,
+    doc: &mut Document,
     selection: &mut Selection,
     id: CharacterId,
 ) {
     let Some(character) = doc.project.character(id) else { return };
     let selected = *selection == Selection::Character(id);
+    let title = format!("{}  ·  {}", character.name, character.kind.label().to_lowercase());
     painter.rect_filled(header, 0.0, if selected { theme::ACCENT.gamma_multiply(0.25) } else { theme::CHARACTER_BG });
     painter.text(
         pos2(header.left() + 8.0, header.center().y),
         Align2::LEFT_CENTER,
-        format!("{}  ·  {}", character.name, character.kind.label().to_lowercase()),
+        title,
         FontId::proportional(11.5),
         theme::ACCENT,
     );
-    if ui.interact(visible, ui.id().with(("character_header", id)), Sense::click()).clicked() {
+    let response = ui.interact(visible, ui.id().with(("character_header", id)), Sense::click());
+    if response.clicked() {
         *selection = Selection::Character(id);
+    }
+    response.context_menu(|ui| {
+        if ui.button("Add Track").clicked() {
+            *selection = Selection::Track(add_track(doc, id));
+            ui.close_menu();
+        }
+    });
+}
+
+/// A new top track for a character, named after how many it has.
+fn add_track(doc: &mut Document, character: CharacterId) -> TrackId {
+    let name = format!("Track {}", doc.project.tracks_of(character).count() + 1);
+    doc.add_track(character, &name)
+}
+
+/// Right-click menu of a track: add a clip of any kind at `frame` (if given), add a
+/// track, delete this one.
+fn track_menu(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, actions: &mut Vec<Action>, track: TrackId, frame: Option<i32>) {
+    let Some(character) = doc.project.track(track).map(|t| t.character) else { return };
+    if let Some(frame) = frame {
+        ui.weak(format!("Add at frame {frame}"));
+        add_clip_items(ui, actions, doc.project.character(character), Some((track, frame)));
+        ui.separator();
+    }
+    if ui.button("Add Track").clicked() {
+        *selection = Selection::Track(add_track(doc, character));
+        ui.close_menu();
+    }
+    if ui.button("Delete Track").clicked() {
+        *selection = Selection::Track(track);
+        actions.push(Action::Delete);
+        ui.close_menu();
     }
 }
 
@@ -346,6 +395,7 @@ fn track_header(
     header: Rect,
     doc: &mut Document,
     selection: &mut Selection,
+    actions: &mut Vec<Action>,
     index: usize,
     id: TrackId,
 ) {
@@ -380,6 +430,7 @@ fn track_header(
     } else if header_response.clicked() {
         *selection = Selection::Track(id);
     }
+    header_response.context_menu(|ui| track_menu(ui, doc, selection, actions, id, None));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -393,6 +444,7 @@ fn track_lane(
     state: &mut TimelineState,
     doc: &mut Document,
     selection: &mut Selection,
+    actions: &mut Vec<Action>,
     track_index: usize,
     track: TrackId,
 ) {
@@ -475,6 +527,24 @@ fn track_lane(
             state.drag = None;
             doc.end_gesture();
         }
+        response.context_menu(|ui| {
+            if ui.button("Duplicate Clip").clicked() {
+                *selection = Selection::Clip(id);
+                actions.push(Action::DuplicateClip);
+                ui.close_menu();
+            }
+            if ui.button(if props.enabled { "Disable Clip" } else { "Enable Clip" }).clicked() {
+                let after = ClipProps { enabled: !props.enabled, ..props.clone() };
+                let label = if after.enabled { "Enable clip" } else { "Disable clip" };
+                doc.apply(label, Edit::ClipProps { clip: id, before: props.clone(), after }, false);
+                ui.close_menu();
+            }
+            if ui.button("Delete Clip").clicked() {
+                *selection = Selection::Clip(id);
+                actions.push(Action::Delete);
+                ui.close_menu();
+            }
+        });
     }
 }
 

@@ -7,6 +7,7 @@ use glam::{Quat, Vec3};
 
 use super::bake::bake_channels;
 use super::edit::{Document, Edit};
+use super::events::{self, NewClip};
 use super::model::{CharacterId, Channel, Clip, ClipId, ClipKind, ClipProps, Interp, Keyframe, Track, TrackId};
 use super::physics::SimLevel;
 
@@ -205,6 +206,57 @@ impl Document {
         edits.push(Edit::InsertClip { index: self.project.clips.len(), clip });
         self.apply("Bake simulation", Edit::Batch(edits), false);
         Some((track, id))
+    }
+
+    /// Adds a new clip of `kind` for `character` at timeline `frame`, with default
+    /// settings (see [`events::template`]); `pose` is what an active pose holds. It goes
+    /// on `track`, or else on the character's track for that kind of clip, which is
+    /// created if needed. One undo step. Returns the clip's id.
+    pub fn add_new_clip(
+        &mut self,
+        kind: NewClip,
+        character: CharacterId,
+        track: Option<TrackId>,
+        frame: i32,
+        pose: Option<&[(Quat, Vec3)]>,
+    ) -> Option<ClipId> {
+        let project = &self.project;
+        let owner = project.character(character)?;
+        let template = events::template(kind, project, owner, pose);
+        let mut edits = Vec::new();
+        let track = match track.filter(|t| project.track(*t).is_some_and(|t| t.character == character)) {
+            Some(track) => track,
+            None => match project.tracks_of(character).filter(|t| t.name == kind.track_name()).last() {
+                Some(existing) => existing.id,
+                None => {
+                    let insert = self.insert_track_edit(character, kind.track_name());
+                    let Edit::InsertTrack { track: Track { id, .. }, .. } = &insert else { unreachable!() };
+                    let id = *id;
+                    edits.push(insert);
+                    id
+                }
+            },
+        };
+        let clip = Clip {
+            id: self.project.alloc_id(),
+            props: ClipProps {
+                name: template.name,
+                track,
+                start: frame,
+                duration: template.duration,
+                blend_in: 0,
+                blend_out: 0,
+                weight: 1.0,
+                enabled: true,
+            },
+            kind: template.kind,
+            channels: template.channels,
+            source: template.source,
+        };
+        let id = clip.id;
+        edits.push(Edit::InsertClip { index: self.project.clips.len(), clip });
+        self.apply(&format!("Add {}", kind.label().to_lowercase()), Edit::Batch(edits), false);
+        Some(id)
     }
 
     /// An edit inserting a new track right after the character's last one.

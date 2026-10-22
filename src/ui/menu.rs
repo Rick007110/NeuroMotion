@@ -6,6 +6,8 @@ use super::actions::Action;
 use super::app::NeuroMotionApp;
 use super::selection::Selection;
 use super::shortcuts;
+use crate::document::events::NewClip;
+use crate::document::{Character, TrackId};
 
 impl NeuroMotionApp {
     pub(super) fn menu_bar(&mut self, ui: &mut Ui, actions: &mut Vec<Action>) {
@@ -34,6 +36,10 @@ impl NeuroMotionApp {
                 item(ui, actions, Action::Redo, &redo, self.doc.can_redo());
                 ui.separator();
                 item(ui, actions, Action::AddKey, "Add Key at Playhead", self.selection.channel().is_some());
+                ui.menu_button("Add", |ui| {
+                    let character = self.target_character().and_then(|id| self.doc.project.character(id));
+                    add_clip_items(ui, actions, character, None);
+                });
                 item(ui, actions, Action::DuplicateClip, "Duplicate Clip", self.selection.clip().is_some());
                 item(ui, actions, Action::BakeSimulation, "Bake Simulation", self.can_bake());
                 item(ui, actions, Action::Delete, "Delete", self.selection.is_deletable());
@@ -57,6 +63,36 @@ impl NeuroMotionApp {
                 item(ui, actions, Action::ShowAbout, "About NeuroMotion", true);
             });
         });
+    }
+}
+
+/// One entry per kind of clip, for `character` (none: all disabled). `at` places the
+/// clip on a track at a frame; `None` uses the selection and the playhead.
+pub(super) fn add_clip_items(ui: &mut Ui, actions: &mut Vec<Action>, character: Option<&Character>, at: Option<(TrackId, i32)>) {
+    for kind in NewClip::ALL {
+        if kind == NewClip::Simulation {
+            ui.separator();
+        }
+        let rigged = character.is_some_and(|c| c.physics.is_some());
+        let enabled = character.is_some() && (rigged || !kind.needs_physics());
+        let label = match kind {
+            NewClip::Motion => "Empty Motion Clip",
+            NewClip::Simulation => "Simulation Event",
+            NewClip::Force => "Force Event",
+            NewClip::Transition => "Transition Event",
+            NewClip::ActivePose => "Active Pose Event",
+            NewClip::Constraint => "Constraint Event",
+        };
+        let response = ui.add_enabled(enabled, Button::new(label));
+        let response = if enabled {
+            response.on_hover_text(kind.description())
+        } else {
+            response.on_disabled_hover_text("This character has no physics body")
+        };
+        if response.clicked() {
+            actions.push(Action::AddClip { kind, at });
+            ui.close_menu();
+        }
     }
 }
 
