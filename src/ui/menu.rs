@@ -18,6 +18,7 @@ impl NeuroMotionApp {
                 item(ui, actions, Action::ImportPose, "Import Pose (.nma)…", true);
                 ui.menu_button("Export", |ui| {
                     item(ui, actions, Action::ExportBvh, "BVH…", true);
+                    item(ui, actions, Action::ExportFbx, "FBX…", true);
                 });
                 ui.separator();
                 item(ui, actions, Action::SaveProject, "Save", true);

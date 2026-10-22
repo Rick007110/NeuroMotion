@@ -8,25 +8,29 @@ use eframe::egui::{self, Align2, RichText};
 use super::app::NeuroMotionApp;
 use super::theme::grid;
 use crate::document::{CharacterId, CharacterKind};
-use crate::io::motion::{self, Units};
 use crate::io::bvh;
+use crate::io::fbx::{self, Encoding};
+use crate::io::motion::{self, Units};
 use crate::physics::Simulation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
     Bvh,
+    Fbx,
 }
 
 impl Format {
     fn label(self) -> &'static str {
         match self {
             Format::Bvh => "BVH",
+            Format::Fbx => "FBX",
         }
     }
 
     fn extension(self) -> &'static str {
         match self {
             Format::Bvh => bvh::FILE_EXTENSION,
+            Format::Fbx => fbx::FILE_EXTENSION,
         }
     }
 }
@@ -35,6 +39,7 @@ pub struct ExportDialog {
     format: Format,
     character: CharacterId,
     units: Units,
+    encoding: Encoding,
 }
 
 impl NeuroMotionApp {
@@ -51,8 +56,9 @@ impl NeuroMotionApp {
             self.status = "There is no character to export.".into();
             return;
         };
-        let units = self.export.as_ref().map_or(Units::default(), |d| d.units);
-        self.export = Some(ExportDialog { format, character, units });
+        // Remember the last choices while the app runs.
+        let (units, encoding) = self.export.as_ref().map_or_else(Default::default, |d| (d.units, d.encoding));
+        self.export = Some(ExportDialog { format, character, units, encoding });
     }
 
     pub(super) fn export_window(&mut self, ctx: &egui::Context) {
@@ -93,6 +99,15 @@ impl NeuroMotionApp {
                         }
                     });
                     ui.end_row();
+                    if dialog.format == Format::Fbx {
+                        ui.label("Encoding");
+                        egui::ComboBox::from_id_salt("export_encoding").selected_text(dialog.encoding.label()).show_ui(ui, |ui| {
+                            for encoding in Encoding::ALL {
+                                ui.selectable_value(&mut dialog.encoding, encoding, encoding.label());
+                            }
+                        });
+                        ui.end_row();
+                    }
                 });
                 ui.add_space(6.0);
                 ui.weak("The project's frame range and frame rate are used; change them under Project.");
@@ -112,7 +127,7 @@ impl NeuroMotionApp {
     /// Asks where to save, then writes the file.
     fn export_file(&mut self) {
         let Some(dialog) = &self.export else { return };
-        let (format, units) = (dialog.format, dialog.units);
+        let (format, units, encoding) = (dialog.format, dialog.units, dialog.encoding);
         let project = &self.doc.project;
         let Some(index) = project.character_index(dialog.character) else { return };
         let character = &project.characters[index];
@@ -136,6 +151,7 @@ impl NeuroMotionApp {
         let motion = motion::sample(project, index, simulation);
         let result = match format {
             Format::Bvh => bvh::save(&path, &character.skeleton, &motion, units),
+            Format::Fbx => fbx::save(&path, &character.skeleton, &motion, units, encoding),
         };
         self.status = match result {
             Ok(()) => format!(

@@ -174,6 +174,7 @@ impl NeuroMotionApp {
             },
             Action::ImportPose => self.import_pose(None),
             Action::ExportBvh => self.open_export(Format::Bvh),
+            Action::ExportFbx => self.open_export(Format::Fbx),
             Action::SaveProject => self.save(false),
             Action::SaveProjectAs => self.save(true),
             Action::Quit => {

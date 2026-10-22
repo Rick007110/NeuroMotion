@@ -1,6 +1,6 @@
 # Exporting motion
 
-**File → Export** writes one character's motion to a file other tools can read. A small
+**File → Export** writes one character's motion as BVH or FBX for other tools. A small
 window asks which character (the selected one by default) and which length unit; the
 frame range and frame rate are the project's (Project in the inspector).
 
@@ -38,6 +38,46 @@ File → Import → Motion Capture (.bvh). Keep **Scale** at 1 for a metres expo
 defaults for Forward and Up (`-Z`, `Y`) turn NeuroMotion's Y-up space into Blender's
 Z-up space.
 
+## FBX (`.fbx`)
+
+FBX 7.4 (FBX 2014/2015), readable by Blender, Maya, MotionBuilder, 3ds Max, Unity and
+Unreal. The window offers two encodings:
+
+- **Binary** (default). Blender's FBX importer only reads binary files.
+- **ASCII**, the same content as readable text, for diffing or debugging.
+
+| Part | What NeuroMotion writes |
+|---|---|
+| Skeleton | One `LimbNode` model (with a `Skeleton` node attribute) per joint, parented like the skeleton. Each model's static transform is the joint's **rest pose** (rest offset and rest rotation), so importers show the character's own rest pose. |
+| Animation | One take ("Take 001") with one layer. Every joint has a rotation curve per axis (`Lcl Rotation`, full local rotation in degrees, one linear key per frame at the frame's time); roots, and joints whose offset is animated, also have translation curves. |
+| Rotation order | Per joint, as for BVH, written as the model's `RotationOrder` with `RotationActive` on (without it, importers ignore the order). |
+| Axes and units | Declared in `GlobalSettings`: Y up, Z front, X across (NeuroMotion's space), and `UnitScaleFactor` (centimetres per unit: 100 for a metres export, 1 for centimetres), so importers scale and rotate it into their own conventions. Either unit imports at the right size. |
+| Frame rate | `TimeMode` for standard rates (24, 25, 30, 48, 50, 60, ...), otherwise a custom rate. |
+
+### Opening in Blender
+
+File → Import → FBX (.fbx) with the default options. Blender shifts imported
+animation by one frame by default (**Animation Offset** = 1), so the project's frame 0
+lands on Blender's frame 1.
+
+## Checking exports in Blender
+
+`tools/blender_check.py` imports exports into Blender and checks every joint against
+the positions NeuroMotion computed:
+
+```bash
+cargo test --release -- --ignored export_samples
+blender --background --python tools/blender_check.py -- target/export-samples
+```
+
+The first command writes BVH (metres and centimetres) and binary FBX (metres and
+centimetres) files of the placeholder project, the physics demo and a skeleton with
+rotated rest frames, plus a `.json` of expected joint positions for each, to
+`target/export-samples`. Set `NEUROMOTION_SAMPLE_SCENE` to an endorphin `.ens` file to
+also export every character of that scene (simulated). With Blender 5.2 all of them
+match to within 0.15 mm; the physics demo's residual is the simulation's own joint
+stretch. The script also runs with Blender's Python module (`pip install bpy`).
+
 ## Baking the simulation to keys
 
 **Edit → Bake Simulation** (with a character, or one of its tracks or clips, selected)
@@ -60,11 +100,13 @@ pushing them around, set its **Starts as** level (character inspector, Physics) 
 
 ## Tests
 
-`src/io/bvh.rs` exports the placeholder project, the physics demo and a hand-made
-skeleton with rotated rest frames (one joint sitting exactly at XYZ gimbal lock),
-reads each file back with an independent parser and checks forward-kinematics joint
-positions against the source. Errors are under 0.001 mm for keys and under 0.5 mm for
-the simulation (the simulation's tiny joint stretch is the difference).
+`src/io/bvh.rs` and `src/io/fbx.rs` export the placeholder project, the physics demo
+and a hand-made skeleton with rotated rest frames (one joint sitting exactly at XYZ
+gimbal lock), read each file back with independent readers (BVH; binary FBX, checking
+every record offset and the footer; ASCII FBX, which must say exactly what the binary
+says) and check forward-kinematics joint positions against the source at every frame.
+Errors are under 0.001 mm for keys and under 0.5 mm for the simulation (the
+simulation's tiny joint stretch is the difference).
 
 `src/document/tests.rs` bakes the placeholder animation and the physics demo's
 simulation, checks the keys alone reproduce every joint within 0.1 mm (keys) and 2 mm
