@@ -642,6 +642,12 @@ fn step_frame(project: &Project, running: &mut Running) -> Frame {
                     let fr = Quat::from_array(body.frame.rotation).normalize();
                     let (rot, pos) = ((jr * fr).normalize(), jp + jr * Vec3::from(body.frame.position));
                     let b = &mut running.world.bodies[binding.first_body + bi];
+                    if pos.distance(b.position) > JUMP {
+                        // A cut, or snapping back from simulation: place it, don't fling it.
+                        (b.position, b.rotation) = (pos, rot);
+                        (b.linear_velocity, b.angular_velocity) = (Vec3::ZERO, Vec3::ZERO);
+                        continue;
+                    }
                     b.linear_velocity = (pos - b.position) / dt;
                     let mut dq = rot * b.rotation.inverse();
                     if dq.w < 0.0 {
@@ -675,6 +681,10 @@ fn step_frame(project: &Project, running: &mut Running) -> Frame {
     running.frame += 1;
     record(project, running, running.frame as f32)
 }
+
+/// A keyed body moving further than this in one physics tick (60 m/s at 120 Hz) is
+/// jumping, not moving, and is placed without velocity.
+const JUMP: f32 = 0.5;
 
 /// Points each simulated joint's muscle at this frame's target pose.
 fn set_muscles(world: &mut World, binding: &Binding, plan: &Plan, project: &Project, ci: usize, anim: &Pose, frame: i32) {

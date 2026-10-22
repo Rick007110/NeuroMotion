@@ -781,6 +781,20 @@ mod tests {
         check(p);
     }
 
+    /// An animation cut moves a keyed character 1 m in one frame. The stick joined to its
+    /// hand catches up (lock corrections are capped at 3 m/s) instead of being flung.
+    #[test]
+    fn animation_cut_does_not_fling_what_it_holds() {
+        let mut p = bendy_stick();
+        let holder = p.characters.iter().find(|c| c.name == "holder").unwrap().id;
+        let mut cut = channel("hips", Property::PosX, &[(0, 0.0), (60, 1.0)]);
+        cut.keys[0].interp = Interp::Step;
+        motion(&mut p, holder, "Cut", 0, 120, true, vec![cut]);
+        let report = sweep(&p);
+        println!("Cut              {report}");
+        assert!(!report.nan && report.fastest < 40.0 && report.stretch < 0.1, "{report}");
+    }
+
     /// endorphin's Car Hit stretched a joint by 6 cm. The stand-in's character takes the
     /// hit within limits, so this guards against regressions rather than reproducing it.
     #[test]
