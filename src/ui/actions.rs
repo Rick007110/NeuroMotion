@@ -1,6 +1,9 @@
 //! Every user command the shell understands. Menus, toolbar buttons and keyboard
 //! shortcuts all produce these, and the app runs them in one place.
 
+use crate::document::events::NewClip;
+use crate::document::{ClipId, TrackId};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     NewProject,
@@ -8,6 +11,8 @@ pub enum Action {
     OpenDemo,
     OpenPhysicsDemo,
     ImportPose,
+    ExportBvh,
+    ExportFbx,
     SaveProject,
     SaveProjectAs,
     Quit,
@@ -15,6 +20,12 @@ pub enum Action {
     Redo,
     AddKey,
     DuplicateClip,
+    /// Adds a clip on a given track at a given frame, or (`None`) for the selected
+    /// character at the playhead.
+    AddClip { kind: NewClip, at: Option<(TrackId, i32)> },
+    /// Re-records an active pose event's pose from the playhead.
+    CapturePose(ClipId),
+    BakeSimulation,
     Delete,
     Deselect,
     PlayPause,
@@ -40,6 +51,8 @@ impl Action {
             Action::OpenDemo => "Open placeholder demo",
             Action::OpenPhysicsDemo => "Open physics demo",
             Action::ImportPose => "Import pose",
+            Action::ExportBvh => "Export BVH",
+            Action::ExportFbx => "Export FBX",
             Action::SaveProject => "Save",
             Action::SaveProjectAs => "Save as",
             Action::Quit => "Exit",
@@ -47,6 +60,9 @@ impl Action {
             Action::Redo => "Redo",
             Action::AddKey => "Add key at playhead",
             Action::DuplicateClip => "Duplicate clip",
+            Action::AddClip { .. } => "Add clip",
+            Action::CapturePose(_) => "Capture pose",
+            Action::BakeSimulation => "Bake simulation to keys",
             Action::Delete => "Delete selection",
             Action::Deselect => "Select none",
             Action::PlayPause => "Play / pause",

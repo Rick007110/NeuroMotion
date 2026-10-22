@@ -3,7 +3,7 @@
 //! Module map:
 //! * `document` – project data model, pose evaluation, undo/redo (no UI)
 //! * `timeline` – transport/playhead and frame↔pixel mapping (no drawing)
-//! * `io`       – project files and endorphin import
+//! * `io`       – project files, endorphin import, motion export
 //! * `physics`  – rigid-body simulation of characters
 //! * `viewport` – camera and character preview drawing
 //! * `ui`       – the egui application shell and panels
