@@ -36,6 +36,8 @@ Each tick (1/rate s) runs 4 substeps. Each substep:
    - twist and swing limits (one-sided rows; springs in the soft zone);
    - muscles;
    - locks (one 6-row block each, each row capped at its strength);
+   - bodies that locks tie together, with the joints between them, solved directly as
+     one system (lesson 12);
    - contact normals, as *soft* constraints (frequency and damping ratio);
    - friction.
 5. Integrate positions.
@@ -148,8 +150,47 @@ A review of these changes turned up a tenth, older than all of them:
     their full warm start: cutting it for locks made loaded ropes sag. Extreme ratios
     still stretch while swinging: a 0.1 kg link locked at the top of seven, with 80 kg
     hanging from them and swung at 0.5-2 m/s, stretches 12-19 cm (2 cm with a keyed top;
-    a 0.15 kg-link rope swinging a 75 kg character stays at 2 cm). An exact tree solve
-    for joint anchors would remove the problem at its root.
+    a 0.15 kg-link rope swinging a 75 kg character stays at 2 cm). A rope locked at
+    the top is now also solved directly (lesson 12); chains without a lock still
+    rely on the four fifths.
+
+Simulating the real scenes with props being props added two more:
+
+11. **The environment is simulated too; only its massless pieces are fixed.** Scenery
+    used to start collision-only, as if endorphin keyed it. The files say otherwise:
+    every scene's background has no inertial body, but every prop has one, scenes
+    lock or join props to hold them in place, and Hands Reach and Look At switches its
+    environment to NoPhysics so its reach target (a prop) doesn't fall. So the
+    environment starts simulated like everything else, bodies without mass stay where
+    they are, and props are real objects: a trapeze bar swings from its rope, a gun
+    joined to both hands is carried by them. Invisible props without collision shapes
+    fall through everything, in endorphin too, so the sweep ignores their height.
+12. **Bodies held together by locks are solved directly, as one system.** With props
+    simulated, sequential impulses met the cases they handle worst. A trapeze bar
+    joined to a rope end hinged 6 m away swings on a lever hundreds of times the rope
+    end's own inertia: it shook itself to 177 m/s instead of swinging at 7.6. A 549 kg
+    gun (Walk With Gun sets the prop's density to 15) joined to both hands closes a
+    loop through the arms with a thousand-to-one mass ratio: the arms came apart.
+    Now, each iteration, after the per-joint and per-lock passes, every group of
+    moving bodies that locks tie together is solved as one linear system: the locks'
+    held axes and the anchors of every joint between those bodies. The system is
+    factored once per substep with a sparse Cholesky factorisation (joints ordered
+    leaf first, so a skeleton adds no fill-in). A lock axis that would pass its
+    strength is held at it, and the rest is solved again without it. Three details
+    make it robust:
+    - Velocity and position correction are solved separately. Around a loop, joint
+      and lock errors never quite agree, and an exact solve settles the disagreement
+      with huge opposing impulses that move nothing but break locks. Position
+      correction uses damped least squares: each row's diagonal is raised by 1%.
+    - The velocity solve is regularised too, by 0.01%. Rows that nearly repeat
+      each other (a ring hanging on a straight cable can barely move up or down, yet
+      a lock says how far) would otherwise amplify small velocity mismatches, for
+      example when a tackler switches from keyed to simulated while joined.
+    - Lock axes that ended the last substep at their strength start out of the
+      solve, so a weak lock (Gymnast Rings' 500 N) doesn't force a refactor every
+      iteration.
+    Scenes without locks are unchanged. Scenes with them simulate 1.3-3 times slower,
+    still faster than real time.
 
 ## Status against endorphin's sample scenes
 
@@ -157,24 +198,26 @@ A review of these changes turned up a tenth, older than all of them:
 every bundled scene. It checks for:
 
 - non-finite values;
-- bodies (other than scenery) sinking more than 10 cm below the ground;
-- joints stretching more than 5 cm;
+- bodies sinking more than 10 cm below the ground (fixed scenery, and bodies without
+  collision shapes, aside);
+- joints stretching more than 5 cm (free props have no joint to stretch);
 - simulated bodies moving faster than 40 m/s.
 
-It also prints lock drift and bodies buried in scenery, says where each worst value
-happened, and for failing scenes and scenes with constraints prints the physics set-up
-(ground, rigs, events, constraint targets and settings).
+It also prints lock drift and bodies buried in fixed scenery, says where each worst
+value happened, and for failing scenes and scenes with constraints prints the physics
+set-up (ground, rigs, events, constraint targets and settings).
+`NM_TRACE=<path to an .ens scene> cargo test --release trace_stand_in -- --ignored
+--nocapture` prints a scene frame by frame.
 
-The open failures can't be reproduced in the cloud (the scenes ship only with
-endorphin), so each has a stand-in built in code (`src/physics/scenes.rs`) with the
-same pattern. All stand-ins pass now; the real scenes need re-checking on a machine
-with endorphin.
+Each failure also gets a stand-in built in code (`src/physics/scenes.rs`) with the
+same pattern, so it can be worked on without endorphin's files.
+
+Last run, with lessons 1-12 (16 scenes; Bridge Escape is skipped for size):
 
 | Result | Scenes |
 |---|---|
-| Clean before lessons 5-9; re-check, and look at anyone standing with a strong preset or running Balance or CatchFall | Arrows, Car Crash, Catch Run, Multi Martial, Stagger Walk, Sword Play, Trapeze, Walk With Gun |
-| Re-check: stand-in passes | Tackle (lessons 5, 7), Balcony (7, 8), Catch Rope, Gymnast Rings, Bendy Stick, Heli Leap (5, 6), Rotating Floor (6, 8) |
-| Re-check: not reproduced | Car Hit (6 cm stretch): the stand-in takes a 15 m/s hit with 3 cm |
+| Clean | Arrows, Car Crash, Catch Rope, Catch Run, Gymnast Rings, Multi Martial, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
+| Failing, as before lessons 11-12 | Balcony (one character's hip stretches 24 cm at frame 3), Bendy Stick (a rig body ends 6.4 m below the ground), Car Hit (a knee stretches 5.9 cm), Heli Leap and Rotating Floor (no ground: a character ends 0.7 m and 9.9 m below the start; maybe a fall rather than a fault, to be looked at in the app) |
 
 What each stand-in reproduces:
 
@@ -202,7 +245,8 @@ simulate as if the character went limp.
 - Virtual-muscle reach springs.
 - Exact cylinders: long ones have rounded ends; flat ones a rounded rim, touching
   flat things at six rim points, the lowest rim point and the point nearest them.
-- An exact (tree) solve for joint anchors, for chains with big mass ratios.
+- An exact solve for joint anchors where no lock holds the chain (lesson 12 covers
+  what locks hold).
 - Interpolated output between frames.
 
 ## Improvements planned beyond endorphin
