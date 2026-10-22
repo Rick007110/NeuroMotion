@@ -40,6 +40,8 @@ pub struct Report {
     pub drift: f32,
     /// Deepest a character's or prop's body centre got inside scenery, m.
     pub buried: f32,
+    /// Where each worst value happened ("character.body @ frame"), in the order above.
+    pub places: [String; 5],
     pub elapsed: Duration,
 }
 
@@ -52,6 +54,14 @@ impl Report {
     /// The sweep's checks, plus locks holding and nothing sinking into scenery.
     pub fn held(&self) -> bool {
         self.ok() && self.drift < 0.05 && self.buried <= 0.0
+    }
+}
+
+impl Report {
+    /// Where the worst values happened, one per line.
+    pub fn places(&self) -> String {
+        let names = ["lowest body", "max joint stretch", "fastest", "lock drift", "buried"];
+        names.iter().zip(&self.places).filter(|(_, p)| !p.is_empty()).map(|(n, p)| format!("    {n:<18} {p}\n")).collect()
     }
 }
 
@@ -88,7 +98,11 @@ pub fn sweep(project: &Project) -> Report {
 pub fn measure(project: &Project, sim: &Simulation, elapsed: Duration) -> Report {
     let fps = project.settings.fps;
     let range = project.settings.range;
-    let mut report = Report { nan: false, lowest: f32::MAX, stretch: 0.0, fastest: 0.0, drift: 0.0, buried: 0.0, elapsed };
+    let mut report = Report { nan: false, lowest: f32::MAX, stretch: 0.0, fastest: 0.0, drift: 0.0, buried: 0.0, places: Default::default(), elapsed };
+    let body_name = |ci: usize, bi: usize| {
+        let c = &project.characters[ci];
+        format!("{}.{}", c.name, c.physics.as_ref().map_or("?", |r| r.bodies[bi].name.as_str()))
+    };
     for frame in range.start..=range.end {
         let frame_bodies = sim.frame(frame).unwrap();
         // Scenery shapes where they are this frame.
@@ -108,28 +122,43 @@ pub fn measure(project: &Project, sim: &Simulation, elapsed: Duration) -> Report
             let Some(cf) = cf else { continue };
             let character = &project.characters[ci];
             let skeleton = &character.skeleton;
-            for (_, p) in &cf.bodies {
+            for (bi, (_, p)) in cf.bodies.iter().enumerate() {
                 report.nan |= !p.is_finite();
                 // Scenery is keyed, and may well sit below the ground.
                 if character.kind != CharacterKind::Environment {
-                    report.lowest = report.lowest.min(p.y);
+                    if p.y < report.lowest {
+                        report.lowest = p.y;
+                        report.places[0] = format!("{} @ frame {frame}", body_name(ci, bi));
+                    }
                     for &(geometry, r, at) in &scenery {
-                        report.buried = report.buried.max(depth_inside(geometry, r, at, *p));
+                        let depth = depth_inside(geometry, r, at, *p);
+                        if depth > report.buried {
+                            report.buried = depth;
+                            report.places[4] = format!("{} @ frame {frame}", body_name(ci, bi));
+                        }
                     }
                 }
             }
             for (i, j) in skeleton.joints.iter().enumerate() {
                 if let Some(p) = j.parent {
                     let gap = cf.joints[i].1.distance(cf.joints[p].1);
-                    report.stretch = report.stretch.max((gap - Vec3::from(j.offset).length()).abs());
+                    let stretch = (gap - Vec3::from(j.offset).length()).abs();
+                    if stretch > report.stretch {
+                        report.stretch = stretch;
+                        report.places[1] = format!("{}.{} @ frame {frame} ({:?})", character.name, j.name, cf.level);
+                    }
                 }
             }
             // Speed is only meaningful while simulated: kinematic bodies jump back onto
             // the animation when a transition ends.
             let prev = (frame > range.start).then(|| sim.frame(frame - 1).unwrap()[ci].as_ref().unwrap());
             if let Some(prev) = prev.filter(|p| p.level == SimLevel::Simulated && cf.level == SimLevel::Simulated) {
-                for (a, b) in cf.bodies.iter().zip(&prev.bodies) {
-                    report.fastest = report.fastest.max(a.1.distance(b.1) * fps);
+                for (bi, (a, b)) in cf.bodies.iter().zip(&prev.bodies).enumerate() {
+                    let speed = a.1.distance(b.1) * fps;
+                    if speed > report.fastest {
+                        report.fastest = speed;
+                        report.places[2] = format!("{} @ frame {frame}", body_name(ci, bi));
+                    }
                 }
             }
         }
@@ -154,10 +183,87 @@ pub fn measure(project: &Project, sim: &Simulation, elapsed: Duration) -> Report
         let held = Vec3::select(lock.linear.cmpgt(Vec3::ZERO), Vec3::ONE, Vec3::ZERO);
         let start = offset(lock.start);
         for frame in lock.start + 1..=lock.end.min(range.end) {
-            report.drift = report.drift.max(((offset(frame) - start) * held).length());
+            let drift = ((offset(frame) - start) * held).length();
+            if drift > report.drift {
+                report.drift = drift;
+                let anchor = lock.anchor.map_or("the world".to_owned(), |(ci, bi)| body_name(ci, bi));
+                report.places[3] = format!("{} to {anchor} @ frame {frame}", body_name(lock.body.0, lock.body.1));
+            }
         }
     }
     report
+}
+
+/// The physics set-up of a project, for reading alongside a failing sweep: ground,
+/// rigs, level switches and constraint events as imported.
+pub fn describe(project: &Project) -> String {
+    let mut out = String::new();
+    let ground = project.physics.ground.as_ref().map_or("none".to_owned(), |g| format!("y = {} ({})", g.height, g.material));
+    out += &format!("    ground {ground}, {} Hz, {} fps\n", project.physics.rate, project.settings.fps);
+    for (ci, c) in project.characters.iter().enumerate() {
+        let Some(rig) = &c.physics else { continue };
+        let mut shapes: std::collections::BTreeMap<&str, usize> = Default::default();
+        for shape in rig.bodies.iter().flat_map(|b| &b.shapes) {
+            let kind = match shape.geometry {
+                Geometry::Sphere { .. } => "sphere",
+                Geometry::Capsule { .. } => "capsule",
+                Geometry::Cylinder { radius, length } if length < 2.0 * radius => "disc",
+                Geometry::Cylinder { .. } => "cylinder",
+                Geometry::Box { .. } => "box",
+            };
+            *shapes.entry(kind).or_default() += 1;
+        }
+        let lightest = rig.bodies.iter().map(|b| (b.mass, b.name.as_str())).min_by(|a, b| a.0.total_cmp(&b.0));
+        let switches: Vec<String> = project
+            .clips
+            .iter()
+            .filter(|clip| project.clip_character(clip).map(|x| x.id) == Some(c.id))
+            .filter(|clip| matches!(&clip.kind, ClipKind::Event { event } if event == "Simulation" || event == "Transition" || event == "Behaviour"))
+            .map(|clip| {
+                let what = ["physicsLevel", "requiredPhysicsLevel", "behaviourName"].iter().find_map(|k| clip.source.get(*k)).map_or("?", String::as_str);
+                format!("{}-{} {what}", clip.props.start, clip.props.end())
+            })
+            .collect();
+        out += &format!(
+            "    [{ci}] {} ({:?}, starts {:?}): {} bodies, {:.1} kg, lightest {:?}, shapes {:?}, events [{}]\n",
+            c.name,
+            c.kind,
+            c.default_level,
+            rig.bodies.len(),
+            rig.total_mass(),
+            lightest,
+            shapes,
+            switches.join("; ")
+        );
+    }
+    for clip in &project.clips {
+        if !matches!(&clip.kind, ClipKind::Event { event } if event == "Constraint") {
+            continue;
+        }
+        let settings: Vec<String> = clip.source.iter().filter(|(k, _)| k.as_str() != "targets").map(|(k, v)| format!("{k}={v}")).collect();
+        let targets = clip.source.get("targets").map_or("", String::as_str);
+        let masses: Vec<String> = targets
+            .split(',')
+            .map(|t| {
+                let mut parts = t.trim().split(".MetaBodies.");
+                let (c, b) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+                let rig = project.character_by_name(c).and_then(|c| c.physics.as_ref());
+                match rig.and_then(|r| Some((r.bodies.get(r.body_index(b)?)?.mass, r.total_mass()))) {
+                    Some((m, total)) => format!("{m:.2} kg of {total:.0} kg"),
+                    None => "UNRESOLVED".to_owned(),
+                }
+            })
+            .collect();
+        out += &format!(
+            "    constraint {}-{}{}: targets [{targets}] ({}), {}\n",
+            clip.props.start,
+            clip.props.end(),
+            if clip.props.enabled { "" } else { " (disabled)" },
+            masses.join(", "),
+            settings.join(" ")
+        );
+    }
+    out
 }
 
 /// How far `point` is inside a placed shape (negative outside).
@@ -691,7 +797,9 @@ mod tests {
     fn trace_stand_in() {
         // Runs with every `--ignored` sweep; only does something when asked to.
         let Ok(name) = std::env::var("NM_TRACE") else { return };
-        let project = match name.as_str() {
+        let describe_only = name.starts_with("describe:");
+        let name = name.trim_start_matches("describe:");
+        let project = match name {
             "tackle" => tackle(),
             "balcony" => balcony(),
             "catch_rope" => catch_rope(),
@@ -703,6 +811,11 @@ mod tests {
             "car_hit" => car_hit(),
             _ => panic!("set NM_TRACE to a stand-in's name"),
         };
+        if describe_only {
+            let report = sweep(&project);
+            print!("{report}\n{}{}", report.places(), describe(&project));
+            return;
+        }
         trace(&project);
     }
 
@@ -710,7 +823,7 @@ mod tests {
         let (sim, elapsed) = simulate(&project);
         let report = measure(&project, &sim, elapsed);
         println!("{:<16} {:>4} frames in {:>6.0?}  {report}", project.settings.name, project.settings.range.len() + 1, report.elapsed);
-        assert!(report.held(), "{}: {report}", project.settings.name);
+        assert!(report.held(), "{}: {report}\n{}{}", project.settings.name, report.places(), describe(&project));
         sim
     }
 
@@ -836,6 +949,11 @@ mod endorphin_scenes {
                 project.settings.range.len() + 1,
                 report.elapsed
             );
+            // What to look at: where the worst values happened and the set-up behind them.
+            let constrained = project.clips.iter().any(|c| matches!(&c.kind, ClipKind::Event { event } if event == "Constraint"));
+            if !ok || constrained || report.drift >= 0.05 || report.buried > 0.0 {
+                print!("{}{}", report.places(), describe(&project));
+            }
             if !ok {
                 failures.push(name);
             }
