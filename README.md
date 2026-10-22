@@ -7,9 +7,11 @@ toward a modern physics engine that behaves like endorphin's and then goes furth
 
 > **Status: early development.** The editor, timeline, undo/redo and endorphin import
 > work. The physics engine runs imported endorphin characters with their own bodies,
-> joint limits and muscles; 8 of the 15 bundled sample scenes already simulate cleanly.
-> endorphin's *behaviours* (stagger, catch fall, ...) aren't recreated yet, so scenes
-> that rely on them behave like a limp character instead.
+> joint limits and muscles; 8 of the 15 bundled sample scenes simulated cleanly at the
+> last check on a machine with endorphin, and the other 7 have fixes waiting to be
+> re-checked there. Of endorphin's *behaviours*, balance and catch fall have original
+> controllers; scenes that rely on the others (stagger, writhe, ...) behave like a limp
+> character instead.
 
 ## What works
 
@@ -43,6 +45,9 @@ behave the same way, then improved:
 - Per-character simulation levels (animated, collision only, collision with momentum,
   simulated), momentum carried from animation into physics, push events, active poses,
   active animations, lock/join constraints, and transitions back to animation.
+- Behaviours: balance (capture-point ankle strategy) and catch fall (arms reach for
+  the ground), run by endorphin's behaviour events of the same name
+  ([docs/behaviours.md](docs/behaviours.md)).
 - **Improvements over endorphin:** no simulate/clear step (the timeline re-simulates
   automatically, in the background, whenever you edit); deterministic results;
   stiff muscles that can't explode; muscle targets kept inside joint limits.
@@ -53,9 +58,9 @@ Try **File → Open Physics Demo** and press Space. Design and status:
 
 ## Roadmap
 
-1. Finish the sample-scene sweep: rope and ring scenes, multi-character joins, moving
-   scenery.
-2. **Behaviours**: original controllers for balance, stagger, catch-fall and more.
+1. Confirm the sample-scene fixes on endorphin's own scenes (rope and ring props,
+   multi-character joins, moving scenery).
+2. **Behaviours**: stepping, stagger, writhe and more, after balance and catch fall.
 3. **Beyond endorphin**: strength curves per body region, smoother hand-back to
    animation, visual feedback on muscle effort, re-simulating only from the edited
    frame.

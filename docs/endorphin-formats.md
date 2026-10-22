@@ -63,8 +63,9 @@ transfers, Severs. Their settings are kept on the clip and listed in the inspect
 *Imported settings*. That covers strength, physics level, momentum scale, behaviour
 name, impulse matrix, target bodies and constraint strengths. The physics engine
 acts on simulation levels, forces, transitions, active poses (whose target pose is
-stored as channels on the clip) and constraints. Behaviours are kept but not
-simulated.
+stored as channels on the clip) and constraints. Behaviours named Balance and
+CatchFall run NeuroMotion's own controllers (see `behaviours.md`); others are kept
+but not simulated.
 
 Overlapping events of the same kind go onto extra tracks ("Animation 2").
 
