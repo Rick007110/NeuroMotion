@@ -7,7 +7,7 @@ toward a modern physics engine that behaves like endorphin's and then goes furth
 
 > **Status: early development.** The editor, timeline, undo/redo and endorphin import
 > work. The physics engine runs imported endorphin characters with their own bodies,
-> joint limits and muscles; 11 of the 16 bundled sample scenes checked simulate
+> joint limits and muscles; 15 of the 16 bundled sample scenes checked simulate
 > cleanly. Of endorphin's *behaviours*, balance and catch fall have original
 > controllers; scenes that rely on the others (stagger, writhe, ...) behave like a limp
 > character instead.
@@ -86,8 +86,8 @@ Force event at the same frame. Design and status:
 
 ## Roadmap
 
-1. The five sample scenes that still fail: Balcony, Bendy Stick, Car Hit, Heli Leap
-   and Rotating Floor ([status](docs/physics-design.md#status-against-endorphins-sample-scenes)).
+1. Car Hit, the one sample scene that still fails: a pedestrian's arm crushed under a
+   car that stops dead ([status](docs/physics-design.md#status-against-endorphins-sample-scenes)).
 2. **Behaviours**: stepping, stagger, writhe and more, after balance and catch fall.
 3. **Beyond endorphin**: strength curves per body region, smoother hand-back to
    animation, visual feedback on muscle effort, re-simulating only from the edited

@@ -198,8 +198,8 @@ Simulating the real scenes with props being props added two more:
 every bundled scene. It checks for:
 
 - non-finite values;
-- bodies sinking more than 10 cm below the ground (fixed scenery, and bodies without
-  collision shapes, aside);
+- simulated bodies sinking more than 10 cm below the ground (fixed scenery, and bodies
+  without collision shapes, aside; keyed bodies sit where their animation puts them);
 - joints stretching more than 5 cm (free props have no joint to stretch);
 - simulated bodies moving faster than 40 m/s.
 
@@ -212,12 +212,31 @@ set-up (ground, rigs, events, constraint targets and settings).
 Each failure also gets a stand-in built in code (`src/physics/scenes.rs`) with the
 same pattern, so it can be worked on without endorphin's files.
 
-Last run, with lessons 1-12 (16 scenes; Bridge Escape is skipped for size):
+Last run, with lessons 1-12 and the import fixes below (16 scenes; Bridge Escape is
+skipped for size):
 
 | Result | Scenes |
 |---|---|
-| Clean | Arrows, Car Crash, Catch Rope, Catch Run, Gymnast Rings, Multi Martial, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
-| Failing, as before lessons 11-12 | Balcony (one character's hip stretches 24 cm at frame 3), Bendy Stick (a rig body ends 6.4 m below the ground), Car Hit (a knee stretches 5.9 cm), Heli Leap and Rotating Floor (no ground: a character ends 0.7 m and 9.9 m below the start; maybe a fall rather than a fault, to be looked at in the app) |
+| Clean | Arrows, Balcony, Bendy Stick, Car Crash, Catch Rope, Catch Run, Gymnast Rings, Heli Leap, Multi Martial, Rotating Floor, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
+| Failing | Car Hit: a clavicle stretches 10 cm. The 747 kg car, joined to a keyed carrier, drives into the pedestrian at 8 m/s, carries them on the bonnet, and stops dead when the carrier's keys end at 1.65 s, with an arm under it |
+
+Four of the five scenes still failing after lesson 12 weren't solver problems at all:
+the importer set them up wrongly. Looking at Balcony in the app showed it: one
+character sitting in mid-air, with no chairs and no balcony.
+
+- **Characters weren't placed.** A character's own `TransformMatrix` (where it sits in
+  the world) was ignored, and only its start pose's root offset used. So everyone
+  started near the origin: Catch Rope's runner on the ground instead of a roof
+  15.8 m up, the gymnast standing on the ground under the rings it should hang from,
+  Rotating Floor's character inside the floor (it fell through), Car Hit's car on top of
+  the pedestrian.
+- **Props had no collision.** A collision surface without geometry of its own uses the
+  mass shape ("environment mass objects have a collision object by default", says
+  endorphin's help). It was read as no collision, so Balcony's chairs and table,
+  Trapeze's bar, Catch Rope's rope and the gymnast's cables touched nothing.
+- **The scene's own keys were dropped.** The scene's `<Animation>` section drives
+  Car Hit's car and Car Crash's carrier box, the rotating floor and Heli Leap's rigs,
+  outside any event. Without it, the cars never moved.
 
 What each stand-in reproduces:
 
