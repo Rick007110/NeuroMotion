@@ -33,7 +33,9 @@ step.
 | **Active pose** | While simulated, the character's muscles pull towards a pose. | *Strength* (multiplies muscle strength), *Ease in* (seconds), and the pose itself: captured from what the viewport shows at the playhead when the event is added; **Capture pose at playhead** re-records it. |
 | **Constraint** | From its first frame to its last, holds bodies: each where it was when the clip started, or all of them to the last body listed. | *Type*: Lock in place, Lock position only, Lock orientation only, Join bodies together. *Position* / *Rotation strength*: spring stiffness along each world axis (N/m, N·m/rad); 0 leaves an axis free. *Bodies*: any body of any character. |
 
-Imported endorphin behaviours show their behaviour name; they aren't simulated yet.
+Imported endorphin behaviours show their behaviour name. Balance and CatchFall run
+NeuroMotion's own controllers ([behaviours.md](behaviours.md)); the others aren't
+simulated yet.
 Settings an event carries that the controls don't cover (imported from endorphin) are
 listed read-only under **Other imported settings**.
 

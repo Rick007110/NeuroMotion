@@ -82,14 +82,11 @@ pub fn import_scene(path: &Path) -> Result<Import, IoError> {
             add_character(&mut project, env, CharacterKind::Environment, isotropic, &mut skipped_joints);
         }
     }
-    // endorphin simulates everything from the first frame unless an event says otherwise.
-    // Scenery is moved by its animation and pushes things, but isn't simulated itself.
+    // endorphin simulates everything from the first frame unless an event says otherwise,
+    // scenery included: its massless pieces stay fixed, while props with mass are real
+    // objects (which is why scenes lock or join them to hold them in place).
     for character in project.characters.iter_mut().filter(|c| c.physics.is_some()) {
-        character.default_level = if character.kind == CharacterKind::Environment {
-            SimLevel::CollisionOnly
-        } else {
-            SimLevel::Simulated
-        };
+        character.default_level = SimLevel::Simulated;
     }
     if project.characters.is_empty() {
         return Err(IoError::Format("the scene contains no characters".into()));
@@ -222,7 +219,7 @@ pub fn import_scene(path: &Path) -> Result<Import, IoError> {
         ));
     }
     if counts.contains_key("Behaviour") {
-        notes.push("Behaviours (stagger, catch fall, ...) are kept but not simulated: endorphin's are protected.".into());
+        notes.push("Behaviours are kept; Balance and CatchFall run NeuroMotion's own controllers, the others (stagger, writhe, ...) aren't simulated yet.".into());
     }
     if skipped_joints > 0 {
         notes.push(format!("Skipped {skipped_joints} virtual-muscle helper joint(s)."));
@@ -698,7 +695,8 @@ fn read_rig(node: Node, joint_nodes: &[Node], skeleton: &SkeletonRef, isotropic:
                 let mass = density * 1000.0 * geometry.volume();
                 Some((mass, geometry.inertia(mass)))
             })
-            .unwrap_or((1.0, [0.004; 3]));
+            // No inertial body: endorphin keeps it fixed in place, like the ground.
+            .unwrap_or((0.0, [0.0; 3]));
         let shapes = elements(Some(mb))
             .filter(|n| n.has_tag_name("CollisionSurface"))
             .filter_map(|cs| {
