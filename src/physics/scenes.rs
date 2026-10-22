@@ -7,8 +7,8 @@
 //! endorphin importer produces. The sweep applies the same checks to both:
 //!
 //! - no non-finite values;
-//! - no body more than 10 cm below the ground (fixed scenery, and bodies without
-//!   collision shapes, aside: those fall through everything, in endorphin too);
+//! - no simulated body more than 10 cm below the ground (fixed scenery, and bodies
+//!   without collision shapes, aside: those fall through everything, in endorphin too);
 //! - no joint stretched by 5 cm or more (free props have no joint to stretch);
 //! - no simulated body faster than 40 m/s;
 //! - (stand-ins) no locked body drifting 5 cm or more from where its lock holds it;
@@ -131,10 +131,11 @@ pub fn measure(project: &Project, sim: &Simulation, elapsed: Duration) -> Report
             let rig = character.physics.as_ref();
             for (bi, (_, p)) in cf.bodies.iter().enumerate() {
                 report.nan |= !p.is_finite();
-                // Fixed scenery may well sit below the ground, and a body without collision
-                // shapes falls through it.
+                // Only the solver's doing counts: keyed bodies sit where their animation puts
+                // them (a hidden carrier underground, say), fixed scenery may well sit below
+                // the ground, and a body without collision shapes falls through it.
                 let body = rig.map(|r| &r.bodies[bi]);
-                if body.is_none_or(|b| !fixed(ci, b) && !b.shapes.is_empty()) {
+                if cf.level == SimLevel::Simulated && body.is_none_or(|b| !fixed(ci, b) && !b.shapes.is_empty()) {
                     if p.y < report.lowest {
                         report.lowest = p.y;
                         report.places[0] = format!("{} @ frame {frame}", body_name(ci, bi));
