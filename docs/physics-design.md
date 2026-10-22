@@ -11,13 +11,14 @@ target is the same model, the same parameters, and the same behaviour.
 |---|---|
 | One rigid body per bone; mass from inertial shape × density | Same, imported per body (`document::physics::BodyDef`) |
 | Spherical inertia by default | Same (`isotropic_inertia`), full tensors available |
-| Collision spheres, boxes, cylinders, capsules ("sphyls") with self-collision flags | Same shapes and flags. Cylinders collide as capsules; box-box isn't handled yet |
+| Collision spheres, boxes, cylinders, capsules ("sphyls") with self-collision flags | Same shapes and flags. Long cylinders collide as capsules, flat ones (wider than long) as discs with a rounded rim |
 | Ball joints: twist range + swing cone between a parent-side and a child-side limit frame; soft zone inside a hard stop | Same frames, ranges and soft-zone springs (elliptical cone) |
 | Effectors: force-limited PD on twist and swing; calibration presets | Same gains and presets, solved as implicit force-capped springs |
 | Velocity-level constraint solver at 120 Hz | Velocity-level sequential-impulse solver at the scene's rate (120 Hz), substepped |
 | Material pairs → restitution, friction, adhesion, softness | Same table. Friction defaults to endorphin-style force caps (newtons per contact) |
 | Simulation levels; momentum carried into physics | Same four levels; kinematic bodies carry animation velocity into the switch |
 | Force events are velocity changes on bodies | Same |
+| Lock and join constraints, with per-axis position and orientation strengths | Rigid constraints whose force on each axis is capped by its strength (read as Karma's relative-position-relative-orientation joint; 0 = free) |
 | Transitions blend simulation back to animation | Same, linear window, then the required level |
 
 ## Solver
@@ -26,17 +27,27 @@ Each tick (1/rate s) runs 4 substeps. Each substep:
 
 1. Apply gravity to dynamic bodies.
 2. Detect contacts at the current pose, with a 2 cm speculative margin so fast bodies
-   don't tunnel.
-3. Warm-start joint, muscle and contact impulses from the previous substep.
-4. Iterate, resolving errors through *soft* constraints (frequency and damping ratio):
+   don't tunnel. Bodies held together by a lock don't collide with each other.
+3. Warm-start joint, muscle, lock and contact impulses from the previous substep
+   (except for bodies that just switched between keyed and simulated).
+4. Iterate:
    - joint anchor points (3-row block);
    - twist and swing limits (one-sided rows; springs in the soft zone);
    - muscles;
-   - contact normals;
+   - locks (one 6-row block each, each row capped at its strength);
+   - contact normals, as *soft* constraints (frequency and damping ratio);
    - friction.
 5. Integrate positions.
 6. Relax: one pass without position bias, so error correction doesn't add energy.
 7. Restitution, for impacts faster than 0.5 m/s.
+
+Keyed bodies (animated, collision-only, collision with momentum) are moved by the
+caller with the animation's velocity. Joints and locks always see that velocity.
+Contacts see it while correcting positions (step 4), so moving scenery can't pass
+through anything, and only the momentum-scaled share in the relax pass: a collision-only
+body pushes and carries things without setting them moving, and one with momentum 1
+hands on its full velocity. A keyed body that moves more than 0.5 m in one tick (a cut,
+or snapping back from simulation) is placed instead, without velocity.
 
 Muscles are springs with physical stiffness *k* and damping *c*, solved implicitly:
 softness γ = 1/(h(c + hk)), bias β = hk/(c + hk). Their accumulated impulse is clamped
@@ -82,21 +93,73 @@ plain sequential impulses get wrong:
 Muscle targets are also clamped into each joint's soft range, because motion
 capture often sits slightly outside a rig's limits.
 
+The scenes with props, several characters and moving scenery taught four more:
+
+5. **Locks are rigid, force-capped constraints, solved as one block.** They used to be
+   a critically damped spring per axis, capped at 30 Hz for the locked body's own
+   mass, and not warm-started. A rope's top segment, a ring or a hand weighs a few
+   hundred grams, so the cap made the lock a soft spring while it carried a whole
+   character, and props sagged by decimetres to metres. Like Karma's
+   relative-position-relative-orientation joint, a lock now holds rigidly unless an
+   axis needs more than its strength (newtons, or newton-metres for orientation;
+   endorphin's 1e5 is effectively unbreakable). Position (at the held point) and
+   orientation are one 6x6 block, so the lock feels the whole lever it moves. It is
+   warm-started, and the bodies it joins don't collide: a join captured while bodies
+   overlap would otherwise fight the contact forever. World locks use world axes;
+   joins use the anchor's axes. That is a reading of Karma, not something the files
+   state; a strength of 0 frees the axis either way. JoinBodies holds every listed
+   body to the last one; LockWithParent does the same, and with a single body holds it
+   to its parent body in its own rig (it used to create no lock at all).
+6. **Keyed bodies show the solver their real velocity; momentum only decides what they
+   hand on.** Collision-only bodies used to look stationary to the solver, so a moving
+   floor or a hand swung through things, and props joined to an animated hand lagged.
+7. **Forget warm starts when a body switches between keyed and simulated.** A keyed
+   body crushing something against scenery or the ground builds up enormous contact
+   impulses, because it can't give way. Replayed on a 60 g finger once the character
+   goes simulated, that was 2,800 m/s in one substep and joints stretched by up to
+   0.9 m. This is the likely cause of the Tackle failure (a collision-with-momentum
+   character going fully simulated while colliding).
+8. **Box-box contacts and flat cylinders are needed for scenery.** Character feet are
+   often boxes, and so are floors and balconies, so without box-box contacts feet sank
+   into them. A flat cylinder (a turntable) collided as a sphere of its radius.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates the first two seconds of
 every bundled scene. It checks for:
 
 - non-finite values;
-- bodies sinking more than 10 cm below the ground;
+- bodies (other than scenery) sinking more than 10 cm below the ground;
 - joints stretching more than 5 cm;
 - simulated bodies moving faster than 40 m/s.
 
+It also prints lock drift and bodies buried in scenery, says where each worst value
+happened, and for failing scenes and scenes with constraints prints the physics set-up
+(ground, rigs, events, constraint targets and settings).
+
+The open failures can't be reproduced in the cloud (the scenes ship only with
+endorphin), so each has a stand-in built in code (`src/physics/scenes.rs`) with the
+same pattern. All stand-ins pass now; the real scenes need re-checking on a machine
+with endorphin.
+
 | Result | Scenes |
 |---|---|
-| Clean | Arrows, Car Crash, Catch Run, Multi Martial, Stagger Walk, Sword Play, Trapeze, Walk With Gun |
-| Close | Car Hit (6 cm stretch) |
-| Open | Balcony (four characters), Tackle (characters joined together), Bendy Stick, Catch Rope, Gymnast Rings, Heli Leap (props hung from constraints still drop), Rotating Floor (moving floor) |
+| Clean (last checked before the fixes above) | Arrows, Car Crash, Catch Run, Multi Martial, Stagger Walk, Sword Play, Trapeze, Walk With Gun |
+| Re-check: stand-in passes | Tackle (lessons 5, 7), Balcony (7, 8), Catch Rope, Gymnast Rings, Bendy Stick, Heli Leap (5, 6), Rotating Floor (6, 8) |
+| Re-check: not reproduced | Car Hit (6 cm stretch): the stand-in takes a 15 m/s hit with 3 cm |
+
+What each stand-in reproduces:
+
+| Stand-in | Pattern | Before | After |
+|---|---|---|---|
+| Tackle | Join (1e5) captured while colliding; the tackler drives the victim into the ground, then goes from collision with momentum to fully simulated | 0.36 m stretch | 1.2 cm |
+| Balcony | Four characters shoulder to shoulder on a box slab; a fifth barges in keyed, then goes limp | feet 13 cm into the slab; then 0.91 m stretch, 77 m/s | 0.7 cm, 5 m/s |
+| Catch Rope | A 1.5 kg rope locked at the top (position 1e5, 1e5, 0), caught by a running, jumping character | 0.74 m stretch, 1.4 m lock drift, 37 m/s | 3.5 cm, 1.8 cm |
+| Gymnast Rings | Light straps locked at the top, a gymnast hanging by LockWithParent with hands overlapping the rings | 11 cm drift | 0.1 cm |
+| Bendy Stick | A springy stick joined to the hand of a collision-only character swinging it | 10 cm drift | 0.2 cm |
+| Heli Leap | A 1.7 t helicopter (fuselage, tail, skids) held by a Lock; a character jumps off | 17 cm drift | 0 |
+| Rotating Floor | No ground; a thin collision-only slab spinning and rocking | sinks through | rides it |
+| Turntable | No ground; a flat cylinder spinning | floats 0.9 m above it | rests on it |
 
 Behaviours are not recreated, so scenes that depend on them (e.g. Stagger Walk's
 stagger) simulate as if the character went limp.
@@ -107,7 +170,7 @@ stagger) simulate as if the character went limp.
   original designs.
 - Sever events.
 - Virtual-muscle reach springs.
-- Box-box contacts.
+- Exact cylinders: long ones have rounded ends, flat ones a rounded rim.
 - Interpolated output between frames.
 
 ## Improvements planned beyond endorphin
