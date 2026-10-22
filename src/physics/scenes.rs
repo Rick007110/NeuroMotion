@@ -7,8 +7,9 @@
 //! endorphin importer produces. The sweep applies the same checks to both:
 //!
 //! - no non-finite values;
-//! - no body more than 10 cm below the ground (scenery aside);
-//! - no joint stretched by 5 cm or more;
+//! - no body more than 10 cm below the ground (fixed scenery, and bodies without
+//!   collision shapes, aside: those fall through everything, in endorphin too);
+//! - no joint stretched by 5 cm or more (free props have no joint to stretch);
 //! - no simulated body faster than 40 m/s;
 //! - (stand-ins) no locked body drifting 5 cm or more from where its lock holds it;
 //! - (stand-ins) no body centre inside solid scenery.
@@ -38,7 +39,7 @@ pub struct Report {
     /// Largest distance a locked body moved away from where its lock holds it, m
     /// (along the axes the lock holds).
     pub drift: f32,
-    /// Deepest a character's or prop's body centre got inside scenery, m.
+    /// Deepest a character's or prop's body centre got inside fixed scenery, m.
     pub buried: f32,
     /// Where each worst value happened ("character.body @ frame"), in the order above.
     pub places: [String; 5],
@@ -105,27 +106,35 @@ pub fn measure(project: &Project, sim: &Simulation, elapsed: Duration) -> Report
     };
     for frame in range.start..=range.end {
         let frame_bodies = sim.frame(frame).unwrap();
-        // Scenery shapes where they are this frame.
+        // Fixed scenery: the environment's massless pieces, or all of it while it isn't
+        // simulated. Its props with mass are simulated like any character's bodies.
+        let fixed = |ci: usize, body: &BodyDef| {
+            let c = &project.characters[ci];
+            c.kind == CharacterKind::Environment
+                && (body.mass <= 0.0 || frame_bodies[ci].as_ref().is_some_and(|cf| cf.level != SimLevel::Simulated))
+        };
+        // Fixed scenery shapes where they are this frame.
         let mut scenery = Vec::new();
         for (ci, cf) in frame_bodies.iter().enumerate() {
             let (Some(cf), Some(rig)) = (cf, &project.characters[ci].physics) else { continue };
-            if project.characters[ci].kind == CharacterKind::Environment {
-                for (body, &(r, p)) in rig.bodies.iter().zip(&cf.bodies) {
-                    for shape in &body.shapes {
-                        let (sr, sp) = (Quat::from_array(shape.frame.rotation), Vec3::from(shape.frame.position));
-                        scenery.push((shape.geometry, r * sr, p + r * sp));
-                    }
+            for (body, &(r, p)) in rig.bodies.iter().zip(&cf.bodies).filter(|(b, _)| fixed(ci, b)) {
+                for shape in &body.shapes {
+                    let (sr, sp) = (Quat::from_array(shape.frame.rotation), Vec3::from(shape.frame.position));
+                    scenery.push((shape.geometry, r * sr, p + r * sp));
                 }
             }
         }
-        for (ci, cf) in sim.frame(frame).unwrap().iter().enumerate() {
+        for (ci, cf) in frame_bodies.iter().enumerate() {
             let Some(cf) = cf else { continue };
             let character = &project.characters[ci];
             let skeleton = &character.skeleton;
+            let rig = character.physics.as_ref();
             for (bi, (_, p)) in cf.bodies.iter().enumerate() {
                 report.nan |= !p.is_finite();
-                // Scenery is keyed, and may well sit below the ground.
-                if character.kind != CharacterKind::Environment {
+                // Fixed scenery may well sit below the ground, and a body without collision
+                // shapes falls through it.
+                let body = rig.map(|r| &r.bodies[bi]);
+                if body.is_none_or(|b| !fixed(ci, b) && !b.shapes.is_empty()) {
                     if p.y < report.lowest {
                         report.lowest = p.y;
                         report.places[0] = format!("{} @ frame {frame}", body_name(ci, bi));
@@ -139,8 +148,12 @@ pub fn measure(project: &Project, sim: &Simulation, elapsed: Duration) -> Report
                     }
                 }
             }
+            // A body that no physics joint holds (a prop) moves freely of its parent.
+            let free = |joint: usize| {
+                rig.is_some_and(|r| r.bodies.iter().enumerate().any(|(bi, b)| b.joint == joint && !r.joints.iter().any(|jd| jd.body == bi)))
+            };
             for (i, j) in skeleton.joints.iter().enumerate() {
-                if let Some(p) = j.parent {
+                if let Some(p) = j.parent.filter(|_| !free(i)) {
                     let gap = cf.joints[i].1.distance(cf.joints[p].1);
                     let stretch = (gap - Vec3::from(j.offset).length()).abs();
                     if stretch > report.stretch {
@@ -833,6 +846,7 @@ mod tests {
     use super::*;
 
     /// `NM_TRACE=<stand-in> cargo test --release trace_stand_in -- --ignored --nocapture`
+    /// (or `NM_TRACE=<path to an .ens scene>`: its first two seconds)
     #[test]
     #[ignore = "debugging aid"]
     fn trace_stand_in() {
@@ -852,7 +866,12 @@ mod tests {
             "car_hit" => car_hit(),
             "balance" => balance_push(1.5, Vec3::Z, true),
             "catch_fall" => catch_fall_shove(Vec3::new(0.0, 0.0, 3.5), true),
-            _ => panic!("set NM_TRACE to a stand-in's name"),
+            path if path.ends_with(".ens") => {
+                let mut project = crate::io::endorphin::import_scene(std::path::Path::new(path)).unwrap().project;
+                project.settings.range.end = project.settings.range.start + 2 * project.settings.fps as i32;
+                project
+            }
+            _ => panic!("set NM_TRACE to a stand-in's name or an .ens scene"),
         };
         if describe_only {
             let report = sweep(&project);

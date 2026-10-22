@@ -54,8 +54,12 @@ It isn't used as a muscle target.
 
 **Physics.** Each character's bodies, collision shapes, joint limits and muscle
 presets are imported into its physics rig. The scene's simulation rate, gravity,
-ground and material table become the project's physics settings. Characters start
-*simulated*, as endorphin does; scenery starts as collision-only.
+ground and material table become the project's physics settings. Characters and the
+environment start *simulated*, as endorphin does. The environment's pieces without an
+inertial body (the background) have no mass and stay fixed; its props with one are
+real objects that fall, swing and get pushed, which is why scenes lock or join props
+to hold them, or switch the environment to NoPhysics (Hands Reach and Look At, whose
+reach target is a prop).
 
 **Every other event** becomes an *event clip* on a track named after its kind:
 Forces, Behaviours, Constraints, Simulations, Active poses, Transitions, Motion
