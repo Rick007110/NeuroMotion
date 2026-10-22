@@ -145,8 +145,11 @@ A review of these changes turned up a tenth, older than all of them:
     on an 8-link rope: 0.36 m stretch and 63 m/s within two seconds). It's the light
     chain/heavy load case sequential impulses converge worst on, and full warm starts
     overshoot it. Four fifths keeps it still (0.4 cm, 0.3 m/s). Locks and muscles keep
-    their full warm start: cutting it for locks made loaded ropes sag. An exact
-    tree solve for joint anchors would remove the problem at its root.
+    their full warm start: cutting it for locks made loaded ropes sag. Extreme ratios
+    still stretch while swinging: a 0.1 kg link locked at the top of seven, with 80 kg
+    hanging from them and swung at 0.5-2 m/s, stretches 12-19 cm (2 cm with a keyed top;
+    a 0.15 kg-link rope swinging a 75 kg character stays at 2 cm). An exact tree solve
+    for joint anchors would remove the problem at its root.
 
 ## Status against endorphin's sample scenes
 
@@ -178,13 +181,14 @@ What each stand-in reproduces:
 | Stand-in | Pattern | Before | After |
 |---|---|---|---|
 | Tackle | Join (1e5) captured while colliding; the tackler drives the victim into the ground, then goes from collision with momentum to fully simulated | 0.36 m stretch | 1.2 cm |
-| Balcony | Four characters shoulder to shoulder on a box slab; a fifth barges in keyed, then goes limp | feet 13 cm into the slab; then 0.91 m stretch, 77 m/s | 0.7 cm, 5 m/s |
-| Catch Rope | A 1.5 kg rope locked at the top (position 1e5, 1e5, 0), caught by a running, jumping character | 0.74 m stretch, 1.4 m lock drift, 37 m/s | 3.5 cm, 1.8 cm |
+| Balcony | Four characters shoulder to shoulder on a box slab; a fifth barges in keyed, then goes limp | feet 13 cm into the slab; then 0.91 m stretch, 77 m/s | 0.5 cm, 5 m/s |
+| Catch Rope | A 1.5 kg rope locked at the top (position 1e5, 1e5, 0), caught by a running, jumping character | 0.74 m stretch, 1.4 m lock drift, 37 m/s | 2.2 cm, 0.8 cm |
 | Gymnast Rings | Light straps locked at the top, a gymnast hanging by LockWithParent with hands overlapping the rings | 11 cm drift | 0.1 cm |
 | Bendy Stick | A springy stick joined to the hand of a collision-only character swinging it | 10 cm drift | 0.2 cm |
 | Heli Leap | A 1.7 t helicopter (fuselage, tail, skids) held by a Lock; a character jumps off | 17 cm drift | 0 |
 | Rotating Floor | No ground; a thin collision-only slab spinning and rocking | sinks through | rides it |
 | Turntable | No ground; a flat cylinder spinning | floats 0.9 m above it | rests on it |
+| Hanging weight | A 20-80 kg weight on a rope locked at the top, hanging straight (lesson 10) | 0.36 m stretch, 63 m/s | 1.5 cm, 0.6 m/s |
 
 Of endorphin's behaviours, Balance and CatchFall now have controllers of their own
 (docs/behaviours.md). Scenes that depend on others (e.g. Stagger Walk's stagger)
