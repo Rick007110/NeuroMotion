@@ -8,6 +8,8 @@
 //! Design notes: docs/physics-design.md.
 
 pub mod collide;
+#[cfg(test)]
+mod scenes;
 pub mod sim;
 pub mod world;
 
