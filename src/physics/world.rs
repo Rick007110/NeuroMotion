@@ -238,6 +238,8 @@ pub struct World {
     interactions: Vec<Interaction>,
     contact_cache: HashMap<(u32, u32, u8), [f32; 3]>,
     lock_cache: HashMap<(usize, usize), [f32; 6]>,
+    /// Whether each body was dynamic last substep, to spot switches.
+    was_dynamic: Vec<bool>,
 }
 
 // ---------------------------------------------------------------------------------
@@ -432,6 +434,7 @@ impl World {
             interactions: Vec::new(),
             contact_cache: HashMap::new(),
             lock_cache: HashMap::new(),
+            was_dynamic: Vec::new(),
         }
     }
 
@@ -463,6 +466,7 @@ impl World {
     }
 
     fn substep(&mut self, h: f32) {
+        self.forget_switched_bodies();
         for body in self.bodies.iter_mut().filter(|b| b.motion == Motion::Dynamic) {
             body.linear_velocity += self.gravity * h;
         }
@@ -553,6 +557,25 @@ impl World {
         for l in &locks {
             self.lock_cache.insert((l.a, l.b), l.impulse);
         }
+    }
+
+    /// Drops warm-start impulses of bodies that just became dynamic or stopped being so.
+    /// What a moved body pushed with (against something it was crushing, say) would hit a
+    /// light body like a hammer once it is simulated.
+    fn forget_switched_bodies(&mut self) {
+        let dynamic: Vec<bool> = self.bodies.iter().map(Body::is_dynamic).collect();
+        let switched: Vec<bool> = (0..dynamic.len()).map(|i| self.was_dynamic.get(i).is_some_and(|&d| d != dynamic[i])).collect();
+        if switched.contains(&true) {
+            let shapes = &self.shapes;
+            let switched_shape = |s: u32| shapes.get(s as usize).and_then(|s| s.body).is_some_and(|b| switched[b]);
+            self.contact_cache.retain(|&(a, b, _), _| !switched_shape(a) && !switched_shape(b));
+            self.lock_cache.retain(|&(a, b), _| !(a != STATIC && switched[a]) && !switched[b]);
+            for joint in self.joints.iter_mut().filter(|j| switched[j.parent] || switched[j.child]) {
+                joint.warm_point = Vec3::ZERO;
+                joint.warm_muscle = [0.0; 3];
+            }
+        }
+        self.was_dynamic = dynamic;
     }
 
     fn write_velocities(&mut self, sb: &[SolverBody]) {
