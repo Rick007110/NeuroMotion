@@ -96,6 +96,8 @@ enum LockKind {
     World { position: bool, orientation: bool },
     /// Every body to the last one listed.
     Join,
+    /// Like a join; a lone body is held to its parent body in its own rig.
+    Parent,
 }
 
 struct PoseTarget {
@@ -350,7 +352,8 @@ fn lock_kind(clip: &Clip) -> Option<LockKind> {
         "Lock" => LockKind::World { position: true, orientation: true },
         "LockPosition" => LockKind::World { position: true, orientation: false },
         "LockOrientation" => LockKind::World { position: false, orientation: true },
-        "JoinBodies" | "LockWithParent" => LockKind::Join,
+        "JoinBodies" => LockKind::Join,
+        "LockWithParent" => LockKind::Parent,
         _ => return None,
     })
 }
@@ -368,10 +371,11 @@ fn constraint_targets(project: &Project, clip: &Clip) -> Vec<(usize, usize)> {
 }
 
 /// Which body each lock of a constraint holds, and to what (`None`: the world).
-fn lock_pairs<T: Copy + PartialEq>(kind: LockKind, bodies: &[T]) -> Vec<(Option<T>, T)> {
+fn lock_pairs<T: Copy + PartialEq>(kind: LockKind, bodies: &[T], parent: impl Fn(T) -> Option<T>) -> Vec<(Option<T>, T)> {
     match kind {
         LockKind::World { .. } => bodies.iter().map(|&b| (None, b)).collect(),
-        LockKind::Join => {
+        LockKind::Parent if bodies.len() == 1 => parent(bodies[0]).map(|p| (Some(p), bodies[0])).into_iter().collect(),
+        LockKind::Join | LockKind::Parent => {
             let Some((&anchor, rest)) = bodies.split_last() else { return Vec::new() };
             rest.iter().filter(|&&b| b != anchor).map(|&b| (Some(anchor), b)).collect()
         }
@@ -403,7 +407,19 @@ pub(crate) fn lock_spans(project: &Project) -> Vec<LockSpan> {
             LockKind::World { position: false, .. } => Vec3::ZERO,
             _ => clip_vec3(clip, "positionStrength"),
         };
-        for (anchor, body) in lock_pairs(kind, &constraint_targets(project, clip)) {
+        let parent = |(ci, bi): (usize, usize)| {
+            let c = &project.characters[ci];
+            let rig = c.physics.as_ref()?;
+            let mut joint = c.skeleton.joints[rig.bodies[bi].joint].parent;
+            while let Some(j) = joint {
+                if let Some(p) = rig.bodies.iter().position(|b| b.joint == j) {
+                    return Some((ci, p));
+                }
+                joint = c.skeleton.joints[j].parent;
+            }
+            None
+        };
+        for (anchor, body) in lock_pairs(kind, &constraint_targets(project, clip), parent) {
             out.push(LockSpan { start: clip.props.start, end: clip.props.end(), anchor, body, linear });
         }
     }
@@ -423,9 +439,9 @@ fn update_constraints(running: &mut Running, frame: i32) {
         let locks = c.locks.get_or_insert_with(|| {
             let (position, orientation) = match c.kind {
                 LockKind::World { position, orientation } => (position, orientation),
-                LockKind::Join => (true, true),
+                LockKind::Join | LockKind::Parent => (true, true),
             };
-            lock_pairs(c.kind, &c.bodies)
+            lock_pairs(c.kind, &c.bodies, |b| bodies[b].parent)
                 .into_iter()
                 .map(|(anchor, b)| {
                     let (ar, ap) = anchor.map_or((Quat::IDENTITY, Vec3::ZERO), |a| (bodies[a].rotation, bodies[a].position));

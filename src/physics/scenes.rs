@@ -715,7 +715,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "stand-in failure: joined characters drift apart"]
     fn tackle_stays_together() {
         check(tackle());
     }
@@ -727,25 +726,21 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "stand-in failure: locked rope stretches and drops"]
     fn caught_rope_holds() {
         check(catch_rope());
     }
 
     #[test]
-    #[ignore = "stand-in failure: locked straps sag"]
     fn gymnast_hangs_from_rings() {
         check(gymnast_rings());
     }
 
     #[test]
-    #[ignore = "stand-in failure: stick slips out of an animated hand"]
     fn stick_stays_in_hand() {
         check(bendy_stick());
     }
 
     #[test]
-    #[ignore = "stand-in failure: locked heavy prop sags"]
     fn helicopter_stays_up() {
         check(heli_leap());
     }
@@ -764,6 +759,22 @@ mod tests {
         // Lying or standing on the disc, not floating above it.
         let height = resting_height(&project, &sim, "dancer");
         assert!(height < 0.1, "dancer rests {height} m above the turntable");
+    }
+
+    /// LockWithParent naming one body holds it to its parent body: a rope locked at the
+    /// top, with its second segment locked to the first, keeps that bend.
+    #[test]
+    fn lock_with_parent_alone_holds_to_the_parent_body() {
+        let mut p = new_scene("Lock with parent", 1.0);
+        let limits = Limits { twist_min: -0.5, twist_max: 0.5, swing1: 1.2, swing2: 1.2 };
+        let rig = chain(Vec3::new(0.0, 3.0, 0.0), 4, 0.3, 0.02, 0.5, None, limits, Gains { stiffness: 0.5, damping: 0.05, force_limit: 5.0 });
+        let rope = add_prop(&mut p, "rope", CharacterKind::Prop, rig, SimLevel::Simulated);
+        // Bent sideways, so without the lock the second segment would swing down.
+        motion(&mut p, rope, "Start pose", 0, 60, false, vec![held("seg1", Property::RotZ, 60.0)]);
+        constrain(&mut p, rope, 0, 60, "Lock", &["rope.MetaBodies.seg0"], (STRONG, STRONG));
+        constrain(&mut p, rope, 0, 60, "LockWithParent", &["rope.MetaBodies.seg1"], (STRONG, STRONG));
+        assert_eq!(lock_spans(&p).len(), 2);
+        check(p);
     }
 
     /// endorphin's Car Hit stretched a joint by 6 cm. The stand-in's character takes the
