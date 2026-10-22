@@ -29,7 +29,8 @@ Each tick (1/rate s) runs 4 substeps. Each substep:
 2. Detect contacts at the current pose, with a 2 cm speculative margin so fast bodies
    don't tunnel. Bodies held together by a lock don't collide with each other.
 3. Warm-start joint, muscle, lock and contact impulses from the previous substep
-   (except for bodies that just switched between keyed and simulated).
+   (joint anchors from four fifths of it; nothing for bodies that just switched
+   between keyed and simulated).
 4. Iterate:
    - joint anchor points (3-row block);
    - twist and swing limits (one-sided rows; springs in the soft zone);
@@ -46,8 +47,9 @@ caller with the animation's velocity. Joints and locks always see that velocity.
 Contacts see it while correcting positions (step 4), so moving scenery can't pass
 through anything, and only the momentum-scaled share in the relax pass: a collision-only
 body pushes and carries things without setting them moving, and one with momentum 1
-hands on its full velocity. A keyed body that moves more than 0.5 m in one tick (a cut,
-or snapping back from simulation) is placed instead, without velocity.
+hands on its full velocity. When any keyed body of a character moves more than 0.5 m
+or turns more than 1 rad in one tick (a cut, or snapping back from simulation), the
+character is placed instead, without velocity.
 
 Muscles are springs with physical stiffness *k* and damping *c*, solved implicitly:
 softness γ = 1/(h(c + hk)), bias β = hk/(c + hk). Their accumulated impulse is clamped
@@ -130,8 +132,21 @@ Making characters balance (docs/behaviours.md) added a ninth:
    foot, so its muscle was capped at about 270 N·m/rad, too weak to hold a standing
    body up (each ankle needs ~370). A planted foot is held by the ground, and its ankle
    moves the body above it. Bodies touching the ground or scenery now count as
-   immovable for the cap (only for the cap; the solve itself is unchanged). Standing
-   characters with strong presets now hold their stance.
+   immovable for the cap (only for the cap; the solve itself is unchanged), unless
+   both of a joint's bodies are grounded (a foot and its toe). Standing characters
+   with strong presets now hold their stance.
+
+A review of these changes turned up a tenth, older than all of them:
+
+10. **Joint anchors warm-start from four fifths of last substep's impulse.** A chain of
+    light links holding a heavy load and hanging straight (a rope or strap with a
+    weight on it, before anything swings it) breathed: every link stretched and
+    squeezed in step, a little more each substep, until it exploded (a 20 kg weight
+    on an 8-link rope: 0.36 m stretch and 63 m/s within two seconds). It's the light
+    chain/heavy load case sequential impulses converge worst on, and full warm starts
+    overshoot it. Four fifths keeps it still (0.4 cm, 0.3 m/s). Locks and muscles keep
+    their full warm start: cutting it for locks made loaded ropes sag. An exact
+    tree solve for joint anchors would remove the problem at its root.
 
 ## Status against endorphin's sample scenes
 
@@ -181,7 +196,9 @@ simulate as if the character went limp.
   endorphin's are vendor-protected, so these need original designs.
 - Sever events.
 - Virtual-muscle reach springs.
-- Exact cylinders: long ones have rounded ends, flat ones a rounded rim.
+- Exact cylinders: long ones have rounded ends; flat ones a rounded rim, touching
+  flat things at six rim points, the lowest rim point and the point nearest them.
+- An exact (tree) solve for joint anchors, for chains with big mass ratios.
 - Interpolated output between frames.
 
 ## Improvements planned beyond endorphin
