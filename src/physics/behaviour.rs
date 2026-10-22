@@ -87,14 +87,20 @@ impl Layout {
         let at = |b: usize| rest[b].1;
         // Where each body's joint is at rest (its origin for the pelvis).
         let pivot = |b: usize| joint_of[b].map_or(at(b), |j| rest_joints[rig.joints[j].joint].1);
-        // Extremes of a branch at rest, by some measure of body position.
-        fn extreme(children: &[Vec<usize>], b: usize, measure: &dyn Fn(usize) -> f32) -> f32 {
-            children[b].iter().map(|&c| extreme(children, c, measure)).fold(measure(b), f32::max)
+        // Extremes of a branch at rest, by some measure of body position. `depth` stops a
+        // malformed rig whose joints loop from recursing forever.
+        fn extreme(children: &[Vec<usize>], b: usize, measure: &dyn Fn(usize) -> f32, depth: usize) -> f32 {
+            let below = children[b].iter().filter(|_| depth > 0).map(|&c| extreme(children, c, measure, depth - 1));
+            below.fold(measure(b), f32::max)
         }
+        let extreme = |b: usize, measure: &dyn Fn(usize) -> f32| extreme(&children, b, measure, n);
         // Follows a branch towards its extreme, one body at a time.
         let follow = |start: usize, measure: &dyn Fn(usize) -> f32| {
             let mut chain = vec![start];
-            while let Some(&next) = children[*chain.last().unwrap()].iter().max_by(|&&a, &&b| extreme(&children, a, measure).total_cmp(&extreme(&children, b, measure))) {
+            while let Some(&next) = children[*chain.last().unwrap()].iter().max_by(|&&a, &&b| extreme(a, measure).total_cmp(&extreme(b, measure))) {
+                if chain.contains(&next) {
+                    break;
+                }
                 chain.push(next);
             }
             chain
@@ -102,7 +108,7 @@ impl Layout {
         let low = |b: usize| -at(b).y;
         let high = |b: usize| at(b).y;
         let mut branches: Vec<usize> = children[pelvis].clone();
-        branches.sort_by(|&a, &b| extreme(&children, b, &low).total_cmp(&extreme(&children, a, &low)));
+        branches.sort_by(|&a, &b| extreme(b, &low).total_cmp(&extreme(a, &low)));
         let legs: Vec<Limb> = branches
             .iter()
             .take(2)
@@ -112,7 +118,7 @@ impl Layout {
             })
             .collect();
 
-        let trunk = branches.iter().skip(2).copied().max_by(|&a, &b| extreme(&children, a, &high).total_cmp(&extreme(&children, b, &high)));
+        let trunk = branches.iter().skip(2).copied().max_by(|&a, &b| extreme(a, &high).total_cmp(&extreme(b, &high)));
         let mut arms = Vec::new();
         let mut chest = None;
         if let Some(trunk) = trunk {
@@ -122,7 +128,7 @@ impl Layout {
             let mut off: Vec<(f32, usize, usize)> = spine
                 .iter()
                 .flat_map(|&s| children[s].iter().filter(|c| !spine.contains(c)).map(move |&c| (s, c)))
-                .map(|(s, c)| (extreme(&children, c, &side), s, c))
+                .map(|(s, c)| (extreme(c, &side), s, c))
                 .collect();
             off.sort_by(|a, b| b.0.total_cmp(&a.0));
             for &(_, s, c) in off.iter().take(2) {
@@ -333,6 +339,18 @@ mod tests {
         assert_eq!(Behaviour::from_name("CatchFall"), Some(Behaviour::CatchFall));
         assert_eq!(Behaviour::from_name("catch fall"), Some(Behaviour::CatchFall));
         assert_eq!(Behaviour::from_name("Writhe"), None);
+    }
+
+    /// A rig whose joints loop (only possible from a malformed file) must not hang.
+    #[test]
+    fn looping_rig_does_not_hang() {
+        let skeleton = humanoid_skeleton();
+        let mut rig = humanoid_rig(&skeleton);
+        let (knee, ankle) = (rig.body_index("l_knee").unwrap(), rig.body_index("l_ankle").unwrap());
+        let mut back = rig.joints.iter().find(|j| j.body == ankle).unwrap().clone();
+        (back.body, back.parent_body) = (knee, ankle);
+        rig.joints.push(back);
+        Layout::new(&rig, &skeleton);
     }
 
     #[test]
