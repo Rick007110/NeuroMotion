@@ -12,6 +12,7 @@ use eframe::egui::{
 
 use super::actions::Action;
 use super::icons::{self, Icon};
+use super::menu::add_clip_items;
 use super::selection::Selection;
 use super::shortcuts;
 use super::theme;
@@ -33,6 +34,8 @@ pub struct TimelineState {
     last_width: f32,
     scroll_y: f32,
     drag: Option<Drag>,
+    /// Timeline frame under the pointer when a lane's context menu opened.
+    menu_frame: i32,
 }
 
 impl Default for TimelineState {
@@ -44,6 +47,7 @@ impl Default for TimelineState {
             last_width: 0.0,
             scroll_y: 0.0,
             drag: None,
+            menu_frame: 0,
         }
     }
 }
@@ -118,7 +122,7 @@ pub fn show(
     let grid_painter = painter.with_clip_rect(lanes);
     for frame in visible_ticks(&view, lanes_left, lane_width, step) {
         let x = to_x(frame as f32);
-        grid_painter.line_segment([pos2(x, lanes.top()), pos2(x, lanes.bottom())], Stroke::new(1.0, theme::GRID));
+        grid_painter.line_segment([pos2(x, lanes.top()), pos2(x, lanes.bottom())], Stroke::new(1.0_f32, theme::GRID));
     }
 
     let mut y = body.top() - state.scroll_y;
@@ -159,8 +163,19 @@ pub fn show(
                 if lane_response.clicked() {
                     *selection = Selection::None;
                 }
-                track_header(ui, &header_painter, header.intersect(body), header, doc, selection, index, id);
-                track_lane(ui, &lane_painter, lane, lanes, &view, lanes_left, state, doc, selection, index, id);
+                // Right-click: add a clip where the pointer is. The playhead moves there
+                // too, so an active pose captures the pose at its own start.
+                if lane_response.secondary_clicked() {
+                    if let Some(pos) = lane_response.interact_pointer_pos() {
+                        state.menu_frame = view.x_to_frame(pos.x, lanes_left).round() as i32;
+                        playback.pause();
+                        playback.seek(state.menu_frame as f64, range);
+                    }
+                }
+                let frame = state.menu_frame;
+                lane_response.context_menu(|ui| track_menu(ui, doc, selection, actions, id, Some(frame)));
+                track_header(ui, &header_painter, header.intersect(body), header, doc, selection, actions, index, id);
+                track_lane(ui, &lane_painter, lane, lanes, &view, lanes_left, state, doc, selection, actions, index, id);
             }
             Row::Channel { clip, channel } => {
                 lane_painter.rect_filled(lane, 0.0, theme::CHANNEL_BG);
@@ -170,12 +185,12 @@ pub fn show(
         }
         painter.with_clip_rect(body).line_segment(
             [row_rect.left_bottom(), row_rect.right_bottom()],
-            Stroke::new(1.0, Color32::from_black_alpha(60)),
+            Stroke::new(1.0_f32, Color32::from_black_alpha(60)),
         );
     }
 
     // Header column divider, out-of-range shading, ruler, then the playhead on top.
-    painter.line_segment([pos2(lanes_left, rect.top()), pos2(lanes_left, rect.bottom())], Stroke::new(1.0, Color32::from_black_alpha(120)));
+    painter.line_segment([pos2(lanes_left, rect.top()), pos2(lanes_left, rect.bottom())], Stroke::new(1.0_f32, Color32::from_black_alpha(120)));
     for shade in [
         Rect::from_min_max(pos2(lanes_left, ruler.top()), pos2(to_x(range.start as f32).clamp(lanes_left, rect.right()), rect.bottom())),
         Rect::from_min_max(pos2(to_x(range.end as f32).clamp(lanes_left, rect.right()), ruler.top()), rect.max),
@@ -319,22 +334,56 @@ fn character_header(
     painter: &Painter,
     visible: Rect,
     header: Rect,
-    doc: &Document,
+    doc: &mut Document,
     selection: &mut Selection,
     id: CharacterId,
 ) {
     let Some(character) = doc.project.character(id) else { return };
     let selected = *selection == Selection::Character(id);
+    let title = format!("{}  ·  {}", character.name, character.kind.label().to_lowercase());
     painter.rect_filled(header, 0.0, if selected { theme::ACCENT.gamma_multiply(0.25) } else { theme::CHARACTER_BG });
     painter.text(
         pos2(header.left() + 8.0, header.center().y),
         Align2::LEFT_CENTER,
-        format!("{}  ·  {}", character.name, character.kind.label().to_lowercase()),
+        title,
         FontId::proportional(11.5),
         theme::ACCENT,
     );
-    if ui.interact(visible, ui.id().with(("character_header", id)), Sense::click()).clicked() {
+    let response = ui.interact(visible, ui.id().with(("character_header", id)), Sense::click());
+    if response.clicked() {
         *selection = Selection::Character(id);
+    }
+    response.context_menu(|ui| {
+        if ui.button("Add Track").clicked() {
+            *selection = Selection::Track(add_track(doc, id));
+            ui.close_menu();
+        }
+    });
+}
+
+/// A new top track for a character, named after how many it has.
+fn add_track(doc: &mut Document, character: CharacterId) -> TrackId {
+    let name = format!("Track {}", doc.project.tracks_of(character).count() + 1);
+    doc.add_track(character, &name)
+}
+
+/// Right-click menu of a track: add a clip of any kind at `frame` (if given), add a
+/// track, delete this one.
+fn track_menu(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, actions: &mut Vec<Action>, track: TrackId, frame: Option<i32>) {
+    let Some(character) = doc.project.track(track).map(|t| t.character) else { return };
+    if let Some(frame) = frame {
+        ui.weak(format!("Add at frame {frame}"));
+        add_clip_items(ui, actions, doc.project.character(character), Some((track, frame)));
+        ui.separator();
+    }
+    if ui.button("Add Track").clicked() {
+        *selection = Selection::Track(add_track(doc, character));
+        ui.close_menu();
+    }
+    if ui.button("Delete Track").clicked() {
+        *selection = Selection::Track(track);
+        actions.push(Action::Delete);
+        ui.close_menu();
     }
 }
 
@@ -346,6 +395,7 @@ fn track_header(
     header: Rect,
     doc: &mut Document,
     selection: &mut Selection,
+    actions: &mut Vec<Action>,
     index: usize,
     id: TrackId,
 ) {
@@ -380,6 +430,7 @@ fn track_header(
     } else if header_response.clicked() {
         *selection = Selection::Track(id);
     }
+    header_response.context_menu(|ui| track_menu(ui, doc, selection, actions, id, None));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -393,6 +444,7 @@ fn track_lane(
     state: &mut TimelineState,
     doc: &mut Document,
     selection: &mut Selection,
+    actions: &mut Vec<Action>,
     track_index: usize,
     track: TrackId,
 ) {
@@ -429,10 +481,10 @@ fn track_lane(
                 pos2(to_x((props.end() - props.blend_out) as f32), held),
                 pos2(x1, bottom),
             ];
-            painter.add(Shape::line(envelope, Stroke::new(1.5, Color32::from_white_alpha(120))));
+            painter.add(Shape::line(envelope, Stroke::new(1.5_f32, Color32::from_white_alpha(120))));
         } else {
             painter.rect_filled(r, 4.0, fill.gamma_multiply(0.22));
-            painter.rect_stroke(r, 4.0, Stroke::new(1.0, fill), StrokeKind::Inside);
+            painter.rect_stroke(r, 4.0, Stroke::new(1.0_f32, fill), StrokeKind::Inside);
         }
         painter.with_clip_rect(r.intersect(lanes).shrink(1.0)).text(
             pos2(r.left() + 7.0, r.center().y),
@@ -442,9 +494,9 @@ fn track_lane(
             if props.enabled { Color32::WHITE } else { theme::DIM_TEXT },
         );
         if selected {
-            painter.rect_stroke(r, 4.0, Stroke::new(2.0, theme::SELECTED), StrokeKind::Inside);
+            painter.rect_stroke(r, 4.0, Stroke::new(2.0_f32, theme::SELECTED), StrokeKind::Inside);
         } else if response.hovered() {
-            painter.rect_stroke(r, 4.0, Stroke::new(1.0, Color32::from_white_alpha(80)), StrokeKind::Inside);
+            painter.rect_stroke(r, 4.0, Stroke::new(1.0_f32, Color32::from_white_alpha(80)), StrokeKind::Inside);
         }
 
         if response.hovered() {
@@ -475,6 +527,24 @@ fn track_lane(
             state.drag = None;
             doc.end_gesture();
         }
+        response.context_menu(|ui| {
+            if ui.button("Duplicate Clip").clicked() {
+                *selection = Selection::Clip(id);
+                actions.push(Action::DuplicateClip);
+                ui.close_menu();
+            }
+            if ui.button(if props.enabled { "Disable Clip" } else { "Enable Clip" }).clicked() {
+                let after = ClipProps { enabled: !props.enabled, ..props.clone() };
+                let label = if after.enabled { "Enable clip" } else { "Disable clip" };
+                doc.apply(label, Edit::ClipProps { clip: id, before: props.clone(), after }, false);
+                ui.close_menu();
+            }
+            if ui.button("Delete Clip").clicked() {
+                *selection = Selection::Clip(id);
+                actions.push(Action::Delete);
+                ui.close_menu();
+            }
+        });
     }
 }
 
@@ -560,7 +630,7 @@ fn channel_lane(
         let s = if response.hovered() || selected { KEY_SIZE + 1.0 } else { KEY_SIZE };
         let diamond = vec![center + vec2(0.0, -s), center + vec2(s, 0.0), center + vec2(0.0, s), center + vec2(-s, 0.0)];
         let fill = if selected { theme::SELECTED } else { theme::KEY };
-        painter.add(Shape::convex_polygon(diamond, fill, Stroke::new(1.0, Color32::from_black_alpha(160))));
+        painter.add(Shape::convex_polygon(diamond, fill, Stroke::new(1.0_f32, Color32::from_black_alpha(160))));
 
         if response.clicked() || response.drag_started() {
             *selection = Selection::Key { clip: clip_id, channel, frame: key.frame };
@@ -611,15 +681,15 @@ fn draw_ruler(
     if minor as f32 * view.px_per_frame >= 5.0 {
         for frame in visible_ticks(view, lanes_left, lane_width, minor) {
             let x = view.frame_to_x(frame as f32, lanes_left);
-            ruler_painter.line_segment([pos2(x, ruler.bottom() - 4.0), pos2(x, ruler.bottom())], Stroke::new(1.0, theme::DIM_TEXT.gamma_multiply(0.5)));
+            ruler_painter.line_segment([pos2(x, ruler.bottom() - 4.0), pos2(x, ruler.bottom())], Stroke::new(1.0_f32, theme::DIM_TEXT.gamma_multiply(0.5)));
         }
     }
     for frame in visible_ticks(view, lanes_left, lane_width, step) {
         let x = view.frame_to_x(frame as f32, lanes_left);
-        ruler_painter.line_segment([pos2(x, ruler.bottom() - 9.0), pos2(x, ruler.bottom())], Stroke::new(1.0, theme::DIM_TEXT));
+        ruler_painter.line_segment([pos2(x, ruler.bottom() - 9.0), pos2(x, ruler.bottom())], Stroke::new(1.0_f32, theme::DIM_TEXT));
         ruler_painter.text(pos2(x + 3.0, ruler.top() + 3.0), Align2::LEFT_TOP, frame.to_string(), FontId::monospace(10.5), theme::DIM_TEXT);
     }
-    painter.line_segment([ruler.left_bottom(), ruler.right_bottom()], Stroke::new(1.0, Color32::from_black_alpha(140)));
+    painter.line_segment([ruler.left_bottom(), ruler.right_bottom()], Stroke::new(1.0_f32, Color32::from_black_alpha(140)));
 
     let response = ui.interact(ruler, ui.id().with("ruler"), Sense::click_and_drag());
     if response.hovered() {
@@ -633,7 +703,7 @@ fn draw_playhead(painter: &Painter, rect: Rect, ruler: Rect, x: f32, frame: i32)
         return;
     }
     let painter = painter.with_clip_rect(Rect::from_min_max(pos2(ruler.left(), rect.top()), rect.max));
-    painter.line_segment([pos2(x, ruler.top()), pos2(x, rect.bottom())], Stroke::new(1.5, theme::PLAYHEAD));
+    painter.line_segment([pos2(x, ruler.top()), pos2(x, rect.bottom())], Stroke::new(1.5_f32, theme::PLAYHEAD));
     let label = frame.to_string();
     let width = 10.0 + 7.0 * label.len() as f32;
     let tag = Rect::from_min_size(pos2(x - width / 2.0, ruler.top() + 2.0), vec2(width, 15.0));

@@ -109,3 +109,42 @@ pub fn local_rotation(rest: [f32; 4], values: [f32; 6]) -> Quat {
     );
     (Quat::from_array(rest).normalize() * euler).normalize()
 }
+
+/// The inverse of [`world_transforms`]: each joint's rotation and position relative to
+/// its parent joint's frame (rest rotation included). Roots keep their world transform.
+pub fn local_transforms(skeleton: &SkeletonRef, world: &[(Quat, Vec3)]) -> Vec<(Quat, Vec3)> {
+    skeleton
+        .joints
+        .iter()
+        .enumerate()
+        .map(|(i, joint)| {
+            let (rot, pos) = world[i];
+            match joint.parent.filter(|&p| p < i) {
+                Some(p) => {
+                    let inverse = world[p].0.inverse();
+                    ((inverse * rot).normalize(), inverse * (pos - world[p].1))
+                }
+                None => (rot, pos),
+            }
+        })
+        .collect()
+}
+
+/// Euler angles of `q` in degrees, in `order` (intrinsic, so `XYZ` is Rx·Ry·Rz).
+/// Every rotation has two angle sets plus whole turns; this picks the one closest to
+/// `near` (usually the previous frame's), so sampled curves never jump or flip.
+pub fn euler_near(q: Quat, order: EulerRot, near: [f32; 3]) -> [f32; 3] {
+    let (a, b, c) = q.normalize().to_euler(order);
+    let (a, b, c) = (a.to_degrees(), b.to_degrees(), c.to_degrees());
+    let distance = |e: &[f32; 3]| e.iter().zip(near).map(|(x, n)| (x - n).abs()).sum::<f32>();
+    [[a, b, c], [a + 180.0, 180.0 - b, c + 180.0]]
+        .map(|mut e| {
+            for (x, n) in e.iter_mut().zip(near) {
+                *x -= ((*x - n) / 360.0).round() * 360.0;
+            }
+            e
+        })
+        .into_iter()
+        .min_by(|x, y| distance(x).total_cmp(&distance(y)))
+        .unwrap_or([a, b, c])
+}
