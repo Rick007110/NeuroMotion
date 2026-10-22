@@ -448,8 +448,8 @@ fn body_pose(project: &Project, character: CharacterId, body: &str, frame: f32) 
 // The stand-ins
 
 /// Tackle: a tackler runs in with momentum (collision with momentum), is joined to the
-/// other character by a strong JoinBodies while their bodies collide, and goes fully
-/// simulated mid-scene.
+/// other character by a strong JoinBodies while their bodies collide, drives it into the
+/// ground and goes fully simulated mid-scene, still pressing on it.
 pub fn tackle() -> Project {
     let mut p = new_scene("Tackle", 2.0);
     let victim = person(&mut p, "victim", Vec3::ZERO, 180.0, &[]);
@@ -463,8 +463,14 @@ pub fn tackle() -> Project {
         ("r_knee", Property::RotX, 25.0),
     ];
     let tackler = person(&mut p, "tackler", Vec3::new(0.0, 0.0, -1.6), 0.0, &reach);
-    // 5 m/s run, kinematic until frame 30.
-    motion(&mut p, tackler, "Run", 0, 30, true, vec![channel("hips", Property::PosZ, &[(0, -1.6), (30, 0.9)])]);
+    // 5 m/s run, diving onto the victim and driving it into the ground, kinematic until
+    // frame 30.
+    let dive = vec![
+        channel("hips", Property::PosZ, &[(0, -1.6), (15, -0.35), (30, 0.4)]),
+        channel("hips", Property::PosY, &[(0, 0.0), (15, 0.0), (30, -0.2)]),
+        channel("hips", Property::RotX, &[(0, 0.0), (15, 0.0), (30, 30.0)]),
+    ];
+    motion(&mut p, tackler, "Run and dive", 0, 30, true, dive);
     event(&mut p, tackler, "Simulation", 0, 1, &[("physicsLevel", "CollisionOnlyWithInertia"), ("momentumScale", "0.3")]);
     level(&mut p, tackler, 30, "FullPhysics");
     let targets = ["tackler.MetaBodies.l_wrist", "tackler.MetaBodies.r_wrist", "tackler.MetaBodies.chest", "tackler.MetaBodies.head", "victim.MetaBodies.chest"];
@@ -683,7 +689,8 @@ mod tests {
     #[test]
     #[ignore = "debugging aid"]
     fn trace_stand_in() {
-        let name = std::env::var("NM_TRACE").unwrap_or_default();
+        // Runs with every `--ignored` sweep; only does something when asked to.
+        let Ok(name) = std::env::var("NM_TRACE") else { return };
         let project = match name.as_str() {
             "tackle" => tackle(),
             "balcony" => balcony(),
@@ -720,7 +727,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "stand-in failure: box feet sink into the balcony"]
     fn balcony_crowd_is_stable() {
         check(balcony());
     }
@@ -746,13 +752,11 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "stand-in failure: falls through moving scenery"]
     fn rotating_floor_carries_character() {
         check(rotating_floor());
     }
 
     #[test]
-    #[ignore = "stand-in failure: flat cylinders collide as spheres"]
     fn turntable_carries_character() {
         let project = turntable();
         let sim = check(project.clone());
