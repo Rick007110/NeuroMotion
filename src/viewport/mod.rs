@@ -171,20 +171,20 @@ impl Viewport {
             let Some(parent) = joint.parent else { continue };
             let flat = |p: Vec3| Vec3::new(p.x, 0.0, p.z);
             if let (Some(a), Some(b)) = (project(flat(world[parent])), project(flat(world[i]))) {
-                painter.line_segment([a, b], Stroke::new(5.0, SHADOW));
+                painter.line_segment([a, b], Stroke::new(5.0_f32, SHADOW));
             }
         }
         for (i, joint) in skeleton.joints.iter().enumerate() {
             let Some(parent) = joint.parent else { continue };
             if let (Some(a), Some(b)) = (project(world[parent]), project(world[i])) {
-                painter.line_segment([a, b], Stroke::new(3.0, color_of(&joint.name)));
+                painter.line_segment([a, b], Stroke::new(3.0_f32, color_of(&joint.name)));
             }
         }
         for (i, joint) in skeleton.joints.iter().enumerate() {
             let Some(p) = project(world[i]) else { continue };
             let radius = if joint.parent.is_none() { 5.5 } else { 3.5 };
             painter.circle_filled(p, radius, color_of(&joint.name));
-            painter.circle_stroke(p, radius, Stroke::new(1.0, BG_BOTTOM));
+            painter.circle_stroke(p, radius, Stroke::new(1.0_f32, BG_BOTTOM));
             if self.show_joint_names {
                 painter.text(
                     p + vec2(7.0, -7.0),
@@ -241,7 +241,7 @@ fn paint_bodies(
         let e = project(p + side * r)?;
         Some((c, c.distance(e)))
     };
-    let edge = Stroke::new(1.0, color.gamma_multiply(1.8));
+    let edge = Stroke::new(1.0_f32, color.gamma_multiply(1.8));
     for (def, &(rotation, position)) in rig.bodies.iter().zip(bodies) {
         for shape in &def.shapes {
             let r = rotation * Quat::from_array(shape.frame.rotation).normalize();
@@ -311,7 +311,7 @@ fn paint_grid(painter: &egui::Painter, project: &impl Fn(Vec3) -> Option<Pos2>) 
             (Vec3::new(-extent, 0.0, t), Vec3::new(extent, 0.0, t)),
         ] {
             if let (Some(a), Some(b)) = (project(a), project(b)) {
-                painter.line_segment([a, b], Stroke::new(1.0, color));
+                painter.line_segment([a, b], Stroke::new(1.0_f32, color));
             }
         }
     }
@@ -328,7 +328,7 @@ fn paint_axis_gizmo(painter: &egui::Painter, rect: Rect, view: &Mat4) {
     for (axis, label, color) in axes {
         let v = view.transform_vector3(axis);
         let tip = origin + vec2(v.x, -v.y) * 22.0;
-        painter.line_segment([origin, tip], Stroke::new(2.0, color));
+        painter.line_segment([origin, tip], Stroke::new(2.0_f32, color));
         painter.text(tip, Align2::CENTER_CENTER, label, FontId::proportional(11.0), color);
     }
 }
