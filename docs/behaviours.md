@@ -86,8 +86,8 @@ Each tick:
 
 Results on the placeholder (test `catch_fall_lands_on_the_hands_first`): shoved
 forwards at 3.5 or 5 m/s, diagonally, sideways or backwards, the hands touch first.
-The head and chest follow 40 or more frames later, or the arms hold them off the ground
-altogether. Shoved forwards limp, it lands on its face.
+The head and chest follow half a second or more later, or the arms hold them off the
+ground altogether. Shoved forwards limp, it lands on its face.
 
 ## Solver change behind them
 
