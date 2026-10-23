@@ -1811,6 +1811,104 @@ mod tests {
         assert!((fallen - 2.4).abs() < 0.1, "fell {fallen} m");
     }
 
+    /// A negative linear strength pushes with that many newtons: -10 N down on 2 kg adds
+    /// 5 m/s² to gravity.
+    #[test]
+    fn negative_linear_strength_pushes_with_a_steady_force() {
+        let mut w = world();
+        w.ground = None;
+        let b = ball(&mut w, Vec3::new(0.0, 10.0, 0.0), 0.1, 2.0);
+        w.locks.push(Lock { anchor: None, body: b, target: (Quat::IDENTITY, Vec3::new(0.0, 10.0, 0.0)), linear: Vec3::new(0.0, -10.0, 0.0), angular: Vec3::ZERO });
+        run(&mut w, 1.0);
+        let v = w.bodies[b].linear_velocity;
+        let expected = -9.81 - 10.0 / 2.0;
+        assert!((v.y - expected).abs() < 1e-3, "{v}, expected {expected} m/s down");
+        assert!(v.x.abs() < 1e-6 && v.z.abs() < 1e-6, "{v}");
+    }
+
+    /// A negative angular strength turns with that many newton-metres about the world
+    /// axis: -100 N·m about X spins a ball of 1 kg·m² at -100 rad/s².
+    #[test]
+    fn negative_angular_strength_turns_with_a_steady_torque() {
+        let mut w = world();
+        w.ground = None;
+        let b = ball(&mut w, Vec3::new(0.0, 10.0, 0.0), 0.5, 10.0);
+        let inertia = 0.4 * 10.0 * 0.5 * 0.5;
+        w.locks.push(Lock { anchor: None, body: b, target: (Quat::IDENTITY, Vec3::new(0.0, 10.0, 0.0)), linear: Vec3::ZERO, angular: Vec3::new(-100.0, 0.0, 0.0) });
+        run(&mut w, 0.2);
+        let spin = w.bodies[b].angular_velocity;
+        let expected = -100.0 * 0.2 / inertia;
+        assert!((spin.x - expected).abs() < 1e-3, "{spin}, expected {expected} rad/s about X");
+        assert!(spin.y.abs() < 1e-5 && spin.z.abs() < 1e-5, "{spin}");
+        // Half of -100 rad/s² times (0.2 s)²: -2 rad about X.
+        let off = w.bodies[b].rotation.angle_between(Quat::from_rotation_x(-2.0));
+        assert!(off < 0.05, "{off} rad away from a -2 rad turn about X");
+    }
+
+    /// Driving axes and holding axes on one lock: X and Y-rotation hold, the rest push.
+    /// The ball stays at x = 0 and stops turning about Y, while it falls faster than
+    /// gravity and spins about X.
+    #[test]
+    fn negative_axes_drive_while_positive_axes_of_the_same_lock_hold() {
+        let mut w = world();
+        w.ground = None;
+        let b = ball(&mut w, Vec3::new(0.0, 10.0, 0.0), 0.5, 10.0);
+        w.bodies[b].linear_velocity = Vec3::new(1.0, 0.0, 0.0);
+        w.bodies[b].angular_velocity = Vec3::new(0.0, 2.0, 0.0);
+        w.locks.push(Lock {
+            anchor: None,
+            body: b,
+            target: (Quat::IDENTITY, Vec3::new(0.0, 10.0, 0.0)),
+            linear: Vec3::new(1e5, -20.0, 0.0),
+            angular: Vec3::new(-100.0, 1e5, 0.0),
+        });
+        run(&mut w, 0.5);
+        let body = &w.bodies[b];
+        assert!(body.position.x.abs() < 0.01, "held axis drifted: {}", body.position);
+        assert!((body.linear_velocity.y - (-9.81 - 2.0) * 0.5).abs() < 1e-2, "{}", body.linear_velocity);
+        assert!(body.angular_velocity.y.abs() < 0.05, "held rotation still turning: {}", body.angular_velocity);
+        assert!((body.angular_velocity.x + 50.0).abs() < 0.5, "{}", body.angular_velocity);
+    }
+
+    /// A join's negative axis pushes the body and its anchor apart with equal and
+    /// opposite force, along the anchor's own axis (here turned to world Y), so their
+    /// momentum stays what it was. Its positive axes keep holding.
+    #[test]
+    fn negative_join_axis_pushes_body_and_anchor_apart_equally() {
+        let mut w = world();
+        w.ground = None;
+        w.gravity = Vec3::ZERO;
+        let anchor = ball(&mut w, Vec3::new(0.0, 5.0, 0.0), 0.1, 2.0);
+        let body = ball(&mut w, Vec3::new(0.0, 4.5, 0.0), 0.1, 5.0);
+        let turn = Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
+        w.bodies[anchor].rotation = turn;
+        // The anchor's X is world Y: the push on the body is down, away from the anchor.
+        let offset = turn.inverse() * (w.bodies[body].position - w.bodies[anchor].position);
+        w.locks.push(Lock { anchor: Some(anchor), body, target: (Quat::IDENTITY, offset), linear: Vec3::new(-10.0, 1e5, 1e5), angular: Vec3::ZERO });
+        // Keep the anchor from turning (a torque only, which leaves momentum alone): a
+        // join's held axes pivot about its target offset, not where the body slid to.
+        let at = w.bodies[anchor].position;
+        w.locks.push(Lock { anchor: None, body: anchor, target: (turn, at), linear: Vec3::ZERO, angular: Vec3::splat(1e5) });
+        run(&mut w, 0.5);
+        let (va, vb) = (w.bodies[anchor].linear_velocity, w.bodies[body].linear_velocity);
+        assert!((vb.y - (-10.0 * 0.5 / 5.0)).abs() < 1e-3, "body {vb}");
+        assert!((va.y - (10.0 * 0.5 / 2.0)).abs() < 1e-3, "anchor {va}");
+        let momentum = va * 2.0 + vb * 5.0;
+        assert!(momentum.length() < 1e-4, "momentum {momentum}");
+
+        // Knocked sideways, the held axes drag the anchor along: still no momentum gained
+        // or lost, and no gap across the anchor's Y and Z.
+        w.bodies[body].linear_velocity.x += 1.0;
+        let before = w.bodies[anchor].linear_velocity * 2.0 + w.bodies[body].linear_velocity * 5.0;
+        run(&mut w, 0.5);
+        let (a, b) = (&w.bodies[anchor], &w.bodies[body]);
+        let after = a.linear_velocity * 2.0 + b.linear_velocity * 5.0;
+        assert!((after - before).length() < 1e-3, "momentum {before} -> {after}");
+        let gap = a.rotation.inverse() * (b.position - a.position) - offset;
+        assert!(gap.y.abs() < 0.01 && gap.z.abs() < 0.01, "held axes opened {gap}");
+        assert!(gap.x < -0.5, "drive axis didn't push apart: {gap}");
+    }
+
     /// A light body joined to a moving anchor holds a heavy load hanging from it by a
     /// joint, and follows the anchor.
     #[test]
