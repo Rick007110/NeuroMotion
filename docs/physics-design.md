@@ -18,7 +18,7 @@ target is the same model, the same parameters, and the same behaviour.
 | Material pairs → restitution, friction, adhesion, softness | Same table. Friction defaults to endorphin-style force caps (newtons per contact) |
 | Simulation levels; momentum carried into physics | Same four levels; kinematic bodies carry animation velocity into the switch |
 | Force events are velocity changes on bodies | Same |
-| Lock and join constraints, with per-axis position and orientation strengths | Rigid constraints whose force on each axis is capped by its strength (read as Karma's relative-position-relative-orientation joint; 0 = free) |
+| Lock and join constraints, with per-axis position and orientation strengths | Rigid constraints whose force on each axis is capped by its strength (read as Karma's relative-position-relative-orientation joint; 0 = free; a negative strength pushes or turns instead, lesson 13) |
 | Transitions blend simulation back to animation | Same, linear window, then the required level |
 
 ## Solver
@@ -192,6 +192,32 @@ Simulating the real scenes with props being props added two more:
     Scenes without locks are unchanged. Scenes with them simulate 1.3-3 times slower,
     still faster than real time.
 
+A user's own scene, Back-Flip-To-Combo, added one more. In endorphin the character
+crouches on a box, backflips off it and lands; in NeuroMotion it floated above the box.
+
+13. **A negative lock strength drives instead of holding, and a character's massless
+    body moves.** Two things held it up:
+    - The flip comes from two locks on pelvis and upper spine with an angular strength
+      of (-100, 0, 0). endorphin's help doesn't mention negative strengths, but the
+      scene only works if they push: such an axis is no longer held (it drops out of
+      the lock's block like a free one) and instead gets a steady force (N) or torque
+      (N·m) of that value along the lock's axis, each substep, before the solve:
+      world axes for world locks, the anchor's axes for joins. The locked body gets
+      it and its anchor the opposite, so a join's drive conserves momentum. Axes
+      with a positive strength on the same lock still hold. -100 about X spins a body
+      backwards about the world's X axis (head towards -Z).
+    - The character has a helper body, NormalMass, whose inertial body is a
+      zero-sized Sphyl, so its mass comes out as 0. Lesson 11's rule (no mass: fixed
+      in place) made it a fixed point inside the character, holding it in the air.
+      That rule is for the environment's background now; a character's or prop's
+      body without mass gets a token 1 kg (inertia 0.004 kg·m² on each axis).
+    With both, the character leaves the box, but not yet when it does in endorphin.
+    The stand-in shows one reason: left alone, the placeholder doesn't stand. 25 N
+    toe locks can't hold it and the pelvis lock leaves pitch free, so it tips
+    forwards from about frame 70, leans about 25° when the drive starts at 246, and
+    the 200 N·m only slows that fall. Kept standing until the drive (Balance, in the
+    stand-in), it flips backwards off the box as in endorphin.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates the first two seconds of
@@ -212,7 +238,7 @@ set-up (ground, rigs, events, constraint targets and settings).
 Each failure also gets a stand-in built in code (`src/physics/scenes.rs`) with the
 same pattern, so it can be worked on without endorphin's files.
 
-Last run, with lessons 1-12 and the import fixes below (16 scenes; Bridge Escape is
+Last run, with lessons 1-12 and the import fixes below (before lesson 13) (16 scenes; Bridge Escape is
 skipped for size):
 
 | Result | Scenes |
@@ -251,6 +277,7 @@ What each stand-in reproduces:
 | Rotating Floor | No ground; a thin collision-only slab spinning and rocking | sinks through | rides it |
 | Turntable | No ground; a flat cylinder spinning | floats 0.9 m above it | rests on it |
 | Hanging weight | A 20-80 kg weight on a rope locked at the top, hanging straight (lesson 10) | 0.36 m stretch, 63 m/s | 1.5 cm, 0.6 m/s |
+| Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -74° at 297, leaves the box at 329, lands behind it at 393, -285° in all. Left alone: tips forwards and falls off the front at 348 |
 
 Of endorphin's behaviours, Balance and CatchFall now have controllers of their own
 (docs/behaviours.md). Scenes that depend on others (e.g. Stagger Walk's stagger)
@@ -267,6 +294,9 @@ simulate as if the character went limp.
 - An exact solve for joint anchors where no lock holds the chain (lesson 12 covers
   what locks hold).
 - Interpolated output between frames.
+- Joins with free position axes: the held axes pivot about the offset captured at the
+  start, not where the body has slid to along a free axis, so they drift when the
+  anchor turns (a body pushed 4 m along a join's free axis drifted 16 cm across it).
 
 ## Improvements planned beyond endorphin
 
