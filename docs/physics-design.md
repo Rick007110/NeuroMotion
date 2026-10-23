@@ -218,6 +218,21 @@ crouches on a box, backflips off it and lands; in NeuroMotion it floated above t
     the 200 N·m only slows that fall. Kept standing until the drive (Balance, in the
     stand-in), it flips backwards off the box as in endorphin.
 
+Writing the test for a join's drive showed one more.
+
+14. **A join's held axes turn with the anchor about where the body is, not where it
+    should be.** A lock's rows used the target offset captured when it switched on
+    as the anchor's lever. That is right while the body sits at the target, but a
+    join with a free or driving position axis lets the body slide far along it. When
+    the anchor turned, the body's point moved sideways at ω × (actual offset) while
+    the rows counted only ω × (target offset), so the held axes drifted: a body
+    driven 4 m along a join's axis, knocked sideways so the anchor turned, opened
+    16 cm across a held axis. The lever is now the body's actual offset from the
+    anchor, as a prismatic joint uses the current separation; the position error is
+    measured from the target as before. The same gap now stays under 1 mm. For a
+    held lock the two levers differ only by the lock's error, so every join's rows
+    change by about that much.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates the first two seconds of
@@ -294,9 +309,6 @@ simulate as if the character went limp.
 - An exact solve for joint anchors where no lock holds the chain (lesson 12 covers
   what locks hold).
 - Interpolated output between frames.
-- Joins with free position axes: the held axes pivot about the offset captured at the
-  start, not where the body has slid to along a free axis, so they drift when the
-  anchor turns (a body pushed 4 m along a join's free axis drifted 16 cm across it).
 
 ## Improvements planned beyond endorphin
 
