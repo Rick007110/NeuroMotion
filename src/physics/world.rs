@@ -342,7 +342,7 @@ struct MuscleBlock {
 struct LockBlock {
     a: usize,
     b: usize,
-    /// Held point on A relative to A's centre; on B it's B's centre.
+    /// Held point on A relative to A's centre: where B's centre is now.
     ra: Vec3,
     /// Lock axes (columns), world space.
     frame: Mat3,
@@ -924,13 +924,16 @@ impl World {
                 None => (Quat::IDENTITY, Vec3::ZERO),
             };
             let body = &self.bodies[b];
-            let ra = anchor_rot * lock.target.1;
+            // The lever is where the body is, not where it should be: a join with a free
+            // or driving axis lets the body slide far from its target, and the held axes
+            // must turn with the anchor about that point or they drift as it turns.
+            let ra = body.position - anchor_pos;
             let frame = Mat3::from_quat(anchor_rot);
             let mut turn = body.rotation * (anchor_rot * lock.target.0).inverse();
             if turn.w < 0.0 {
                 turn = -turn;
             }
-            let position_error = frame.transpose() * (body.position - (anchor_pos + ra));
+            let position_error = frame.transpose() * (body.position - (anchor_pos + anchor_rot * lock.target.1));
             let rotation_error = frame.transpose() * turn.to_scaled_axis();
 
             // Effective mass in lock axes: [linear; angular] rows, B's centre held.
@@ -1885,10 +1888,6 @@ mod tests {
         // The anchor's X is world Y: the push on the body is down, away from the anchor.
         let offset = turn.inverse() * (w.bodies[body].position - w.bodies[anchor].position);
         w.locks.push(Lock { anchor: Some(anchor), body, target: (Quat::IDENTITY, offset), linear: Vec3::new(-10.0, 1e5, 1e5), angular: Vec3::ZERO });
-        // Keep the anchor from turning (a torque only, which leaves momentum alone): a
-        // join's held axes pivot about its target offset, not where the body slid to.
-        let at = w.bodies[anchor].position;
-        w.locks.push(Lock { anchor: None, body: anchor, target: (turn, at), linear: Vec3::ZERO, angular: Vec3::splat(1e5) });
         run(&mut w, 0.5);
         let (va, vb) = (w.bodies[anchor].linear_velocity, w.bodies[body].linear_velocity);
         assert!((vb.y - (-10.0 * 0.5 / 5.0)).abs() < 1e-3, "body {vb}");
@@ -1896,8 +1895,9 @@ mod tests {
         let momentum = va * 2.0 + vb * 5.0;
         assert!(momentum.length() < 1e-4, "momentum {momentum}");
 
-        // Knocked sideways, the held axes drag the anchor along: still no momentum gained
-        // or lost, and no gap across the anchor's Y and Z.
+        // Knocked sideways, the held axes drag the anchor along and turn it while the
+        // body slides metres along the drive: still no momentum gained or lost, and no
+        // gap across the anchor's Y and Z.
         w.bodies[body].linear_velocity.x += 1.0;
         let before = w.bodies[anchor].linear_velocity * 2.0 + w.bodies[body].linear_velocity * 5.0;
         run(&mut w, 0.5);
