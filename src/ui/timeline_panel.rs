@@ -12,6 +12,7 @@ use eframe::egui::{
 
 use super::actions::Action;
 use super::icons::{self, Icon};
+use super::inspector::Gesture;
 use super::menu::add_clip_items;
 use super::selection::Selection;
 use super::shortcuts;
@@ -227,7 +228,7 @@ fn build_rows(doc: &Document, selection: Selection) -> Vec<Row> {
 fn transport_bar(
     ui: &mut Ui,
     state: &mut TimelineState,
-    doc: &Document,
+    doc: &mut Document,
     playback: &mut Playback,
     actions: &mut Vec<Action>,
 ) {
@@ -261,7 +262,23 @@ fn transport_bar(
         if field.changed() {
             playback.seek(frame as f64, range);
         }
-        ui.weak(format!("/ {}", range.end));
+        // The scene's last frame, editable here as well as on the project page.
+        let mut end = range.end;
+        let end_field = ui
+            .add(DragValue::new(&mut end).range(range.start + 1..=100_000).prefix("/ "))
+            .on_hover_text("Last frame of the scene: drag or type to change it");
+        let mut gesture = Gesture::default();
+        gesture.drag(&end_field);
+        let edit = (end != range.end).then(|| {
+            let before = doc.project.settings.clone();
+            let mut after = before.clone();
+            after.range.end = end;
+            Edit::Settings { before, after }
+        });
+        if edit.is_some() && state.auto_fit {
+            state.fit_requested = true;
+        }
+        gesture.commit(doc, "Change end frame", edit);
         ui.weak(timecode(playback.playhead(), fps));
         ui.separator();
         if icons::button(ui, Icon::Loop, &tip(Action::ToggleLoop), playback.looping).clicked() {
