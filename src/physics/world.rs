@@ -536,6 +536,7 @@ impl World {
         for body in self.bodies.iter_mut().filter(|b| b.is_dynamic()) {
             body.linear_velocity += self.gravity * h;
         }
+        self.apply_lock_drives(h);
         let mut sb: Vec<SolverBody> = self
             .bodies
             .iter()
@@ -635,6 +636,26 @@ impl World {
         self.lock_cache.clear();
         for l in &locks {
             self.lock_cache.insert(l.key, l.impulse);
+        }
+    }
+
+    /// A lock axis with a negative strength drives instead of holding: a steady force (N)
+    /// or torque (N·m) of that value along the lock's axis, on the locked body, and the
+    /// opposite on its anchor. endorphin's files use it to spin a character into a flip
+    /// or push a hand down (its help doesn't say so; the scenes do).
+    fn apply_lock_drives(&mut self, h: f32) {
+        for lock in &self.locks {
+            if lock.linear.min_element() >= 0.0 && lock.angular.min_element() >= 0.0 {
+                continue;
+            }
+            let frame = lock.anchor.map_or(Mat3::IDENTITY, |a| Mat3::from_quat(self.bodies[a].rotation));
+            let force = frame * lock.linear.min(Vec3::ZERO) * h;
+            let torque = frame * lock.angular.min(Vec3::ZERO) * h;
+            for (body, sign) in [(Some(lock.body), 1.0), (lock.anchor, -1.0)] {
+                let Some(body) = body.map(|b| &mut self.bodies[b]).filter(|b| b.is_dynamic()) else { continue };
+                body.linear_velocity += force * (sign * body.inv_mass);
+                body.angular_velocity += body.inv_inertia_world() * (torque * sign);
+            }
         }
     }
 

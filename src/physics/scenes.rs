@@ -869,7 +869,8 @@ mod tests {
             "catch_fall" => catch_fall_shove(Vec3::new(0.0, 0.0, 3.5), true),
             path if path.ends_with(".ens") => {
                 let mut project = crate::io::endorphin::import_scene(std::path::Path::new(path)).unwrap().project;
-                project.settings.range.end = project.settings.range.start + 2 * project.settings.fps as i32;
+                let seconds = std::env::var("NM_SECONDS").ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
+                project.settings.range.end = project.settings.range.end.min(project.settings.range.start + (seconds * project.settings.fps) as i32);
                 project
             }
             _ => panic!("set NM_TRACE to a stand-in's name or an .ens scene"),

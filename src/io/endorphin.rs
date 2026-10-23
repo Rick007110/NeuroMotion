@@ -423,7 +423,7 @@ fn add_character(project: &mut Project, node: Node, kind: CharacterKind, isotrop
         .unwrap_or_else(|| kind.label().to_owned());
     let name = node.attribute("name").unwrap_or("character");
     let skeleton = SkeletonRef { name: rig, source, joints };
-    let physics = read_rig(node, &nodes, &skeleton, isotropic);
+    let physics = read_rig(node, &nodes, &skeleton, isotropic, kind == CharacterKind::Environment);
     let id = project.add_character(name, kind, skeleton);
     if let Some(c) = project.characters.iter_mut().find(|c| c.id == id) {
         c.physics = physics;
@@ -760,7 +760,8 @@ fn read_physics_settings(project: &mut Project, scene: Node, engine: Node) {
 
 /// Bodies, joints and muscle presets of a character (or prop, or environment).
 /// `joint_nodes[i]` is the XML element of skeleton joint `i`.
-fn read_rig(node: Node, joint_nodes: &[Node], skeleton: &SkeletonRef, isotropic: bool) -> Option<PhysicsRig> {
+/// `scenery`: the environment, whose pieces without an inertial body stay fixed in place.
+fn read_rig(node: Node, joint_nodes: &[Node], skeleton: &SkeletonRef, isotropic: bool, scenery: bool) -> Option<PhysicsRig> {
     let body_of: Vec<Option<&str>> = joint_nodes.iter().map(|n| n.attribute("metaBody")).collect();
     let mut bodies = Vec::new();
     for mb in elements(child(node, "MetaBodies")).filter(|n| n.has_tag_name("MetaBody")) {
@@ -777,8 +778,11 @@ fn read_rig(node: Node, joint_nodes: &[Node], skeleton: &SkeletonRef, isotropic:
                 let mass = density * 1000.0 * geometry.volume();
                 Some((mass, geometry.inertia(mass)))
             })
-            // No inertial body: endorphin keeps it fixed in place, like the ground.
-            .unwrap_or((0.0, [0.0; 3]));
+            // No mass (no inertial body, or an empty one): scenery stays fixed in place, like
+            // the ground. A character's helper body (Back-Flip-To-Combo's zero-sized
+            // NormalMass) gets a token mass instead, or it would hold the character in the air.
+            .filter(|&(mass, _)| scenery || mass > 0.0)
+            .unwrap_or(if scenery { (0.0, [0.0; 3]) } else { (1.0, [0.004; 3]) });
         let shapes = elements(Some(mb))
             .filter(|n| n.has_tag_name("CollisionSurface"))
             .filter_map(|cs| {
