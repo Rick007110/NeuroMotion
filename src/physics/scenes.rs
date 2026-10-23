@@ -805,6 +805,36 @@ pub fn car_hit() -> Project {
     p
 }
 
+/// Back-Flip-To-Combo (a user's scene, not one of endorphin's samples): a character
+/// stands on a 2.5 m box, weakly locked at the toes until frame 206 and held at the
+/// pelvis against sideways drift and against turning about Y and Z until 305. From frame
+/// 246 to 297 two locks with a negative angular strength (-100 N·m about X: drives, not
+/// holds) spin pelvis and upper spine backwards, and it flips off the back of the box. At
+/// 120 fps, like the scene.
+///
+/// The scene's character stands until the flip; the placeholder, without the scene's
+/// animation, doesn't: left alone it tips forwards from about frame 70 and is leaning
+/// about 25° when the drive starts, too far for 200 N·m to bring back. With `balance`,
+/// Balance keeps it standing until the drive starts.
+pub fn backflip(balance: bool) -> Project {
+    let mut p = new_scene("Back flip", 4.0);
+    p.settings.fps = 120.0;
+    p.settings.range.end = 480;
+    let block = Geometry::Box { size: [1.2, 2.5, 1.2] };
+    add_prop(&mut p, "box", CharacterKind::Environment, scenery(&[(block, Quat::IDENTITY, Vec3::new(0.0, 1.25, 0.0))]), SimLevel::CollisionOnly);
+    // Facing +Z with the heels 25 cm from the box's back edge.
+    let flipper = person(&mut p, "flipper", Vec3::new(0.0, 2.5, -0.3), 0.0, &[]);
+    let toes = ["flipper.MetaBodies.l_toe", "flipper.MetaBodies.r_toe"];
+    constrain(&mut p, flipper, 0, 206, "Lock", &toes, (Vec3::splat(25.0), Vec3::splat(25.0)));
+    constrain(&mut p, flipper, 0, 305, "Lock", &["flipper.MetaBodies.hips"], (Vec3::new(1e5, 0.0, 0.0), Vec3::new(0.0, 1e5, 1e5)));
+    let spin = (Vec3::ZERO, Vec3::new(-100.0, 0.0, 0.0));
+    constrain(&mut p, flipper, 246, 297, "Lock", &["flipper.MetaBodies.hips", "flipper.MetaBodies.chest"], spin);
+    if balance {
+        behave(&mut p, flipper, 0, 246, "Balance");
+    }
+    p
+}
+
 /// Prints, per frame and character, the lowest body, the most stretched joint and the
 /// fastest body, for finding where a scene goes wrong.
 pub fn trace(project: &Project) {
@@ -865,6 +895,8 @@ mod tests {
             "rotating_floor" => rotating_floor(),
             "turntable" => turntable(),
             "car_hit" => car_hit(),
+            "backflip" => backflip(true),
+            "backflip_passive" => backflip(false),
             "balance" => balance_push(1.5, Vec3::Z, true),
             "catch_fall" => catch_fall_shove(Vec3::new(0.0, 0.0, 3.5), true),
             path if path.ends_with(".ens") => {
@@ -987,6 +1019,57 @@ mod tests {
         let report = sweep(&p);
         println!("Cut              {report}");
         assert!(!report.nan && report.fastest < 40.0 && report.stretch < 0.1, "{report}");
+    }
+
+    /// Back flip: per frame, the hips' turn about world X so far (degrees, unwrapped;
+    /// negative is backwards for a character facing +Z), and the lowest body centre.
+    fn flip_track(project: &Project, sim: &Simulation) -> Vec<(f32, f32)> {
+        let ci = project.characters.iter().position(|c| c.name == "flipper").unwrap();
+        let hips = project.characters[ci].physics.as_ref().unwrap().body_index("hips").unwrap();
+        let frame = |f: i32| sim.frame(f).unwrap()[ci].as_ref().unwrap();
+        let start = frame(0).bodies[hips].0;
+        let (mut turned, mut last) = (0.0f32, 0.0f32);
+        (0..=project.settings.range.end)
+            .map(|f| {
+                let cf = frame(f);
+                // The hips' starting up direction, carried along.
+                let up = cf.bodies[hips].0 * start.inverse() * Vec3::Y;
+                let angle = up.z.atan2(up.y);
+                let step = (angle - last + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+                turned += step;
+                last = angle;
+                (turned.to_degrees(), cf.bodies.iter().map(|b| b.1.y).fold(f32::MAX, f32::min))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn backflip_drive_flips_the_character_off_the_box() {
+        for balance in [true, false] {
+            let project = backflip(balance);
+            let sim = check(project.clone());
+            let track = flip_track(&project, &sim);
+            // Off the box: the lowest body centre 10 cm below its top.
+            let leaves = track.iter().position(|&(_, low)| low < 2.4).unwrap() as i32;
+            let lands = track.iter().position(|&(_, low)| low < 0.15).unwrap() as i32;
+            let ci = project.characters.iter().position(|c| c.name == "flipper").unwrap();
+            let rig = project.characters[ci].physics.as_ref().unwrap();
+            let end = sim.frame(project.settings.range.end).unwrap()[ci].as_ref().unwrap();
+            let hips = end.bodies[rig.body_index("hips").unwrap()].1;
+            println!(
+                "back flip (balance {balance}): {:.0}° at frame 246, {:.0}° at 297, leaves the box at frame {leaves}, lands at {lands}, \
+                 {:.0}° in all, hips end at {hips:.2}",
+                track[246].0, track[297].0, track.last().unwrap().0
+            );
+            assert!(track.last().unwrap().1 < 0.15 && hips.y < 0.5, "not on the ground: hips at {hips}");
+            assert!(hips.z.abs() > 0.6, "still on the box: hips at {hips}");
+            if balance {
+                assert!(track[246].0.abs() < 5.0, "leaning {}° before the drive", track[246].0);
+                assert!(leaves > 246, "left the box at frame {leaves}, before the drive");
+                assert!(track.last().unwrap().0 < -180.0, "turned {}°", track.last().unwrap().0);
+                assert!(hips.z < -0.6, "landed in front of the box: {hips}");
+            }
+        }
     }
 
     /// endorphin's Car Hit stretched a joint by 6 cm. The stand-in's character takes the
