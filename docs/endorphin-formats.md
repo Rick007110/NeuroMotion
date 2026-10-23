@@ -112,6 +112,18 @@ These are what the importer relies on:
 - Event elements live in `Events`, `ForceEvents`, `SecondaryBehaviours`,
   `TertiaryBehaviours` and `SeverBehaviourEvents`. Each has `startFrameNumber`,
   `endFrameNumber`, `priority`, `enabled` and `character`.
+- Constraint events give a strength per axis for position and for orientation
+  (newtons and newton-metres; 1e5 is effectively unbreakable, 0 leaves the axis free).
+  endorphin's help doesn't document negative strengths; scenes use them as drives.
+  Back-Flip-To-Combo spins its character into the flip with an orientation strength
+  of (-100, 0, 0) on pelvis and spine. NeuroMotion reads a negative axis as a steady
+  force or torque of that value along the axis (world axes for locks, the anchor's
+  for joins), on the locked body and the opposite on its anchor, instead of a hold.
+- A body's mass is its inertial shape's volume times its density (g/cm³). A
+  character's body can come out with none: Back-Flip-To-Combo's NormalMass is a
+  zero-sized Sphyl. Only the environment's massless pieces stay fixed in place;
+  a character's or prop's get a token 1 kg, or one fixed body would hold the whole
+  character still.
 
 The conventions were checked by forward kinematics on real data. With these
 conventions, the standard character's rest pose is a T-pose with its feet on the ground
