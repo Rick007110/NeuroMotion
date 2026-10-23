@@ -1217,6 +1217,51 @@ mod tests {
         assert!(notes.iter().any(|n| n.contains("keyed in the scene")));
     }
 
+    /// Back-Flip-To-Combo's helper body: a character MetaBody whose inertial body is a
+    /// zero-sized Sphyl of density 0. Fixed in place it would hold the character up, so it
+    /// gets a token mass; the environment's massless piece stays fixed scenery.
+    #[test]
+    fn massless_character_body_gets_a_token_mass_but_scenery_stays_fixed() {
+        let rest = matrix([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], [0.0, 0.0, 0.0]);
+        let xml = format!(
+            r#"<?xml version="1.0"?>
+<Scene>
+  <Engine bpositionBufferFrameRate="{fps}"><PlaybackRange start="0" end="30"/></Engine>
+  <Characters>
+    <Character name="hero" typeName="skeletalCharacter2.5">
+      <MetaBodies>
+        <MetaBody name="NormalMass">{rest}
+          <InertialBody><Geometry type="Sphyl" bparam0="{zero}" bparam1="{zero}"/><Inertia density="{zero}"/></InertialBody>
+        </MetaBody>
+      </MetaBodies>
+      <Skeleton name="root" metaBody="NormalMass">{rest}</Skeleton>
+    </Character>
+  </Characters>
+  <Environment name="environment">
+    <MetaBodies>
+      <MetaBody name="Box">{rest}
+        <CollisionSurface><Geometry type="Cuboid" bparam0="{one}" bparam1="{one}" bparam2="{one}"/></CollisionSurface>
+      </MetaBody>
+    </MetaBodies>
+    <Skeleton name="root" metaBody="Box">{rest}</Skeleton>
+  </Environment>
+</Scene>"#,
+            fps = hex(30.0),
+            zero = hex(0.0),
+            one = hex(1.0),
+        );
+        let Import { project, .. } = import(&xml);
+        let body = |kind: CharacterKind| {
+            let c = project.characters.iter().find(|c| c.kind == kind).unwrap_or_else(|| panic!("no {kind:?}"));
+            c.physics.as_ref().unwrap().bodies[0].clone()
+        };
+        let helper = body(CharacterKind::Character);
+        assert_eq!((helper.mass, helper.inertia), (1.0, [0.004; 3]), "{helper:?}");
+        let scenery = body(CharacterKind::Environment);
+        assert_eq!((scenery.mass, scenery.inertia), (0.0, [0.0; 3]), "{scenery:?}");
+        assert_eq!(scenery.shapes.len(), 1);
+    }
+
     #[test]
     fn rejects_unreadable_bytes() {
         assert!(matches!(decode_document(&[0x1b, 0xd1, 0xd7, 0xee, 0x3e]), Err(IoError::Format(_))));
