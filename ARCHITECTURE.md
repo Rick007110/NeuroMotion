@@ -100,7 +100,10 @@ Research on how endorphin behaves is in [docs/endorphin-physics.md](docs/endorph
 
 - `assets/`: the app icon. `icon.svg` is the source; `icon-256.png` (the window
   icon) and `icon.ico` (embedded in the Windows executable by `build.rs`) are made
-  from it.
+  from it. `logo-transparent.png` is the logo without its tile, with a dark outline
+  so it reads on any background (the Discord webhooks' avatar).
+- `docs/discord-roadmap.md`: the short roadmap the Discord roadmap workflow keeps
+  posted in the community's #roadmap channel; keep it in step with `ROADMAP.md`.
 - `tools/`: helper scripts, such as checking exports in Blender.
 
 ## Principles

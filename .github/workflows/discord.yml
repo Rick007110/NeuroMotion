@@ -65,7 +65,7 @@ jobs:
           # Discord embeds take 256 characters of title and 4096 of description.
           jq -n --arg title "${TITLE:0:256}" --arg text "${MESSAGE:0:4096}" --arg url "$URL" '{
             username: "NeuroMotion",
-            avatar_url: "https://raw.githubusercontent.com/Rick007110/NeuroMotion/main/assets/icon-256.png",
+            avatar_url: "https://raw.githubusercontent.com/Rick007110/NeuroMotion/main/assets/logo-transparent.png",
             embeds: [{
               title: (if $title == "" then null else $title end),
               url: $url,
