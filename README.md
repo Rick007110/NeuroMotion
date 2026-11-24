@@ -90,15 +90,19 @@ Force event at the same frame. Design and status:
 
 ## Roadmap
 
-1. Car Hit, the one sample scene that still fails: a pedestrian's arm crushed under a
-   car that stops dead ([status](docs/physics-design.md#status-against-endorphins-sample-scenes)).
-2. **Behaviours**: stepping, stagger, writhe and more, after balance and catch fall.
-3. **Beyond endorphin**: strength curves per body region, smoother hand-back to
-   animation, visual feedback on muscle effort, re-simulating only from the edited
-   frame.
+The road to 1.0 is everything endorphin 2.5 could do, and then more. It runs in five
+milestones:
 
-Every item is an [issue](https://github.com/Rick007110/NeuroMotion/issues) you can pick
-up; see [Contributing](#contributing).
+1. **Physics that matches endorphin**, checked against measurements.
+2. **Behaviours**: stepping, stagger, writhe and the rest.
+3. **Your own characters, props and motion**: BVH and FBX import, your own rigs.
+4. **An editor animators want to work in**: a 3D viewport, posing, pose tools.
+5. **Ready for everyone**: installers, a manual, sample scenes.
+
+What's done, what's missing and the releases along the way are in
+[ROADMAP.md](ROADMAP.md). Every item is an
+[issue](https://github.com/Rick007110/NeuroMotion/issues) you can pick up; see
+[Contributing](#contributing).
 
 ## Download
 
