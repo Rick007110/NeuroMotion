@@ -81,8 +81,10 @@ In priority order, for a simulated character at a given frame:
 1. **Active pose events** covering the frame, each on the joints it names (all of
    them if it names none): the pose stored in the event, at the event's strength, with
    the `DesiredPoseCalibration` preset. Over its entry blend an event moves the target
-   and the gains over from what the joint had before it; where several drive one
-   joint, the latest to start wins (lesson 19).
+   and the gains over, linearly, from what the joint had before it; where several drive
+   one joint, the latest to start wins (lesson 19). A joint no running event names
+   follows the events naming its nearest ancestor, at the value they store for it (lesson
+   27).
 2. **Active animation** covering the frame: the animated pose at the clip's strength
    (imported `strength`, default 1 for NeuroMotion clips). Uses the `Normal` preset.
 3. **Otherwise**: hold the pose the character had when it went into simulation, at the
@@ -107,7 +109,8 @@ plain sequential impulses get wrong:
    If the muscle goes last, it pushes through stops and light end bodies blow up.
 4. **Springs are capped at 30 Hz of natural frequency, for the mass they move.**
    endorphin's presets tuned for whole limbs would ring at 140-325 Hz on hands and
-   fingers. Torso and limb muscles (3-15 Hz) are untouched.
+   fingers. Torso and limb muscles (3-15 Hz) are untouched. "The mass they move" was
+   the joint's two bodies; imported scenes now count the whole limb too (lesson 27).
 
 Muscle targets are also clamped into each joint's soft range, because motion
 capture often sits slightly outside a rig's limits.
@@ -732,79 +735,6 @@ from 0.90 m to 0.52 m over frames 54-62 and the jumper steps off the roof's edge
     word still lets a heavy load through a light body show as stress; and what
     endorphin's own run of Walk With Gun looks like hasn't been compared.
 
-Tracing Back-Flip-To-Combo itself (#6), with the user's scene file, showed two more.
-
-19. **Each active pose drives only the joints it names, and a shape already inside
-    its parent at rest doesn't collide with it.** The scene has no behaviours: its 42
-    active poses (41 enabled) and 83 forces do everything, with the constraints of
-    lesson 13. Its poses split the body: one event drives the legs (`Objects`
-    `character01.Joints.RThigh`, ...), another, overlapping it, the spine, head and
-    arms, a third the feet, and so on, each at its own strength (0.05 to 5) and ease-in.
-    Every event stores a whole-body pose. The simulation took the one event that came
-    last in the file, applied its whole pose to every joint at its strength, and
-    ignored the others; joints the pose left at rest have no channel (the importer
-    drops those) and were held where the character started. Now each event drives
-    the joints it names, or all of them if it names none, at rest where it has no
-    channel. Where several drive one joint, they apply in the order they start, each
-    moving the target (slerp) and the gains (lerp) over from what the joint had before
-    over its ease-in, so the latest to start wins once it has eased in. A lone event
-    used to ease its strength in from zero; it now eases in from the character's own
-    muscles (`Default`, or `Normal` under an active animation).
-
-    The second: the character's head has four collision shapes that may collide with
-    their parent (`collidesWithParent`, on no other body), and they sit inside the
-    neck at rest. Contacts push overlap apart at up to 3 m/s, so the head was thrown
-    50° forward against the neck in the first ten frames of every run. In endorphin's
-    video it stays upright. A shape that already overlaps one of its parent body's
-    shapes in the rig's rest pose now doesn't collide with that parent; the head
-    turns 0.5° in those frames. A shape on a fixed parent keeps colliding: Heli Leap's
-    and Bendy Stick's background props sit inside the background body they belong to,
-    and without that exception they fell through it.
-
-    Stand-ins: Split poses hangs the placeholder by the hips, bends its knees by 60° in
-    one event from frame 10 and its elbows by 60° in another from frame 20, each
-    storing the other at rest. Before: knees 0° and elbows 59° at frame 150; after:
-    59° and 60° (`overlapping_active_poses_each_drive_their_own_joints`). Head on
-    neck grows the placeholder's head sphere into the neck and lets it collide with
-    its parent: it turned 44° against the neck in the first second, now 2.6°
-    (`a_shape_overlapping_its_parent_at_rest_does_not_push_it`). Every other stand-in
-    gives the same numbers, and `nudge_survey`'s output is identical. endorphin's
-    sample sweep stays 16 of 16 clean; the scenes with active poses or such shapes
-    change a little: Catch Run's lowest body 1.6 to 0.4 cm, Gymnast Rings' stretch
-    0.22 to 0.51 cm, Rotating Floor's 0.30 to 0.36 cm, Walk With Gun's 1.50 to
-    1.25 cm (its drift 2.6 to 11.3 cm), Sword Play's drift 12.6 to 2.1 cm, Heli Leap's
-    lowest body -4.1 to 0.0 cm, Bendy Stick's fastest body 9.2 to 8.7 m/s; the other
-    nine are unchanged.
-
-    This doesn't make the scene flip yet. endorphin's video (it plays the 726 frames
-    in 7.05 s, about 103 a second) shows the character holding a T-pose, bringing its
-    arms forward from frame ~100, crouching from ~185, springing back off the box
-    around 250-260 as the drive (246-297) runs, turning over and landing feet first
-    behind the box around 340. In NeuroMotion, before and after, it starts tipping
-    backwards within the first 20 frames and falls off the back of the box head first
-    before the drive starts:
-
-    | | main | lesson 19 |
-    |---|---|---|
-    | Head in the first 10 frames | thrown 50° forward | 0.5° |
-    | Leaves the box | frame 190 | frame 199 |
-    | First touches the floor | frame 219, a finger | frame 228, the head |
-    | Torso pitch at 246 / 297 (pelvis to head, 0 = upright, negative = backwards) | -253° / -309° | -242° / -263° |
-    | Flips feet first and lands | no | no |
-
-    What tips it: its centre of mass starts 4.4 cm in front of its heels' back edge
-    (feet on the box from z = -0.034 to 0.231 m, centre of mass at 0.010 m), and the
-    first pose swings its arms about 90° forward and down in half a second. The
-    reaction leans the trunk back; by frame 40 the centre of mass is behind the heels
-    and the 25 N toe locks can't hold it. In an experiment with the toe locks made
-    unbreakable (and the head not yet fixed) it stood until the crouch but went over
-    backwards between frames 200 and 210, before the drive. In the video the arms stay
-    out until about frame 100, so either endorphin applies
-    that first pose (frames 0-102, strength 0.55, 0.5 s ease-in) differently, or the
-    timing reading of the video is off. Still open: how endorphin eases a pose in,
-    whether a pose holds its joints after it ends (here the ankles are driven by
-    nothing between frames 102 and 199), and how `strength` scales the preset.
-
 Switching NeuroMotion's own projects to Coulomb friction too taught one more.
 
 26. **New projects use Coulomb friction, and
@@ -878,6 +808,215 @@ Switching NeuroMotion's own projects to Coulomb friction too taught one more.
     weakens its hips, knees and ankles several times over (`behaviours.md`, *Stagger
     Walk*).
 
+Tracing Back-Flip-To-Combo itself (#6), with the user's scene file, showed two more.
+
+19. **Each active pose drives only the joints it names, and a shape already inside
+    its parent at rest doesn't collide with it.** The scene has no behaviours: its 42
+    active poses (41 enabled) and 83 forces do everything, with the constraints of
+    lesson 13. Its poses split the body: one event drives the legs (`Objects`
+    `character01.Joints.RThigh`, ...), another, overlapping it, the spine, head and
+    arms, a third the feet, and so on, each at its own strength (0.05 to 5) and ease-in.
+    Every event stores a whole-body pose. The simulation took the one event that came
+    last in the file, applied its whole pose to every joint at its strength, and
+    ignored the others; joints the pose left at rest have no channel (the importer
+    drops those) and were held where the character started. Now each event drives
+    the joints it names, or all of them if it names none, at rest where it has no
+    channel. Where several drive one joint, they apply in the order they start, each
+    moving the target (slerp) and the gains (lerp) over from what the joint had before
+    over its ease-in, so the latest to start wins once it has eased in. A lone event
+    used to ease its strength in from zero; it now eases in from the character's own
+    muscles (`Default`, or `Normal` under an active animation).
+
+    The second: the character's head has four collision shapes that may collide with
+    their parent (`collidesWithParent`, on no other body), and they sit inside the
+    neck at rest. Contacts push overlap apart at up to 3 m/s, so the head was thrown
+    50° forward against the neck in the first ten frames of every run. In endorphin's
+    video it stays upright. A shape that already overlaps one of its parent body's
+    shapes in the rig's rest pose now doesn't collide with that parent; the head
+    turns 0.5° in those frames. A shape on a fixed parent keeps colliding: Heli Leap's
+    and Bendy Stick's background props sit inside the background body they belong to,
+    and without that exception they fell through it.
+
+    Stand-ins: Split poses hangs the placeholder by the hips, bends its knees by 60° in
+    one event from frame 10 and its elbows by 60° in another from frame 20, each
+    storing the other at rest. Before: knees 0° and elbows 59° at frame 150; after:
+    59° and 60° (`overlapping_active_poses_each_drive_their_own_joints`). Head on
+    neck grows the placeholder's head sphere into the neck and lets it collide with
+    its parent: it turned 44° against the neck in the first second, now 2.6°
+    (`a_shape_overlapping_its_parent_at_rest_does_not_push_it`). Every other stand-in
+    gives the same numbers, and `nudge_survey`'s output is identical. endorphin's
+    sample sweep stays 16 of 16 clean; the scenes with active poses or such shapes
+    change a little: Catch Run's lowest body 1.6 to 0.4 cm, Gymnast Rings' stretch
+    0.22 to 0.51 cm, Rotating Floor's 0.30 to 0.36 cm, Walk With Gun's 1.50 to
+    1.25 cm (its drift 2.6 to 11.3 cm), Sword Play's drift 12.6 to 2.1 cm, Heli Leap's
+    lowest body -4.1 to 0.0 cm, Bendy Stick's fastest body 9.2 to 8.7 m/s; the other
+    nine are unchanged.
+
+    This doesn't make the scene flip yet. endorphin's video (it plays the 726 frames
+    in 7.05 s, about 103 a second) shows the character holding a T-pose, bringing its
+    arms forward from frame ~100, crouching from ~185, springing back off the box
+    around 250-260 as the drive (246-297) runs, turning over and landing feet first
+    behind the box around 340. In NeuroMotion, before and after, it starts tipping
+    backwards within the first 20 frames and falls off the back of the box head first
+    before the drive starts:
+
+    | | main | lesson 19 |
+    |---|---|---|
+    | Head in the first 10 frames | thrown 50° forward | 0.5° |
+    | Leaves the box | frame 190 | frame 199 |
+    | First touches the floor | frame 219, a finger | frame 228, the head |
+    | Torso pitch at 246 / 297 (pelvis to head, 0 = upright, negative = backwards) | -253° / -309° | -242° / -263° |
+    | Flips feet first and lands | no | no |
+
+    What tips it: its centre of mass starts 4.4 cm in front of its heels' back edge
+    (feet on the box from z = -0.034 to 0.231 m, centre of mass at 0.010 m), and the
+    first pose swings its arms about 90° forward and down in half a second. The
+    reaction leans the trunk back; by frame 40 the centre of mass is behind the heels
+    and the 25 N toe locks can't hold it. In an experiment with the toe locks made
+    unbreakable (and the head not yet fixed) it stood until the crouch but went over
+    backwards between frames 200 and 210, before the drive. In the video the arms stay
+    out until about frame 100, so either endorphin applies
+    that first pose (frames 0-102, strength 0.55, 0.5 s ease-in) differently, or the
+    timing reading of the video is off. Still open: how endorphin eases a pose in,
+    whether a pose holds its joints after it ends (here the ankles are driven by
+    nothing between frames 102 and 199), and how `strength` scales the preset. (A
+    recording with endorphin's frame counter answered most of this: lesson 27. The arms
+    do come forward from frame 0; the video timing was off.)
+
+A frame-by-frame comparison of Back-Flip-To-Combo with a recording of endorphin's own
+run (#6) answered most of lesson 19's open questions about active poses.
+
+27. **Active poses as endorphin applies them: a joint
+    no event names follows its limb's pose, endorphin's swing1 is the other swing axis, and
+    a muscle moves its whole limb.** The recording shows endorphin's View Frame field (read
+    to about ±4 frames); a camera fitted to the box's corners and the start pose's head and
+    fingertips (20 px of error over 10 points) draws NeuroMotion's dump
+    (`dump_scene_motion`) over it, and the character's silhouette comes from subtracting the
+    empty scene. Measured that way:
+
+| Back-Flip-To-Combo | endorphin | main | Now |
+|---|---|---|---|
+| Far hand's image x (T-pose 487 px, arms forward 457 px) at frames 12 / 16 / 24 / 28 / 32 / 40 | 486 / 481 / 477 / 473 / 461 / 457 | 484 / 483 / 478 / 475 / 470 / 459 | 484 / 482 / 475 / 470 / 464 / 455 |
+| Whole-body lean about the heels (the start pose turned to fit the legs' and pelvis' silhouette; degrees, negative backwards; endorphin's frame 0 fits -1) at frames 44 / 72 / 100 / 120 | -2.5 / -5 / -7 / -4.5 | -3 / -7.5 / -11.5 / -15 | -3 / -6 / -8 / -7.5 |
+| Left arm, shoulder to fingertip, at frame 96 (degrees above horizontal; endorphin's from the fingertip's pixel on a plane through the shoulder, ±5°) | about -7 | -34 | +14 |
+| Head's height in the image at frames 140 / 168 / 192 / 216 / 240 (px from the top, smaller is higher; about 86 px a metre) | 227 / 244 / 236 / 197 / 199 (180 at 248) | 222 / 266 / 301 / 303 / 305 | 217 / 233 / 239 / 260 / 255 |
+| Leaves the box top (lowest body 10 cm below it) / first touches the floor | about 212 (in the air above the box at 228, highest around 248) / about 276, feet first behind the box | 171, falling off the back head first / 358 | 242, arching back over the box's edge / 294 |
+
+So in endorphin the arms come forward over the first pose's 0.5 s ease-in and stay about
+level, the body leans back about 6° (the first pose itself turns the ankles 4° back),
+recovers, crouches on the box with its shins well forward and its trunk over its knees
+(frames 140-192), springs up off it at about 205-212 and turns over in the air. Three
+things kept NeuroMotion's character from crouching; each was tested alone (a run with
+all three off reproduces main exactly):
+
+- **A joint no running pose names follows the pose that drives its limb.** From frame 102
+  nothing names the ankles: one event drives the thighs and calves, another the spine and
+  arms. The ankles were held where the character started at the `Default` preset (10
+  N·m/rad here), so the shins stayed upright. Every event stores the whole body, and the
+  legs' event (frames 100-191) stores the ankles bent 25° forward. Stood on its feet
+  with the ankles at their start, the crouch the events ask for puts the centre of mass
+  about 30 cm behind the heels; with the ankles bent the shins lean forward and the trunk
+  comes over the knees, as in endorphin's crouch. Now a joint no running
+  event names takes its target, gains and ease-in from the events naming its nearest
+  ancestor (the ankle and toes from the one naming the calf), at their stored values.
+  Joints no event names anywhere up the chain keep the character's own muscles as
+  before. Other readings tested on this scene: holding a pose's last target and gains
+  after it ends, going limp after it ends, holding the target at the `Default` gains:
+  each left the box at frames 180-185, like main.
+- **endorphin's `swing1Size` bounds the turn about the limit frame's Z axis, `swing2Size`
+  the turn about Y.** NeuroMotion read them the other way round. Read that way, the
+  active poses endorphin's own scenes store (408 joint targets in the sample scenes)
+  sit outside their joints' soft cones 124 times, up to 5.3 times the cone (toes), hands
+  3-5.6, clavicles 2, feet 2.6; read this way, 46 times, at most 1.5 times and mostly
+  under 1.2 (Back-Flip-To-Combo's 240: 78 outside, adding up to 52 cone-widths beyond,
+  against 51 adding up to 6.6). The pose tool keeps poses inside the limits, so this
+  reading is the right one. It widens this character's hip flexion from 55° to 85°
+  and its ankle's from 30° to 45°.
+- **A muscle moves its whole limb.** Lesson 4 caps a spring at 30 Hz for the inertia
+  of the joint's own two bodies. For a 0.4 kg clavicle that cap is far below what
+  holding up the arm needs, so the first pose's arms sagged 50° below the pose (-34°
+  instead of +15°); for the toes, with both foot and toe on the box, it left the toe
+  muscles too soft to keep the heels from rolling back. With `SpringCap::Limbs` a muscle
+  may also be as stiff as 5 Hz on the whole limb hanging from its joint against the
+  rest of the body, a side resting on the ground or scenery counting as immovable
+  (both, when both are: a toe and the foot above it on the box, a knee in a two-footed
+  crouch). 30 Hz on the limb also crouches but opened Car Hit's knee by 6.2 cm as its
+  pedestrian curls up on the bonnet (10 Hz 2.7 cm, 5 Hz 2.2, two-body 2.9); 3 Hz and
+  up all crouch. Counting neither side as held when both rest on the ground (lesson 9's
+  rule) left the box at 180.
+
+| Back-Flip-To-Combo, one change off at a time | Leaves the box | Touches the floor |
+|---|---|---|
+| All three (now) | 242 | 294 |
+| Without the swing reading | 232 | 286 |
+| Without unnamed joints following their limb | 184 | 257 |
+| Without the limb cap | 181 | 351 |
+| None (main) | 171 | 358 |
+
+What the recording also settles: **the ease-in moves the target**, linearly over
+`bentryBlendPeriod`, as NeuroMotion already did (see the far hand above). Applying the
+target at once and easing only the strength in brings the arm round by frame 16
+(endorphin: frame 40); a smoothstep ease (486 / 485 / 478 / 473 / 466 / 455) is no
+closer. Whether the gains ease in too can't be told apart: with this preset (10 000
+N·m/rad at strength 1) the muscle reaches the target either way. **What holds a joint
+after its pose ends** made no difference here (`Default`, as before). **Strength**
+still multiplies stiffness, damping and force limit: scaling the force limit or not,
+or capping strength at 1, changed nothing before the jump.
+
+NeuroMotion's own projects keep the two-body cap (`SpringCap::Bodies`, the default; saved
+projects keep theirs): with whole limbs, Balance survives only 2 of its 8 hard backward
+pushes (`balance_steps_when_the_ankles_cannot_hold` wants 4) and Stagger's feet go 0.8
+times as far as Balance's (`stagger_keeps_stepping_after_a_hard_push` wants 1.5), as with
+Coulomb friction in lesson 21. Imported scenes get `SpringCap::Limbs`, as they get
+Coulomb friction. Every stand-in built on NeuroMotion's own settings gives the same
+numbers as before, and `nudge_survey`'s output is identical. The Back flip stand-in now
+uses the limb cap as the scene does: standing, 0° at frame 246, -79° at 297, leaves the
+box at 319, lands at 385, -279° in all (was 1°, -76°, 319, 385, -281°); left alone,
+leaves at 337 and lands at 411 (338, 412).
+
+Stand-ins: Arms out hangs a character with clavicles by the hips and poses its arms
+straight forward over 0.5 s: with the two-body cap they stay hanging (-89° at frame
+120), with the limb cap they come up (-32° at frame 30) and hold at -9°
+(`a_clavicle_holds_the_arm_out`). Unnamed ankles names only the knees in an event that
+stores the ankles bent 30°: before, the ankles didn't move (0°); now they turn 21° while
+the knees bend 59° (`an_unnamed_joint_follows_its_limbs_pose`). `swing_sizes_and_spring_cap`
+checks the importer's reading.
+
+endorphin's sample sweep stays 16 of 16 clean over each scene's whole range. Ten of the
+sixteen have active poses (all naming their joints); every scene has the new swing
+reading and the limb cap:
+
+| Sample scene | Before: max stretch / lowest body / fastest / largest lock drift | Now |
+|---|---|---|
+| Arrows | 1.27 cm / 0.5 cm / 20.0 m/s / 0.1 cm | 0.86 cm / 0.5 cm / 20.7 m/s / 0.0 cm |
+| Balcony (poses) | 0.78 / 0.8 / 20.2 / 3.1 | 1.26 / 0.6 / 25.0 / 1.4 |
+| Bendy Stick (poses) | 0.61 / 5.1 / 0.4 / 0.8 | unchanged |
+| Car Crash (poses) | 1.26 / 0.0 / 19.7 / 28.7 | 0.57 / 0.0 / 19.3 / 28.1 |
+| Car Hit | 2.94 / 0.6 / 15.4 / 38.0 | 2.17 / 8.8 (the carrier) / 26.5 / 38.0 |
+| Catch Rope | 1.12 / 1.7 / 21.4 / 1.2 | 1.36 / 1.8 / 23.4 / 1.4 |
+| Catch Run (poses) | 1.41 / 1.6 / 15.2 / 1.4 | 1.41 / 1.6 / 15.2 / 1.3 |
+| Gymnast Rings (poses) | 0.20 / 159 / 3.9 / 0.3 | 0.39 / 159 / 6.9 / 5.1 |
+| Heli Leap (poses, no ground) | 0.29 / -191 / 12.1 / 2.4 | 0.29 / -77 / 17.7 / 0.5 |
+| Multi Martial | 1.74 / 0.8 / 18.0 / 0.0 | 2.80 / 1.0 / 16.2 / 0.0 |
+| Rotating Floor (poses, no ground) | 0.56 / -473 / 10.7 / 0.2 | 0.30 / -478 / 9.0 / 0.0 |
+| Stagger Walk | 0.46 / 1.7 / 8.3 / 0.0 | 0.70 / 1.1 / 6.8 / 0.0 |
+| Sword Play (poses) | 0.46 / 1.7 / 2.1 / 1.4 | 0.62 / 0.7 / 4.2 / 2.2 |
+| Tackle | 0.66 / 1.5 / 9.2 / 0.0 | 0.94 / 1.0 / 9.1 / 2.2 |
+| Trapeze (poses) | 1.09 / 1.7 / 29.3 / 0.2 | 2.18 / 1.2 / 15.6 / 0.3 |
+| Walk With Gun (poses) | 0.76 / -2.5 / 6.1 / 14.6 | 0.93 / 0.1 / 7.4 / 9.6 |
+
+The flip still doesn't happen as in endorphin. NeuroMotion's character now crouches on
+the box as endorphin's does until about frame 192, then, as the legs' event (frames
+190-205, knees to 59°) and the strength-5 spine event (190-218, the back arched 37°)
+start together, arches back over the box's edge with its knees still bent instead of
+first springing up: its head never rises above the crouch (239 px at 192, 255 at 240;
+endorphin's rises 64 px, about 0.75 m, from its crouch to frame 248). It goes off the back of the box at 242,
+turning fast: -581° by frame 297 against endorphin's single turn, with the scene's
+-100 N·m drive (lesson 13) acting on a body that is lower and more tucked than
+endorphin's. Not yet known: whether endorphin's strength-5 event is weaker than
+NeuroMotion makes it (its arms, too, stay about 20° below the first pose, where
+NeuroMotion's reach it), and how it reads the negative lock strength of the drive.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over
@@ -901,7 +1040,7 @@ set-up (ground, rigs, events, constraint targets and settings).
 Each failure also gets a stand-in built in code (`src/physics/scenes.rs`) with the
 same pattern, so it can be worked on without endorphin's files.
 
-Last run, over each scene's whole range, with lessons 1-25 and
+Last run, over each scene's whole range, with lessons 1-27 and
 imported behaviours actually running (until the behaviour names were matched,
 `docs/behaviours.md`, none of them ran in these scenes); 16 scenes, Bridge Escape is
 skipped for size:
@@ -957,11 +1096,13 @@ What each stand-in reproduces:
 | Turntable | No ground; a flat cylinder spinning | floats 0.9 m above it | rests on it |
 | Hanging weight | A 20-80 kg weight on a rope locked at the top, hanging straight (lesson 10) | 0.36 m stretch, 63 m/s | 1.5 cm, 0.6 m/s |
 | Car carry | Car Hit: a 747 kg car joined (1e5) to a keyed carrier drives into a standing character with clavicles at 8 m/s, catches its arm against its ribs, carries it on the bonnet and stops dead at 1.65 s (lesson 15). The join gives way by 23 cm as the carrier stops, by design. After the stop the pedestrian slides off and the arm whips round against its own chest and neck. Coulomb friction, and the car 15 cm off the ground, as Car Hit's is (lesson 21) | 5.8 cm (shoulder) at the hit; 7.0 cm after the stop (#23) | Over 201 nudged runs, up to the stop: 0.7 cm at most for the body (shoulder included), toes and fingers 0.5-2.2 cm at the hit. After the stop: 1.1 cm at most (lessons 17 and 21) |
-| Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps, Coulomb friction (lesson 21) | floats above the box | standing (Balance until the drive): flips backwards, 1° at frame 246, -76° at 297, leaves the box at 319, lands behind it at 385, -281° in all. Left alone: tips forwards and falls off the front at 338, landing at 412 (changed by lessons 16 and 21) |
+| Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps, Coulomb friction (lesson 21), whole-limb muscle cap (lesson 27) | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -79° at 297, leaves the box at 319, lands behind it at 385, -279° in all. Left alone: tips forwards and falls off the front at 337, landing at 411 (changed by lessons 16 and 21 and the limb cap) |
 | Bonnet slide | Car Hit's pedestrian landing on the bonnet: a 75 kg box thrown at 4 m/s against Heavy join's car drops onto it (lesson 21) | slides on at 3.7-3.9 m/s | stopped dead: -0.33 m/s three frames after landing |
 | Heavy join | Car Hit's join alone: a 747 kg car joined (1e5) to a light keyed carrier that drives off at 8 m/s and stops dead 1 s later (lesson 20) | 15-18 cm behind its carrier for the whole drive and after the stop | 23 cm behind at frame 4, on the carrier from frame 11; 23 cm past it at the stop, back 8 frames later |
 | Gun drop | Walk With Gun: a placeholder holds a 550 kg box in both hands (`JoinBodies`, 1e5 N and 1e4 N·m), its 0.39 kg fingers 3 cm below the box's underside, and drops with it; Coulomb friction (lesson 25) | lowest finger 1.4 cm in the ground | 2.7 to 2.8 cm above it, over 9 nudged runs |
 | Split poses | Two overlapping active poses on different joints (knees from frame 10, elbows from 20), each storing the other joints at rest (lesson 19) | knees 0°, elbows 59° at frame 150 | knees 59°, elbows 60° |
+| Arms out | Back-Flip-To-Combo's first pose: a character with clavicles, hung by the hips, poses its arms straight forward over 0.5 s (lesson 27) | arms stay hanging (-89° at frame 120) with the two-body muscle cap | -32° at frame 30, holding at -9° with the limb cap |
+| Unnamed ankles | Back-Flip-To-Combo's crouch: an event names only the knees and stores the ankles bent 30° (lesson 27) | ankles don't move (0°), knees 59° | ankles 21°, knees 59° |
 | Head on neck | A head shape that may collide with its parent, inside the neck at rest (lesson 19) | turned 44° against the neck in 1 s | 2.6° |
 | Curl hand-back | Car Hit's hand-back: a character with clavicles curls up on the ground (BodyFoetal), then a 0.75 s transition, overlapping the curl's end, blends it back onto its standing animation (lesson 18) | 16.6 cm (knee) mid-transition | 0.09 cm |
 | Tilting floor | Rotating Floor's end: no ground; a long collision-only slab with a wall at its low end tilts 20°, carrying a character 1.9 m below y = 0 | fails the sweep (lowest -1.9 m) | rides it (nothing under the slab) |
@@ -1000,8 +1141,8 @@ hasn't been re-run against endorphin's scene since.
   `libm` crate, say) instead of the platform's.
 - Interpolated output between frames.
 - Contacts in the direct solve, for the groups where they aren't yet. Those of free
-  lock groups against the ground and massless scenery are in (the Walk With Gun
-  lesson); contacts between two bodies of a group, against keyed bodies, and of groups
+  lock groups against the ground and massless scenery are in (lesson
+  25); contacts between two bodies of a group, against keyed bodies, and of groups
   solved for a crushing body or an open joint aren't. A foot crushed under a car, with
   Coulomb friction holding it to the road, tears its ankle open (lesson 21): the direct
   solve holds the joints, but contacts are solved after it.
@@ -1009,9 +1150,14 @@ hasn't been re-run against endorphin's scene since.
   lesson 21, or made in NeuroMotion before lesson 26, keeps force-capped friction
   until it is imported again or its `contact` is edited; the app has no setting for
   it yet.
+- Back-Flip-To-Combo's jump and flip: its character crouches as endorphin's does but
+  arches back over the box's edge instead of springing up, and turns about 1.6 times as
+  far as endorphin's by frame 297 (lesson 27).
 
 ## Improvements planned beyond endorphin
 
 - Re-simulate automatically from the edited frame onward, instead of from the start.
 - Muscle strength as keyable curves per body region.
 - Pose-matched hand-back from simulation to animation.
+- The whole-limb muscle cap for NeuroMotion's own projects too (imported scenes have it,
+  lesson 27), once Balance and Stagger are tuned for it.

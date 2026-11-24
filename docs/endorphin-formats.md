@@ -108,6 +108,11 @@ inertial body (the background) have no mass and stay fixed; its props with one a
 real objects that fall, swing and get pushed, which is why scenes lock or join props
 to hold them, or switch the environment to NoPhysics (Hands Reach and Look At, whose
 reach target is a prop).
+A joint's `SoftLimits` and `HardLimits` give full widths: `twistSize` about the limit
+frame's X axis, `swing1Size` for the turn about its Z axis and `swing2Size` about its Y
+axis (the active poses endorphin's scenes store sit inside the cones read this way, and
+far outside them read the other way: physics-design.md, lesson 27).
+Imported scenes also get Coulomb friction (lesson 21) and the whole-limb muscle cap.
 
 **Every other event** becomes an *event clip* on a track named after its kind:
 Forces, Behaviours, Constraints, Simulations, Active poses, Transitions, Motion

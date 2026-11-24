@@ -58,6 +58,10 @@ Pretty-printed JSON, chosen over RON because every language and diff tool reads 
   `"force_capped"` (a cap of that many newtons per contact, what NeuroMotion used
   before). A project keeps the one it was saved with, so it simulates as it did; a
   file with no `physics` settings gets the default.
+- `physics.spring_cap` is what the muscle spring cap counts as the mass a muscle
+  moves: `"bodies"` (the joint's two bodies, the default, what Balance and Stagger are
+  tuned on) or `"limbs"` (the whole limb hanging from the joint, as endorphin's muscles
+  behave; imported scenes get it). A file without it gets `"bodies"`.
 - Key frames are local to the clip. Rotations are degrees, offsets are metres added to
   the joint's rest offset.
 - `skeleton.source` points at an external rig file; `joints` is a cached copy so the

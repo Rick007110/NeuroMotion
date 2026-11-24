@@ -25,7 +25,7 @@ use glam::{Quat, Vec3};
 use super::sim::{Simulation, cut_joints, lock_spans, rig_bodies};
 use crate::document::physics::{
     BodyDef, ContactModel, Frame, Gains, Geometry, JointDef, Limits, MuscleGains, MuscleSet,
-    PhysicsRig, ShapeDef,
+    PhysicsRig, ShapeDef, SpringCap,
 };
 use crate::document::sample::{humanoid_rig, humanoid_skeleton};
 use crate::document::{
@@ -2252,6 +2252,7 @@ pub fn backflip(balance: bool) -> Project {
     let mut p = new_scene("Back flip", 5.0);
     // Friction as endorphin's scenes have it once imported (lesson 21).
     p.physics.contact = ContactModel::Coulomb;
+    p.physics.spring_cap = SpringCap::Limbs;
     p.settings.fps = 120.0;
     p.settings.range.end = 600;
     let block = Geometry::Box {
@@ -2386,6 +2387,73 @@ pub fn split_poses() -> Project {
     let elbows = ["poser.Joints.l_elbow", "poser.Joints.r_elbow"];
     active_pose(&mut p, id, 10, 180, &knees, pose(60.0, 0.0));
     active_pose(&mut p, id, 20, 180, &elbows, pose(0.0, -60.0));
+    p
+}
+
+/// Back-Flip-To-Combo's first pose: a character with clavicles, hung by the hips, holds
+/// its arms straight out in front from frame 0, eased in over 0.5 s, with the muscle cap
+/// `cap`. A 0.4 kg clavicle holds the whole arm up.
+pub fn arms_out(cap: SpringCap) -> Project {
+    let mut p = new_scene("Arms out", 2.0);
+    p.physics.spring_cap = cap;
+    let id = add_person(
+        &mut p,
+        "poser",
+        person_rig_with_clavicles(),
+        Vec3::new(0.0, 1.5, 0.0),
+        0.0,
+        &[],
+    );
+    constrain(
+        &mut p,
+        id,
+        0,
+        120,
+        "Lock",
+        &["poser.MetaBodies.hips"],
+        (STRONG, STRONG),
+    );
+    // The whole body is driven, as the scene's first pose drives every joint: the
+    // spine at rest, the arms forward.
+    let arms = ["l", "r"].map(|side| held(&format!("{side}_shoulder"), Property::RotX, -90.0));
+    active_pose(&mut p, id, 0, 120, &[], arms.to_vec());
+    let clip = p.clips.last_mut().unwrap();
+    clip.source.insert("entryBlendPeriod".into(), "0.5".into());
+    p
+}
+
+/// Back-Flip-To-Combo's crouch: one event names the knees and stores the ankles
+/// bent too; nothing names the ankles. Hung by the hips, the placeholder bends its knees
+/// by 60° and (stored, unnamed) its ankles by 30° from frame 10.
+pub fn unnamed_ankles() -> Project {
+    let mut p = new_scene("Unnamed ankles", 2.0);
+    let id = person(&mut p, "poser", Vec3::new(0.0, 1.5, 0.0), 0.0, &[]);
+    constrain(
+        &mut p,
+        id,
+        0,
+        120,
+        "Lock",
+        &["poser.MetaBodies.hips"],
+        (STRONG, STRONG),
+    );
+    let pose = ["l", "r"]
+        .into_iter()
+        .flat_map(|side| {
+            [
+                held(&format!("{side}_knee"), Property::RotX, 60.0),
+                held(&format!("{side}_ankle"), Property::RotX, -30.0),
+            ]
+        })
+        .collect();
+    active_pose(
+        &mut p,
+        id,
+        10,
+        120,
+        &["poser.Joints.l_knee", "poser.Joints.r_knee"],
+        pose,
+    );
     p
 }
 
@@ -2524,6 +2592,9 @@ mod tests {
             "backflip" => backflip(true),
             "backflip_passive" => backflip(false),
             "curl_hand_back" => curl_hand_back(),
+            "arms_out" => arms_out(SpringCap::Limbs),
+            "arms_out_bodies" => arms_out(SpringCap::Bodies),
+            "unnamed_ankles" => unnamed_ankles(),
             "balance" => balance_push(1.5, Vec3::Z, true),
             "balance_step" => balance_push(1.5, -Vec3::Z, true),
             "balance_steps" => balance_push(HARD_PUSHES[1], Vec3::Z, true),
@@ -3094,6 +3165,75 @@ mod tests {
         assert!((45.0..75.0).contains(&knees), "knees bent {knees}°");
         assert!((45.0..75.0).contains(&elbows), "elbows bent {elbows}°");
         assert!(early < 15.0, "elbows bent {early}° before their event");
+    }
+
+    /// The left arm's elevation at a frame: degrees above horizontal, shoulder to wrist.
+    fn arm_elevation(project: &Project, sim: &Simulation, frame: i32) -> f32 {
+        let skeleton = &project.characters[0].skeleton;
+        let at = |name: &str| {
+            sim.frame(frame).unwrap()[0].as_ref().unwrap().joints
+                [skeleton.joint_index(name).unwrap()]
+            .1
+        };
+        let arm = at("l_wrist") - at("l_shoulder");
+        arm.y.atan2(arm.x.hypot(arm.z)).to_degrees()
+    }
+
+    /// A clavicle holds the whole arm up (lesson 27). With the muscle cap
+    /// counting only the joint's two bodies, the 0.4 kg clavicle's and the shoulder's
+    /// muscles are capped far below what the arm needs: posed straight out, the arms
+    /// stay hanging (-89° at frame 120). Counting the arm they move, the arms come up
+    /// over the 0.5 s ease-in (-32° at frame 30) and hold 9° below horizontal.
+    #[test]
+    fn a_clavicle_holds_the_arm_out() {
+        let elevation = |cap| {
+            let project = arms_out(cap);
+            let sim = check(project.clone());
+            (
+                arm_elevation(&project, &sim, 30),
+                arm_elevation(&project, &sim, 120),
+            )
+        };
+        let (bodies, limbs) = (elevation(SpringCap::Bodies), elevation(SpringCap::Limbs));
+        println!(
+            "arms out: elevation at frames 30 / 120 with the two-body cap {:.0}° / {:.0}°, \
+             with the limb cap {:.0}° / {:.0}°",
+            bodies.0, bodies.1, limbs.0, limbs.1
+        );
+        assert!(limbs.1 > -20.0, "arms at {}° with the limb cap", limbs.1);
+        assert!(
+            bodies.1 < limbs.1 - 45.0,
+            "two-body cap {}°, limb cap {}°",
+            bodies.1,
+            limbs.1
+        );
+        // Eased in over 0.5 s: on their way up at a quarter second.
+        assert!(
+            (-75.0..-10.0).contains(&limbs.0),
+            "arms at {}° at frame 30",
+            limbs.0
+        );
+    }
+
+    /// A joint no running pose names follows the pose that drives its limb (the lesson
+    /// on active poses): the ankles bend with the knees' event that stores them.
+    #[test]
+    fn an_unnamed_joint_follows_its_limbs_pose() {
+        let project = unnamed_ankles();
+        let sim = check(project.clone());
+        let knee = bend(&project, &sim, 100, "l_knee", "l_ankle");
+        let rest = bend(&project, &sim, 5, "l_ankle", "l_toe");
+        let ankle = bend(&project, &sim, 100, "l_ankle", "l_toe");
+        println!(
+            "unnamed ankles: knees {knee:.0}°, ankles {:.0}° from rest",
+            ankle - rest
+        );
+        assert!((45.0..75.0).contains(&knee), "knees bent {knee}°");
+        assert!(
+            (ankle - rest).abs() > 20.0,
+            "ankles turned {}°",
+            ankle - rest
+        );
     }
 
     /// A head that may collide with its parent but overlaps the neck at rest isn't

@@ -56,12 +56,14 @@ NeuroMotion, and we need numbers to prove it.
   transition ends exactly on the animation (lessons 22-24); scenes run as long as
   endorphin runs them, and the sweep checks each scene's whole range
 - 🟡 Back-Flip-To-Combo ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)):
-  overlapping active poses now each drive their own joints, and the head no longer
-  starts inside its neck (lesson 19), but the character still leaves the box around
-  frame 170, long before the flip's drive at 246, and with Coulomb friction its feet
-  catch on the box's edge. endorphin's character stands, crouches and flips feet
-  first. Open: how endorphin eases a pose in and what holds a joint after its pose
-  ends
+  measured against a recording of endorphin's run with its frame counter, active poses
+  now apply as endorphin's do: a joint no event names follows its limb's pose,
+  endorphin's swing limits are read the right way round, and an imported character's
+  muscles count the whole limb they move. Its arms come forward, it leans and crouches
+  on the box as endorphin's does until about frame 192 (it used to fall off the back at
+  171). It doesn't flip yet: where endorphin's springs up off the box, it arches back
+  over the edge and lands behind it at 294 (endorphin: about 276, feet first), turning
+  too far
 - 🟡 **Reference measurements**: scenes measured in endorphin (frames, positions,
   angles) and compared with NeuroMotion, so "behaves like endorphin" is checked, not
   eyeballed. Car Hit is the first: measured from a recording of endorphin's own run
@@ -203,9 +205,10 @@ What moves NeuroMotion closest to endorphin quality now, in order:
    better exports (BVH/FBX) of endorphin's own results, for a spread of scenes
    (Tackle, Stagger Walk, a few Behaviour Scenes, Back-Flip-To-Combo), turned into
    tests that score how close NeuroMotion is.
-2. **Active poses as endorphin applies them** ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)): how a pose eases in, what
-   holds a joint after its pose ends and how strength scales the muscles. This is
-   what keeps Back-Flip-To-Combo from standing until its flip.
+2. **Back-Flip-To-Combo's jump** ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)): active poses now apply as endorphin's do and
+   the character crouches as endorphin's does; what's left is the take-off (frames
+   190-220: a strength-5 spine pose and the legs' extension) and how endorphin reads
+   the negative lock strength of the flip's drive.
 3. **Explosion and the other missing behaviours** in the inventory's order (Look and
    Reach, Explosion, JumpDive); Car Hit's flight over the car needs Explosion.
 4. **Stepping on endorphin's characters** (the spring cap on light pelvises and
