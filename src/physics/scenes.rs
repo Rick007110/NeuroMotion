@@ -719,7 +719,7 @@ fn person_rig() -> (SkeletonRef, PhysicsRig) {
 
 /// `person_rig` with a clavicle between the chest and each upper arm, like endorphin's
 /// characters: a light body (0.4 kg) on a stiff ball joint at the sternum.
-fn person_rig_with_clavicles() -> (SkeletonRef, PhysicsRig) {
+pub(super) fn person_rig_with_clavicles() -> (SkeletonRef, PhysicsRig) {
     let (mut skeleton, mut rig) = person_rig();
     for (side, x) in [("l", 1.0f32), ("r", -1.0)] {
         let chest = skeleton.joint_index("chest").unwrap();
@@ -799,6 +799,99 @@ fn person_rig_with_clavicles() -> (SkeletonRef, PhysicsRig) {
             soft_stiffness: 10.0,
             soft_damping: 10.0,
             muscle: format!("{side}_clavicle"),
+        });
+    }
+    (skeleton, rig)
+}
+
+/// `person_rig_with_clavicles` with each forearm split in two at its middle, like
+/// endorphin's characters (ForearmMass, then ForearmTwistMass on a joint that only
+/// twists). The collarbone (0.15 m) and upper arm (0.28 m) then make a longer pair of
+/// segments than the upper arm and the first half of the forearm (0.125 m), as on
+/// endorphin's character (0.16 + 0.32 m against 0.32 + 0.13 m).
+pub(super) fn person_rig_with_split_forearms() -> (SkeletonRef, PhysicsRig) {
+    let (mut skeleton, mut rig) = person_rig_with_clavicles();
+    for side in ["l", "r"] {
+        let elbow = skeleton.joint_index(&format!("{side}_elbow")).unwrap();
+        let wrist = skeleton.joint_index(&format!("{side}_wrist")).unwrap();
+        // Insert the twist joint just before the wrist, so parents still come first.
+        let at = wrist;
+        let bump = |i: usize| if i >= at { i + 1 } else { i };
+        for j in &mut skeleton.joints {
+            j.parent = j.parent.map(bump);
+        }
+        for b in &mut rig.bodies {
+            b.joint = bump(b.joint);
+        }
+        for j in &mut rig.joints {
+            j.joint = bump(j.joint);
+        }
+        let half = Vec3::from(skeleton.joints[wrist].offset) * 0.5;
+        let wrist = wrist + 1;
+        skeleton.joints.insert(
+            at,
+            Joint::new(
+                &format!("{side}_forearm_twist"),
+                Some(elbow),
+                half.to_array(),
+            ),
+        );
+        skeleton.joints[wrist].parent = Some(at);
+        skeleton.joints[wrist].offset = half.to_array();
+
+        // Both halves get half the forearm's mass and the same capsule.
+        let elbow_body = rig.body_index(&format!("{side}_elbow")).unwrap();
+        let Geometry::Capsule { radius, .. } = rig.bodies[elbow_body].shapes[0].geometry else {
+            panic!("the forearm is a capsule");
+        };
+        let piece = Piece::along(half, radius, rig.bodies[elbow_body].mass * 0.5);
+        let frame = Frame {
+            rotation: piece.frame.0.to_array(),
+            position: piece.frame.1.to_array(),
+        };
+        let forearm = &mut rig.bodies[elbow_body];
+        forearm.frame = frame;
+        forearm.mass = piece.mass;
+        forearm.inertia = piece.geometry.inertia(piece.mass);
+        forearm.shapes[0].geometry = piece.geometry;
+        let mut twist = forearm.clone();
+        twist.name = format!("{side}_forearm_twist");
+        twist.joint = at;
+        rig.bodies.push(twist);
+        let twist_body = rig.bodies.len() - 1;
+
+        let wrist_body = rig.body_index(&format!("{side}_wrist")).unwrap();
+        rig.joints
+            .iter_mut()
+            .find(|j| j.body == wrist_body)
+            .unwrap()
+            .parent_body = twist_body;
+        // Twists about the forearm (the joint frame's X axis) and barely swings.
+        let along = Quat::from_rotation_arc(Vec3::X, half.normalize()).to_array();
+        let hard = Limits {
+            twist_min: -1.2,
+            twist_max: 1.2,
+            swing1: 0.02,
+            swing2: 0.02,
+        };
+        let soft = Limits {
+            twist_min: -1.15,
+            twist_max: 1.15,
+            swing1: 0.01,
+            swing2: 0.01,
+        };
+        rig.joints.push(JointDef {
+            name: format!("{side}_forearm_twist"),
+            joint: at,
+            body: twist_body,
+            parent_body: elbow_body,
+            primary: along,
+            secondary: along,
+            hard,
+            soft,
+            soft_stiffness: 10.0,
+            soft_damping: 10.0,
+            muscle: format!("{side}_forearm_twist"),
         });
     }
     (skeleton, rig)
@@ -1105,6 +1198,23 @@ pub fn catch_fall_shove(shove: Vec3, behaviour: bool) -> Project {
     if behaviour {
         behave(&mut p, id, 30, 150, "CatchFall");
     }
+    push(&mut p, id, 30, "faller.MetaBodies.chest", shove);
+    p
+}
+
+/// `catch_fall_shove` with CatchFall, on a character whose arms are built like
+/// endorphin's: collarbones and forearms in two bodies.
+pub fn catch_fall_split_forearms(shove: Vec3) -> Project {
+    let mut p = new_scene("Catch fall, split forearms", 2.5);
+    let id = add_person(
+        &mut p,
+        "faller",
+        person_rig_with_split_forearms(),
+        Vec3::ZERO,
+        0.0,
+        &[],
+    );
+    behave(&mut p, id, 30, 150, "CatchFall");
     push(&mut p, id, 30, "faller.MetaBodies.chest", shove);
     p
 }
@@ -2445,6 +2555,7 @@ mod tests {
             "balance_steps" => balance_push(HARD_PUSHES[1], Vec3::Z, true),
             "stagger" => pushed(Some("Stagger"), HARD_PUSHES[1], Vec3::Z),
             "catch_fall" => catch_fall_shove(Vec3::new(0.0, 0.0, 3.5), true),
+            "catch_fall_split" => catch_fall_split_forearms(Vec3::new(0.0, 0.0, 3.5)),
             path if path.ends_with(".ens") => {
                 let mut project = crate::io::endorphin::import_scene(std::path::Path::new(path))
                     .unwrap()
@@ -3614,11 +3725,46 @@ mod behaviour_tests {
         }
     }
 
+    /// CatchFall on arms built like endorphin's (collarbones, forearms in two bodies)
+    /// must reach with the upper arms and forearms, so the hands land first as they do
+    /// on the placeholder.
+    #[test]
+    fn catch_fall_lands_on_the_hands_with_split_forearms() {
+        for shove in [Vec3::new(0.0, 0.0, 3.5), Vec3::new(2.5, 0.0, 2.5)] {
+            let project = catch_fall_split_forearms(shove);
+            let (sim, time) = simulate(&project);
+            let report = measure(&project, &sim, time);
+            let hands = first_touch(&project, &sim, &[("l_wrist", 0.035), ("r_wrist", 0.035)]);
+            let head = first_touch(&project, &sim, &[("head", 0.1)]);
+            let chest = first_touch(&project, &sim, &[("chest", 0.12)]);
+            println!(
+                "catch fall, split forearms, shoved {shove}: hands {hands:?}, head {head:?}, chest {chest:?}; {report}"
+            );
+            assert!(report.ok(), "{report}");
+            // Well before: aiming the collarbones instead, the hands landed only 2 frames
+            // before the head and chest when shoved forwards (10 frames ahead now).
+            let ahead =
+                |a: Option<i32>, b: Option<i32>| a.is_some_and(|a| b.is_none_or(|b| a + LEAD <= b));
+            const LEAD: i32 = 5;
+            assert!(
+                ahead(hands, head) && ahead(hands, chest),
+                "shoved {shove}: hands {hands:?}, head {head:?}, chest {chest:?}"
+            );
+        }
+    }
+
     /// The placeholder drops limp at the start, then `behaviour` (if any) runs from 1 s to
     /// the end of a 3.5 s scene.
     fn limp_then(behaviour: Option<&str>) -> Project {
+        let skeleton = humanoid_skeleton();
+        let rig = humanoid_rig(&skeleton);
+        limp_then_on((skeleton, rig), behaviour)
+    }
+
+    /// `limp_then` with another character.
+    fn limp_then_on(character: (SkeletonRef, PhysicsRig), behaviour: Option<&str>) -> Project {
         let mut p = new_scene("Curl", 3.5);
-        let id = placeholder(&mut p, "victim", Vec3::ZERO, 0.0);
+        let id = add_person(&mut p, "victim", character, Vec3::ZERO, 0.0, &[]);
         if let Some(name) = behaviour {
             behave(&mut p, id, 60, 210, name);
         }
@@ -3663,6 +3809,38 @@ mod behaviour_tests {
         );
         let report = measure(&curled, &sim_curled, time);
         println!("foetal run: {report}");
+        assert!(report.ok(), "{report}");
+        assert!(
+            b.0 < a.0 * 0.8,
+            "knees not closer to the chest: {a:?} {b:?}"
+        );
+        assert!(b.1 < a.1 * 0.8, "head not closer to the knees: {a:?} {b:?}");
+        assert!(b.2 < a.2 * 0.5, "hands not over the head: {a:?} {b:?}");
+    }
+
+    /// BodyFoetal on arms built like endorphin's: the forearms, not just the upper arms,
+    /// fold the hands over the head.
+    #[test]
+    fn body_foetal_curls_up_with_split_forearms() {
+        let (limp, curled) = (
+            limp_then_on(person_rig_with_split_forearms(), None),
+            limp_then_on(person_rig_with_split_forearms(), Some("BodyFoetal")),
+        );
+        let ((sim_limp, _), (sim_curled, time)) = (simulate(&limp), simulate(&curled));
+        let (a, b) = (
+            curl_distances(&limp, &sim_limp, 180),
+            curl_distances(&curled, &sim_curled, 180),
+        );
+        println!(
+            "limp, split forearms: knees-chest {:.2} m, head-knees {:.2} m, hands-head {:.2} m",
+            a.0, a.1, a.2
+        );
+        println!(
+            "foetal, split forearms: knees-chest {:.2} m, head-knees {:.2} m, hands-head {:.2} m",
+            b.0, b.1, b.2
+        );
+        let report = measure(&curled, &sim_curled, time);
+        println!("foetal run, split forearms: {report}");
         assert!(report.ok(), "{report}");
         assert!(
             b.0 < a.0 * 0.8,

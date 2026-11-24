@@ -46,9 +46,16 @@ between rigs, so `Layout` works from the rig's shape in its rest pose instead:
   middle of the soles, so a rig turned any way at rest works (feet centred under the
   ankles don't say, and then it is taken to face +Z with its left at +X);
 - the **trunk** is the branch that reaches highest;
-- the **arms** are the two branches off the trunk that reach furthest sideways. Upper
-  arm and forearm are the longest consecutive pair along each branch, which skips
-  collarbones, hands and fingers.
+- the **arms** are the two branches off the trunk that reach furthest sideways. The
+  arm's tip is the far end of its last body (a finger or the hand). Shoulder and elbow
+  are the consecutive pair of joints along the branch that reaches furthest to that
+  tip, weighed by how evenly the elbow splits the reach (the shorter part over the
+  longer); upper arm and forearm are the bodies they move. That skips collarbones,
+  hands and fingers, and also works where the forearm is two bodies, as on endorphin's
+  characters (ForearmMass, then ForearmTwistMass). The longest consecutive pair of
+  segments, the pick before, took the collarbone (0.16 m) and upper arm (0.32 m) there
+  over the upper arm and the forearm's first half (0.13 m), so CatchFall, BodyFoetal
+  and Writhe aimed the collarbone and upper arm of every imported character.
 
 A rig without two legs doesn't balance, and one without arms doesn't catch its fall.
 
@@ -260,6 +267,12 @@ forwards at 3.5 or 5 m/s, diagonally, sideways or backwards, the hands touch fir
 The head and chest follow half a second or more later, or the arms hold them off the
 ground altogether. Shoved forwards limp, it lands on its face.
 
+On a stand-in with arms built like endorphin's, collarbones and each forearm in two
+bodies (test `catch_fall_lands_on_the_hands_with_split_forearms`), the hands land 10
+frames before the head and chest shoved forwards at 3.5 m/s and 12 frames before
+shoved diagonally. With the old limb pick, which aimed the collarbones, it was 2 and 9
+frames.
+
 ## Body foetal
 
 Goal: curl up and protect the head.
@@ -281,6 +294,11 @@ stop at 1.4 rad of flexion and its spine joints at 0.5, so the 1.6 rad hip targe
 at the limit. Rigs with a wider range curl further. The placeholder falls on its back,
 where curling lifts the legs and head against gravity; the tests don't cover the
 character on its side or front.
+
+With collarbones and forearms in two bodies, as on endorphin's characters (test
+`body_foetal_curls_up_with_split_forearms`), the hands end 0.15 m from the head (limp
+0.85 m). With the old limb pick they stayed 0.76 m away: it folded the upper arms,
+not the forearms, over the head.
 
 ## Writhe
 

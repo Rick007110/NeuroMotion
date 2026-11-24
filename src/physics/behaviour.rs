@@ -110,8 +110,10 @@ impl Layout {
     /// Finds the limbs from the rig's shape at rest rather than from names, so it works
     /// on any biped: the legs are the two branches from the pelvis reaching lowest, the
     /// trunk the one reaching highest, and the arms the two branches off the trunk
-    /// reaching furthest sideways. Upper and lower limb segments are the longest
-    /// consecutive pair along each branch (skipping collarbones, hands and fingers).
+    /// reaching furthest sideways. A leg's thigh and shin are the first two bodies of
+    /// its branch; an arm's upper arm and forearm the consecutive pair reaching furthest
+    /// to its tip, split most evenly at the elbow (skipping collarbones, hands, fingers
+    /// and a forearm's second body).
     pub fn new(rig: &PhysicsRig, skeleton: &SkeletonRef) -> Option<Self> {
         let n = rig.bodies.len();
         let rest_joints = world_transforms(skeleton, &Pose::rest(skeleton.joints.len()));
@@ -205,15 +207,21 @@ impl Layout {
             for &(_, s, c) in off.iter().take(2) {
                 let start = pivot(c);
                 let chain = follow(c, &|b| at(b).distance(start));
-                // Segment lengths, joint to next joint; pick the longest consecutive pair.
-                let length = |i: usize| {
-                    chain
-                        .get(i + 1)
-                        .map_or(0.0, |&next| pivot(chain[i]).distance(pivot(next)))
+                // The arm's tip: the far end of its last body, taken as its centre
+                // mirrored about its joint (a hand or finger hangs from its joint).
+                let last = *chain.last().unwrap();
+                let tip = 2.0 * at(last) - pivot(last);
+                // Shoulder and elbow are the consecutive pair of joints reaching furthest
+                // to the tip, weighed by how evenly the elbow splits that reach (shorter
+                // part over longer). The longest pair of segments isn't enough: a
+                // forearm in two bodies (endorphin's) loses to collarbone and upper arm.
+                let score = |i: usize| {
+                    let (shoulder, elbow) = (pivot(chain[i]), pivot(chain[i + 1]));
+                    let (a, b) = (shoulder.distance(elbow), elbow.distance(tip));
+                    shoulder.distance(tip) * a.min(b) / a.max(b).max(1e-6)
                 };
-                let best = (0..chain.len().saturating_sub(2)).max_by(|&a, &b| {
-                    (length(a) + length(a + 1)).total_cmp(&(length(b) + length(b + 1)))
-                });
+                let best = (0..chain.len().saturating_sub(2))
+                    .max_by(|&a, &b| score(a).total_cmp(&score(b)));
                 if let Some(i) = best {
                     arms.push(Limb {
                         upper: chain[i],
@@ -1357,5 +1365,35 @@ mod tests {
                 ["r_shoulder", "r_elbow", "r_wrist"]
             ]
         );
+    }
+
+    /// The arms of rigs with collarbones, and with forearms in two bodies as on
+    /// endorphin's characters: upper arm and forearm, not collarbone and upper arm,
+    /// though the collarbone and upper arm make the longest pair of segments there.
+    #[test]
+    fn finds_the_arms_past_collarbones_and_split_forearms() {
+        use crate::physics::scenes::{person_rig_with_clavicles, person_rig_with_split_forearms};
+        let cases = [
+            (person_rig_with_clavicles(), "wrist"),
+            (person_rig_with_split_forearms(), "forearm_twist"),
+        ];
+        for ((skeleton, rig), end) in cases {
+            let layout = Layout::new(&rig, &skeleton).unwrap();
+            let name = |b: usize| rig.bodies[b].name.clone();
+            let mut arms: Vec<_> = layout
+                .arms
+                .iter()
+                .map(|a| [name(a.upper), name(a.lower), name(a.end)])
+                .collect();
+            arms.sort();
+            assert_eq!(
+                arms,
+                ["l", "r"].map(|s| [
+                    format!("{s}_shoulder"),
+                    format!("{s}_elbow"),
+                    format!("{s}_{end}")
+                ]),
+            );
+        }
     }
 }
