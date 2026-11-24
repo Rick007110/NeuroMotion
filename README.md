@@ -40,7 +40,11 @@ compatibility.
 ## What works
 
 - **Editor**: viewport with an orbit camera, a timeline with tracks, clips, keys,
-  scrubbing and transport, an inspector for whatever is selected, and a menu bar.
+  scrubbing and transport, an inspector for whatever is selected, a scene tree of
+  characters, props and their physics bodies (View → Scene Tree), and a menu bar.
+- **Physics settings**: simulation rate, gravity, contact model and the material
+  interaction and pair tables are editable on the inspector's project page, each
+  change undoable and re-simulated at once.
 - **Animation**: keyframed clips layered per track with weights and blend-in/out
   ramps; step, linear and smooth curves.
 - **Physics events**: add simulation switches, pushes, transitions back to animation,

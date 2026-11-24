@@ -91,6 +91,7 @@ impl NeuroMotionApp {
             });
 
             ui.menu_button("View", |ui| {
+                ui.checkbox(&mut self.show_scene, "Scene Tree");
                 ui.checkbox(&mut self.show_inspector, "Inspector");
                 ui.checkbox(&mut self.show_timeline, "Timeline");
                 ui.separator();

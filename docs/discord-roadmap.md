@@ -8,6 +8,7 @@
 - Behaviours: **Balance** (with stepping), **Stagger**, **CatchFall**, **BodyFoetal**, **Writhe**, now running in imported scenes too
 - Sever events, constraints, active poses, forces
 - Export to **FBX** and **BVH**, bake simulation to keys
+- Edit the scene's **physics settings** (gravity, rate, materials) in the app, and browse the scene's bodies in a **scene tree**
 - **v0.1.0 beta** with downloads for Windows, macOS and Linux, and our new logo
 
 ### 🔨 In progress
