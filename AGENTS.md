@@ -67,7 +67,9 @@ changed.
   `docs/behaviours.md` and `src/physics/behaviour.rs`. They must work on any biped
   `Layout` finds, including characters that rest in a T-pose.
 - **Docs move with the code.** Update the relevant file in `docs/`, the README's
-  status and `ROADMAP.md` when behaviour changes. A physics lesson learned gets a
+  status and `ROADMAP.md` when behaviour changes (and its short Discord version,
+  `docs/discord-roadmap.md`, when an item moves between done, in progress and
+  planned). A physics lesson learned gets a
   numbered entry in `docs/physics-design.md`.
 - **Units in names or comments:** metres, kilograms, seconds, radians, N, N·m, frames.
 - **Match the surrounding code:** naming, comment density, idioms. Comments explain why.
