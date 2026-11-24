@@ -96,6 +96,13 @@ Research on how endorphin behaves is in [docs/endorphin-physics.md](docs/endorph
 - `viewport/`: the orbit camera and drawing with egui's painter. A GPU renderer can
   replace it without touching the rest. Layout notes: [docs/layout.md](docs/layout.md).
 
+### Other folders
+
+- `assets/`: the app icon. `icon.svg` is the source; `icon-256.png` (the window
+  icon) and `icon.ico` (embedded in the Windows executable by `build.rs`) are made
+  from it.
+- `tools/`: helper scripts, such as checking exports in Blender.
+
 ## Principles
 
 - **Deterministic simulation.** The same project gives the same motion every time
