@@ -804,6 +804,107 @@ fn person_rig_with_clavicles() -> (SkeletonRef, PhysicsRig) {
     (skeleton, rig)
 }
 
+/// `person_rig_with_clavicles` with each forearm split in two like endorphin's
+/// characters: the forearm to half way, then a forearm-twist body that only turns
+/// about the bone, then the hand. With `t_pose`, it rests with its arms out to the
+/// sides, as endorphin's characters do.
+pub(crate) fn person_rig_like_endorphins(t_pose: bool) -> (SkeletonRef, PhysicsRig) {
+    let (mut skeleton, mut rig) = person_rig_with_clavicles();
+    for (side, x) in [("l", 1.0f32), ("r", -1.0)] {
+        let wrist = skeleton.joint_index(&format!("{side}_wrist")).unwrap();
+        let elbow = skeleton.joints[wrist].parent.unwrap();
+        // Insert the twist joint just before the wrist, so parents still come first.
+        let at = wrist;
+        let bump = |i: usize| if i >= at { i + 1 } else { i };
+        for j in &mut skeleton.joints {
+            j.parent = j.parent.map(bump);
+        }
+        for b in &mut rig.bodies {
+            b.joint = bump(b.joint);
+        }
+        for j in &mut rig.joints {
+            j.joint = bump(j.joint);
+        }
+        let wrist = wrist + 1;
+        let half = Vec3::from(skeleton.joints[wrist - 1].offset) * 0.5;
+        skeleton.joints.insert(
+            at,
+            Joint::new(
+                &format!("{side}_forearm_twist"),
+                Some(elbow),
+                half.to_array(),
+            ),
+        );
+        skeleton.joints[wrist].parent = Some(at);
+        skeleton.joints[wrist].offset = half.to_array();
+
+        // The forearm keeps its first half; the twist body takes the rest of its mass.
+        let forearm = rig.body_index(&format!("{side}_elbow")).unwrap();
+        let first = Piece::along(half, 0.038, 0.8);
+        let body = &mut rig.bodies[forearm];
+        body.frame = Frame {
+            rotation: first.frame.0.to_array(),
+            position: first.frame.1.to_array(),
+        };
+        body.mass = first.mass;
+        body.inertia = first.geometry.inertia(first.mass);
+        body.shapes[0].geometry = first.geometry;
+        let piece = Piece::along(half, 0.035, 0.6);
+        rig.bodies.push(BodyDef {
+            name: format!("{side}_forearm_twist"),
+            joint: at,
+            frame: Frame {
+                rotation: piece.frame.0.to_array(),
+                position: piece.frame.1.to_array(),
+            },
+            mass: piece.mass,
+            inertia: piece.geometry.inertia(piece.mass),
+            shapes: vec![ShapeDef {
+                geometry: piece.geometry,
+                frame: Frame::IDENTITY,
+                material: "skin".into(),
+                collides_with_parent: false,
+                collides_with_siblings: true,
+                collides_with_ancestors: false,
+            }],
+        });
+        let twist_body = rig.bodies.len() - 1;
+        let hand = rig.body_index(&format!("{side}_wrist")).unwrap();
+        rig.joints
+            .iter_mut()
+            .find(|j| j.body == hand)
+            .unwrap()
+            .parent_body = twist_body;
+        // Twist about the bone only, like endorphin's forearm twist joints.
+        let along = Quat::from_rotation_arc(Vec3::X, half.normalize()).to_array();
+        let limits = |twist: f32, swing: f32| Limits {
+            twist_min: -twist,
+            twist_max: twist,
+            swing1: swing,
+            swing2: swing,
+        };
+        rig.joints.push(JointDef {
+            name: format!("{side}_forearm_twist"),
+            joint: at,
+            body: twist_body,
+            parent_body: forearm,
+            primary: along,
+            secondary: along,
+            hard: limits(1.6, 0.01),
+            soft: limits(1.55, 0.005),
+            soft_stiffness: 10.0,
+            soft_damping: 1.0,
+            muscle: format!("{side}_elbow"),
+        });
+        if t_pose {
+            let shoulder = skeleton.joint_index(&format!("{side}_shoulder")).unwrap();
+            skeleton.joints[shoulder].rest_rotation =
+                Quat::from_rotation_z(x * std::f32::consts::FRAC_PI_2).to_array();
+        }
+    }
+    (skeleton, rig)
+}
+
 /// Adds the stand-in character with its feet at `at`, facing `yaw` degrees from +Z,
 /// held in a start pose (joint, property, value) for the whole scene.
 fn person(

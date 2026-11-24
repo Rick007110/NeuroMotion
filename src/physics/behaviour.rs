@@ -204,7 +204,27 @@ impl Layout {
             off.sort_by(|a, b| b.0.total_cmp(&a.0));
             for &(_, s, c) in off.iter().take(2) {
                 let start = pivot(c);
-                let chain = follow(c, &|b| at(b).distance(start));
+                let mut chain = follow(c, &|b| at(b).distance(start));
+                // A body that only twists about its own bone (endorphin's forearm twist)
+                // continues the segment before it: without this, half forearms made the
+                // collarbone and upper arm the longest pair.
+                let twist_only = |b: usize, from: usize| {
+                    let Some(j) = joint_of[b] else { return false };
+                    let jd = &rig.joints[j];
+                    let axis = rest_joints[jd.joint].0
+                        * Quat::from_array(jd.secondary).normalize()
+                        * Vec3::X;
+                    let bone = (pivot(b) - pivot(from)).normalize_or_zero();
+                    jd.hard.swing1.max(jd.hard.swing2) < 0.05 && axis.dot(bone).abs() > 0.9
+                };
+                let mut k = 1;
+                while k < chain.len() {
+                    if twist_only(chain[k], chain[k - 1]) {
+                        chain.remove(k);
+                    } else {
+                        k += 1;
+                    }
+                }
                 // Segment lengths, joint to next joint; pick the longest consecutive pair.
                 let length = |i: usize| {
                     chain
@@ -1278,6 +1298,32 @@ mod tests {
         );
         assert_eq!(Behaviour::from_name("Bob2: Look and Reach 2.0"), None);
         assert_eq!(Behaviour::from_name("Bob2: Explosion 2.0"), None);
+    }
+
+    /// endorphin's characters have a clavicle before each upper arm and a twist body
+    /// half way along each forearm. The upper arm and forearm are still the arm.
+    #[test]
+    fn finds_the_arms_past_clavicles_and_forearm_twists() {
+        for t_pose in [false, true] {
+            let (skeleton, rig) = super::super::scenes::person_rig_like_endorphins(t_pose);
+            let layout = Layout::new(&rig, &skeleton).unwrap();
+            let name = |b: usize| rig.bodies[b].name.as_str();
+            let mut arms: Vec<_> = layout
+                .arms
+                .iter()
+                .map(|a| [name(a.upper), name(a.lower), name(a.end)])
+                .collect();
+            arms.sort();
+            assert_eq!(
+                arms,
+                [
+                    ["l_shoulder", "l_elbow", "l_wrist"],
+                    ["r_shoulder", "r_elbow", "r_wrist"]
+                ],
+                "t-pose {t_pose}"
+            );
+            assert_eq!(layout.chest.map(name), Some("chest"));
+        }
     }
 
     /// A rig whose joints loop (only possible from a malformed file) must not hang.

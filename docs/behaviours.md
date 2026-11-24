@@ -48,7 +48,12 @@ between rigs, so `Layout` works from the rig's shape in its rest pose instead:
 - the **trunk** is the branch that reaches highest;
 - the **arms** are the two branches off the trunk that reach furthest sideways. Upper
   arm and forearm are the longest consecutive pair along each branch, which skips
-  collarbones, hands and fingers.
+  collarbones, hands and fingers. A body that can only twist about its own bone
+  (swing limits under 0.05 rad, twist axis along the bone), like endorphin's forearm
+  twist, counts as part of the segment before it. Without that, endorphin's forearms,
+  split in two, made collarbone and upper arm the longest pair, so CatchFall, BodyFoetal
+  and Writhe aimed the collarbones of every imported character (stiff joints that
+  barely move) instead of the arms (test `finds_the_arms_past_clavicles_and_forearm_twists`).
 
 A rig without two legs doesn't balance, and one without arms doesn't catch its fall.
 
