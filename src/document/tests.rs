@@ -1048,3 +1048,76 @@ fn editor_sever_event_simulates_like_a_direct_one() {
     doc.undo();
     assert!(doc.project.clip(sever).is_none());
 }
+
+#[test]
+fn physics_settings_edits_undo_and_redo() {
+    let mut doc = Document::new(placeholder_project());
+    let original = doc.project.physics.clone();
+    let revision = doc.revision();
+
+    let mut after = original.clone();
+    after.gravity = [0.0, -1.62, 0.0];
+    after.contact = physics::ContactModel::Coulomb;
+    after.interactions.get_mut("Default").unwrap().restitution = 0.7;
+    after
+        .pairs
+        .push(("steel".into(), "ice".into(), "Default".into()));
+    doc.apply(
+        "Edit physics settings",
+        Edit::Physics {
+            before: original.clone(),
+            after: after.clone(),
+        },
+        false,
+    );
+    assert_eq!(doc.project.physics, after);
+    assert!(
+        doc.revision() > revision,
+        "the simulation follows revisions"
+    );
+
+    doc.undo();
+    assert_eq!(doc.project.physics, original);
+    doc.redo();
+    assert_eq!(doc.project.physics, after);
+}
+
+#[test]
+fn dragging_a_physics_value_is_one_undo_step() {
+    let mut doc = Document::new(placeholder_project());
+    let original = doc.project.physics.clone();
+    let mut before = original.clone();
+    for step in 1..=5 {
+        let mut after = original.clone();
+        after.gravity[1] = -9.81 + step as f32;
+        doc.apply(
+            "Edit physics settings",
+            Edit::Physics {
+                before: before.clone(),
+                after: after.clone(),
+            },
+            true,
+        );
+        before = after;
+    }
+    doc.end_gesture();
+    assert_eq!(doc.undo_depth(), 1);
+    assert!((doc.project.physics.gravity[1] + 4.81).abs() < 1e-4);
+    doc.undo();
+    assert_eq!(doc.project.physics, original);
+}
+
+#[test]
+fn unchanged_physics_settings_are_not_recorded() {
+    let mut doc = Document::new(placeholder_project());
+    let same = doc.project.physics.clone();
+    doc.apply(
+        "Edit physics settings",
+        Edit::Physics {
+            before: same.clone(),
+            after: same,
+        },
+        false,
+    );
+    assert!(!doc.can_undo());
+}

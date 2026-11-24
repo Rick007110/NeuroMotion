@@ -11,7 +11,7 @@ use super::model::{
     Channel, CharacterId, Clip, ClipId, ClipProps, Keyframe, Project, ProjectSettings, Track,
     TrackId,
 };
-use super::physics::SimLevel;
+use super::physics::{PhysicsSettings, SimLevel};
 
 pub const UNDO_LIMIT: usize = 500;
 
@@ -67,6 +67,11 @@ pub enum Edit {
     RemoveTrack {
         index: usize,
         track: Track,
+    },
+    /// Scene-wide physics settings: rate, gravity, contact model, materials.
+    Physics {
+        before: PhysicsSettings,
+        after: PhysicsSettings,
     },
     /// The simulation level a character starts at.
     CharacterLevel {
@@ -150,6 +155,9 @@ impl Edit {
                     project.tracks.remove(i);
                 }
             }
+            Edit::Physics { before, after } => {
+                project.physics = pick(before, after, forward).clone();
+            }
             Edit::CharacterLevel {
                 character,
                 before,
@@ -175,6 +183,7 @@ impl Edit {
             Edit::Track { before, after, .. } => before == after,
             Edit::ClipProps { before, after, .. } => before == after,
             Edit::ChannelKeys { before, after, .. } => before == after,
+            Edit::Physics { before, after } => before == after,
             Edit::CharacterLevel { before, after, .. } => before == after,
             Edit::ClipSource { before, after, .. } => before == after,
             Edit::ClipChannels { before, after, .. } => before == after,
@@ -189,6 +198,10 @@ impl Edit {
     fn absorb(&mut self, newer: &Edit) -> bool {
         match (self, newer) {
             (Edit::Settings { after, .. }, Edit::Settings { after: next, .. }) => {
+                *after = next.clone();
+                true
+            }
+            (Edit::Physics { after, .. }, Edit::Physics { after: next, .. }) => {
                 *after = next.clone();
                 true
             }
