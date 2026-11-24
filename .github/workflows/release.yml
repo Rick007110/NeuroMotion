@@ -1,13 +1,22 @@
-# Builds the app for Windows, macOS and Linux and attaches it to a GitHub release.
-# Start one by pushing a version tag: git tag v0.2.0 && git push origin v0.2.0
+# Builds the app for Windows, macOS and Linux and attaches it to a GitHub pre-release.
+# Start one either way:
+# - Actions → Release → Run workflow, with a version such as v0.2.0: the release and
+#   its tag are made from the branch you run it on;
+# - or push a version tag: git tag v0.2.0 && git push origin v0.2.0
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. v0.2.0 (becomes the tag)"
+        required: true
 
 env:
   CARGO_TERM_COLOR: always
+  VERSION: ${{ inputs.version || github.ref_name }}
 
 permissions:
   contents: write
@@ -29,6 +38,11 @@ jobs:
             binary: neuromotion
     runs-on: ${{ matrix.os }}
     steps:
+      - name: Check the version
+        shell: bash
+        run: |
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] \
+            || { echo "Version must look like v1.2.3 or v1.2.3-beta.1, not '$VERSION'"; exit 1; }
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -36,7 +50,7 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          dir="neuromotion-${GITHUB_REF_NAME}-${{ matrix.name }}"
+          dir="neuromotion-${VERSION}-${{ matrix.name }}"
           mkdir "$dir"
           cp "target/release/${{ matrix.binary }}" README.md LICENSE "$dir/"
           if [ "${{ runner.os }}" = "Windows" ]; then
@@ -65,6 +79,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 \
-            || gh release create "$GITHUB_REF_NAME" --title "NeuroMotion $GITHUB_REF_NAME" --generate-notes --prerelease
-          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          # Run by hand, the tag doesn't exist yet: --target makes it on the commit built.
+          gh release view "$VERSION" > /dev/null 2>&1 \
+            || gh release create "$VERSION" --target "$GITHUB_SHA" --title "NeuroMotion $VERSION (beta)" --generate-notes --prerelease
+          gh release upload "$VERSION" dist/* --clobber
