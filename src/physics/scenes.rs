@@ -3315,8 +3315,9 @@ mod behaviour_tests {
     /// after. Near its limit, which pushes it survives turns on small differences in
     /// where a foot lands, so each set is checked as a count. Over 101 runs with the
     /// speeds nudged by up to ±1e-3 (`nudge_survey`) the counts were 5-8 of 8
-    /// backwards, 3-7 of 22 sideways and 6-11 of 12 forwards; each minimum here is one
-    /// below the worst.
+    /// backwards, 3-7 of 22 sideways and 6-11 of 12 forwards when these minimums were
+    /// set, one below the worst; with Coulomb friction and the higher swing they are
+    /// 6-8, 8-12 and 9-12.
     fn stepping_sets() -> [(&'static str, Pushes, usize); 3] {
         let sideways = [speeds(Vec3::X, 1.9, 2.8), speeds(-Vec3::X, 1.7, 2.8)].concat();
         [
@@ -3388,8 +3389,9 @@ mod behaviour_tests {
     /// and its feet go more than 1.5 times as far as Balance's. How many steps one
     /// push takes turns on small differences in where a foot lands (pushed at 2.5 m/s,
     /// 2 to 6 over 9 nudged runs). Over 101 runs with the speeds nudged by up to ±1e-3
-    /// (`nudge_survey`), the fewest after one hard push was 3, the total 17 to 31, and
-    /// the feet went 2.3 to 4.2 times as far as Balance's.
+    /// (`nudge_survey`), the fewest after one hard push was 3, the total 25 to 41, and
+    /// the feet went 1.9 to 4.5 times as far as Balance's (3, 17 to 31 and 2.3 to 4.2
+    /// on force-capped friction, before Stagger shuffled and stepped short).
     #[test]
     fn stagger_keeps_stepping_after_a_hard_push() {
         let (stagger, balance_moved) = stagger_and_balance(0.0);
