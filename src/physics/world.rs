@@ -4,9 +4,9 @@
 //! Each substep: gravity → contacts → warm start → solve with position bias →
 //! integrate positions → relax without bias. Joints keep their impulses between
 //! substeps; contacts are matched by (shape, shape, feature) and locks by their bodies
-//! to warm start. Bodies that locks tie together, and characters that something much
-//! heavier presses on, are also solved directly, as one system per group, each
-//! iteration (see `LockGroup`).
+//! to warm start. Bodies that locks tie together, characters that something much
+//! heavier presses on, and characters with a joint come apart are also solved directly,
+//! as one system per group, each iteration (see `LockGroup`).
 
 use std::collections::HashMap;
 
@@ -64,6 +64,11 @@ const WARM_START: f32 = 0.8;
 /// heavier is solved directly (see `World::crushed_groups`).
 const CRUSH_RATIO: f32 = 5.0;
 const CRUSH_SEPARATION: f32 = 0.01;
+/// A jointed group with a joint open wider than this, m, is solved directly that substep
+/// (lesson 17). Joints normally sit within a few millimetres. Not lower: at 1 cm it also
+/// caught Heli Leap's jumper landing at 12.5 m/s, whose ankles the ground's contacts open
+/// within a substep, and there solving the joints directly opened them a little more.
+const STRETCH_LIMIT: f32 = 0.015;
 const STATIC: usize = usize::MAX;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -395,7 +400,8 @@ enum RowSource {
 /// rope hinged 6 m away swings on a lever hundreds of times its own inertia. Solving
 /// those rows together, directly, after the per-joint and per-lock passes each
 /// iteration, handles both. A character something much heavier presses on (a car
-/// catching an arm against the ribs) is solved the same way, joints only.
+/// catching an arm against the ribs), or one with a joint come apart (an arm whipping
+/// round against its own body), is solved the same way, joints only.
 struct LockGroup {
     rows: Vec<GroupRow>,
     /// The rows' effective mass matrix J M⁻¹ Jᵀ (lower triangle, row-major).
@@ -1097,8 +1103,8 @@ impl World {
     }
 
     /// Groups of moving bodies that locks tie together (with the joints between them),
-    /// and jointed groups something heavy presses on, and the rows each group solves
-    /// directly. Nothing else is grouped.
+    /// jointed groups something heavy presses on or with a joint come apart, and the rows
+    /// each group solves directly. Nothing else is grouped.
     fn prepare_groups(
         &self,
         sb: &[SolverBody],
@@ -1107,7 +1113,8 @@ impl World {
         contacts: &[ContactRow],
         bias_rate: f32,
     ) -> Vec<LockGroup> {
-        if locks.is_empty() && contacts.is_empty() {
+        let stretched = |j: &&JointRows| j.point_error.length() > STRETCH_LIMIT;
+        if locks.is_empty() && contacts.is_empty() && !joints.iter().any(|j| stretched(&j)) {
             return Vec::new();
         }
         let moves = |i: usize| i != STATIC && self.bodies[i].is_dynamic();
@@ -1135,6 +1142,16 @@ impl World {
         let mut locked: Vec<usize> = locks.iter().filter_map(|l| group_of(l.a, l.b)).collect();
         // Groups something presses on that won't give way (lesson 15).
         locked.extend(self.crushed_groups(contacts, locks, &mut |i| group_of(i, i)));
+        // Groups with a joint come apart (lesson 17). A light limb whipping round
+        // against its own body closes a loop of joints and contacts that four
+        // iterations don't settle: the contacts, solved last, win, and the joint keeps
+        // opening. Solved directly, the joints hold again within a substep or two.
+        locked.extend(
+            joints
+                .iter()
+                .filter(stretched)
+                .filter_map(|j| group_of(j.a, j.b)),
+        );
         locked.sort_unstable();
         locked.dedup();
         let mut rows: Vec<Vec<GroupRow>> = locked.iter().map(|_| Vec::new()).collect();
