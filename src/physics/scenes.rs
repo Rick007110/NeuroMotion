@@ -2278,6 +2278,101 @@ mod behaviour_tests {
             }
         }
     }
+
+    /// The placeholder drops limp at the start, then `behaviour` (if any) runs from 1 s to
+    /// the end of a 3.5 s scene.
+    fn limp_then(behaviour: Option<&str>) -> Project {
+        let mut p = new_scene("Curl", 3.5);
+        let id = placeholder(&mut p, "victim", Vec3::ZERO, 0.0);
+        if let Some(name) = behaviour {
+            behave(&mut p, id, 60, 210, name);
+        }
+        p
+    }
+
+    /// Position of a rig body at a frame.
+    fn at(project: &Project, sim: &Simulation, body: &str, frame: i32) -> Vec3 {
+        let rig = project.characters[0].physics.as_ref().unwrap();
+        let cf = sim.frame(frame).unwrap()[0].as_ref().unwrap();
+        cf.bodies[rig.body_index(body).unwrap()].1
+    }
+
+    /// (knees to chest, head to knees, hands to head): average distances at a frame.
+    fn curl_distances(project: &Project, sim: &Simulation, frame: i32) -> (f32, f32, f32) {
+        let pos = |name: &str| at(project, sim, name, frame);
+        let knees = (pos("l_knee") + pos("r_knee")) / 2.0;
+        let hands =
+            (pos("l_wrist").distance(pos("head")) + pos("r_wrist").distance(pos("head"))) / 2.0;
+        (
+            knees.distance(pos("chest")),
+            pos("head").distance(knees),
+            hands,
+        )
+    }
+
+    #[test]
+    fn body_foetal_curls_up() {
+        let (limp, curled) = (limp_then(None), limp_then(Some("BodyFoetal")));
+        let ((sim_limp, _), (sim_curled, time)) = (simulate(&limp), simulate(&curled));
+        let (a, b) = (
+            curl_distances(&limp, &sim_limp, 180),
+            curl_distances(&curled, &sim_curled, 180),
+        );
+        println!(
+            "limp: knees-chest {:.2} m, head-knees {:.2} m, hands-head {:.2} m",
+            a.0, a.1, a.2
+        );
+        println!(
+            "foetal: knees-chest {:.2} m, head-knees {:.2} m, hands-head {:.2} m",
+            b.0, b.1, b.2
+        );
+        let report = measure(&curled, &sim_curled, time);
+        println!("foetal run: {report}");
+        assert!(report.ok(), "{report}");
+        assert!(
+            b.0 < a.0 * 0.8,
+            "knees not closer to the chest: {a:?} {b:?}"
+        );
+        assert!(b.1 < a.1 * 0.8, "head not closer to the knees: {a:?} {b:?}");
+        assert!(b.2 < a.2 * 0.5, "hands not over the head: {a:?} {b:?}");
+    }
+
+    #[test]
+    fn writhe_keeps_moving_and_is_deterministic() {
+        let project = limp_then(Some("Writhe"));
+        let (sim, time) = simulate(&project);
+        let report = measure(&project, &sim, time);
+        println!("writhe run: {report}");
+        assert!(report.ok(), "{report}");
+        let rig = project.characters[0].physics.as_ref().unwrap();
+        // Speed of each body over the last second, from its movement between frames.
+        let mut moving = 0;
+        let mut total = 0.0;
+        let fps = project.settings.fps;
+        for name in rig.bodies.iter().map(|b| b.name.as_str()) {
+            let travelled: f32 = (180..210)
+                .map(|f| at(&project, &sim, name, f).distance(at(&project, &sim, name, f + 1)))
+                .sum();
+            let speed = travelled * fps / 30.0;
+            total += speed;
+            moving += usize::from(speed > 0.1);
+        }
+        println!(
+            "writhe: {moving} of {} bodies moving, mean {:.2} m/s",
+            rig.bodies.len(),
+            total / rig.bodies.len() as f32
+        );
+        assert!(moving >= 4, "only {moving} bodies move");
+        // The same scene again gives the same bodies, bit for bit.
+        let (again, _) = simulate(&project);
+        for frame in [90, 150, 210] {
+            let (a, b) = (
+                sim.frame(frame).unwrap()[0].as_ref().unwrap(),
+                again.frame(frame).unwrap()[0].as_ref().unwrap(),
+            );
+            assert_eq!(a.bodies, b.bodies, "frame {frame} differs between runs");
+        }
+    }
 }
 
 /// Simulates every sample scene shipped with a local endorphin install and checks the

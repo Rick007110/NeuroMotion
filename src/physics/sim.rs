@@ -856,6 +856,7 @@ fn step_frame(project: &Project, running: &mut Running) -> Frame {
                     ci,
                     &poses[ci],
                     frame,
+                    t,
                 );
             } else {
                 // Move kinematic bodies onto the animation, with matching velocity.
@@ -930,6 +931,7 @@ fn set_muscles(
     ci: usize,
     anim: &Pose,
     frame: i32,
+    t: f32,
 ) {
     let skeleton = &project.characters[ci].skeleton;
     let pose_target = plan
@@ -987,7 +989,7 @@ fn set_muscles(
         .iter()
         .rev()
         .find(|(s, e, _)| *s <= frame && frame < *e);
-    if let (Some(&(.., behaviour)), Some(layout)) = (behaviour, &binding.layout) {
+    if let (Some(&(start, _, behaviour)), Some(layout)) = (behaviour, &binding.layout) {
         let mut drive = Drive {
             world,
             first_body: binding.first_body,
@@ -996,6 +998,7 @@ fn set_muscles(
             layout,
             targets: &mut targets,
             gains: &mut gains,
+            elapsed: ((t - start as f32) / project.settings.fps.max(1.0)).max(0.0),
         };
         behaviour.drive(&mut drive);
     }
