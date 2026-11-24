@@ -1734,6 +1734,108 @@ pub fn car_carry_at(speed: f32) -> Project {
     p
 }
 
+/// Car Hit's join on its own: a 747 kg car on the ground, joined (1e5 N and N·m) to a
+/// light carrier hidden underground, which is keyed to drive off at 8 m/s at once, stop
+/// dead at 1 s and stay. A force of 1e5 N moves 747 kg at 134 m/s², so the car falls
+/// behind for the first few frames (8 m/s takes 60 ms) and runs on past the stop, by
+/// design; what matters is that it then catches up (lesson 20).
+pub fn heavy_join() -> Project {
+    let mut p = new_scene("Heavy join", 2.0);
+    let car = Piece::at(
+        Geometry::Box {
+            size: [1.7, 0.62, 4.2],
+        },
+        747.0,
+        Quat::IDENTITY,
+        Vec3::ZERO,
+    );
+    let carrier = Piece::at(
+        Geometry::Box {
+            size: [0.1, 0.1, 0.1],
+        },
+        0.004,
+        Quat::IDENTITY,
+        Vec3::ZERO,
+    );
+    let still = Limits {
+        twist_min: 0.0,
+        twist_max: 0.0,
+        swing1: 0.0,
+        swing2: 0.0,
+    };
+    let no_muscle = Gains {
+        stiffness: 0.0,
+        damping: 0.0,
+        force_limit: 0.0,
+    };
+    let car = add_prop(
+        &mut p,
+        "car",
+        CharacterKind::Prop,
+        prop_rig(
+            vec![("body", None, Vec3::new(0.0, 0.31, 0.0), car)],
+            still,
+            no_muscle,
+        ),
+        SimLevel::Simulated,
+    );
+    let carrier = add_prop(
+        &mut p,
+        "carrier",
+        CharacterKind::Prop,
+        prop_rig(
+            vec![("box", None, Vec3::new(0.0, -1.0, 0.0), carrier)],
+            still,
+            no_muscle,
+        ),
+        SimLevel::CollisionOnly,
+    );
+    motion(
+        &mut p,
+        carrier,
+        "Drive",
+        0,
+        120,
+        false,
+        vec![channel(
+            "box",
+            Property::PosZ,
+            &[(0, 0.0), (60, 8.0), (120, 8.0)],
+        )],
+    );
+    constrain(
+        &mut p,
+        car,
+        0,
+        120,
+        "JoinBodies",
+        &["car.MetaBodies.body", "carrier.MetaBodies.box"],
+        (STRONG, STRONG),
+    );
+    p
+}
+
+/// How far Heavy join's car is from where its join holds it, m, at each frame.
+pub fn heavy_join_gaps(project: &Project, sim: &Simulation) -> Vec<f32> {
+    let index = |name: &str| {
+        project
+            .characters
+            .iter()
+            .position(|c| c.name == name)
+            .unwrap()
+    };
+    let (car, carrier) = (index("car"), index("carrier"));
+    let offset = |f: i32| {
+        let frame = sim.frame(f).unwrap();
+        let at = |ci: usize| frame[ci].as_ref().unwrap().bodies[0].1;
+        at(car) - at(carrier)
+    };
+    let start = offset(0);
+    (0..=project.settings.range.end)
+        .map(|f| offset(f).distance(start))
+        .collect()
+}
+
 /// Car carry's hit and carry: from the start until the carrier's keys end and the car
 /// stops, frame 99 (the hit is around frame 15). Lesson 15 is about this part.
 pub const CAR_CARRY_HIT: std::ops::RangeInclusive<i32> = 0..=99;
@@ -1955,6 +2057,7 @@ mod tests {
             "rotating_floor" => rotating_floor(),
             "turntable" => turntable(),
             "car_hit" => car_hit(),
+            "heavy_join" => heavy_join(),
             "car_carry" => car_carry(),
             "backflip" => backflip(true),
             "backflip_passive" => backflip(false),
@@ -2443,6 +2546,31 @@ mod tests {
     #[test]
     fn car_hit_keeps_joints_together() {
         check(car_hit());
+    }
+
+    /// Heavy join (lesson 20): the car falls behind its carrier as it drives off (23 cm
+    /// at frame 4) and runs on past the stop (23 cm), as 1e5 N allows, but catches up
+    /// within 7 frames each time. It used to stay 15-18 cm behind for the whole drive
+    /// and the second after the stop: a lock at its strength only ever closed the gap
+    /// at strength × substep / mass, 0.3 m/s here.
+    #[test]
+    fn heavy_join_catches_up() {
+        let project = heavy_join();
+        let (sim, _) = simulate(&project);
+        let gaps = heavy_join_gaps(&project, &sim);
+        let worst = |frames: std::ops::RangeInclusive<usize>| {
+            gaps[frames].iter().copied().fold(0.0f32, f32::max)
+        };
+        println!(
+            "heavy join: gap {:.3} m at frame 5, {:.3} at 15, {:.3} worst over 20-60, {:.3} worst after the stop, {:.3} over 80-120",
+            gaps[5],
+            gaps[15],
+            worst(20..=60),
+            worst(61..=120),
+            worst(80..=120)
+        );
+        assert!(worst(20..=60) < 0.01, "behind while driving: {gaps:?}");
+        assert!(worst(80..=120) < 0.01, "not back after the stop: {gaps:?}");
     }
 
     /// endorphin's Car Hit: a heavy car joined to a keyed carrier catches the

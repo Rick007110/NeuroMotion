@@ -18,7 +18,7 @@ target is the same model, the same parameters, and the same behaviour.
 | Material pairs → restitution, friction, adhesion, softness | Same table. Friction defaults to endorphin-style force caps (newtons per contact) |
 | Simulation levels; momentum carried into physics | Same four levels; kinematic bodies carry animation velocity into the switch |
 | Force events are velocity changes on bodies | Same |
-| Lock and join constraints, with per-axis position and orientation strengths | Rigid constraints whose force on each axis is capped by its strength (read as Karma's relative-position-relative-orientation joint; 0 = free; a negative strength pushes or turns instead, lesson 13) |
+| Lock and join constraints, with per-axis position and orientation strengths | Rigid constraints whose force on each axis is capped by its strength (read as Karma's relative-position-relative-orientation joint; 0 = free; a negative strength pushes or turns instead, lesson 13); one that has fallen behind pulls with its full strength until it catches up (lesson 20) |
 | Transitions blend simulation back to animation | Same, linear window, then the required level |
 
 ## Solver
@@ -35,7 +35,8 @@ Each tick (1/rate s) runs 4 substeps. Each substep:
    - joint anchor points (3-row block);
    - twist and swing limits (one-sided rows; springs in the soft zone);
    - muscles;
-   - locks (one 6-row block each, each row capped at its strength);
+   - locks (one 6-row block each, each row capped at its strength, closing a gap no
+     faster than that strength could stop it, lesson 20);
    - bodies that locks tie together, with the joints between them, solved directly as
      one system (lesson 12), and the same for characters something much heavier
      presses on (lesson 15) or with a joint open more than 1.5 cm (lesson 17);
@@ -43,6 +44,7 @@ Each tick (1/rate s) runs 4 substeps. Each substep:
    - friction.
 5. Integrate positions.
 6. Relax: one pass without position bias, so error correction doesn't add energy.
+   Lock axes still at their strength after step 4 are left as they are (lesson 20).
 7. Restitution, for impacts faster than 0.5 m/s.
 
 Keyed bodies (animated, collision-only, collision with momentum) are moved by the
@@ -408,7 +410,58 @@ and not where Car carry does.
 
     Car Hit still reports 0.38 m of drift on the car's join to its 4 g carrier from
     frame 5. The sweep doesn't check drift, and the carrier is lighter than the car
-    by a factor of about 180 000; that is a separate question.
+    by a factor of about 180 000; that was a separate question (lesson 20).
+
+A frame-by-frame comparison of Car Hit with a recording of endorphin's showed two
+general mismatches. The first was in locks.
+
+20. **A lock that has fallen behind pulls with its full strength until it catches
+    up.** In Car Hit a 747 kg car is joined (1e5 N) to a 4 g keyed carrier, which
+    switches to its keys at frame 2 and drives off at 8.2 m/s (16.5 m/s for that first
+    frame, as it catches up with its keys). 1e5 N moves the car at 134 m/s², so it
+    can't keep up at once: it fell 0.38 m behind by frame 5. Then it stayed behind,
+    closing the gap at 0.3 m/s, 0.3 m behind still at frame 100. In endorphin the car
+    follows the carrier from the start; in the recording it is 0.4-0.6 m ahead of
+    NeuroMotion's at frames 8-30.
+    The force cap wasn't the problem; how a capped lock corrects position was.
+    Position correction adds velocity that the relax pass (step 6) takes back, so
+    each substep the lock could close the gap by at most strength × h² / mass and
+    keep none of the speed: the 0.3 m/s is 1e5 N × (1/480 s) / 747 kg. A force-capped
+    constraint in Karma, which corrects errors in the same velocity solve that it
+    caps, pulls with its full strength while it can't keep up, and the body gains
+    speed. Now, too: a lock axis still at its strength when the position-correcting
+    iterations end keeps that impulse through the relax pass, in the per-lock block
+    and in the direct solve. Pulling with all its strength, a lock would arrive
+    faster than it can stop and swing past (a weak lock round and round its target),
+    so each axis also closes no faster than its strength could stop it on target:
+    √(2 × strength × e / effective mass) for a gap e, as well as the usual 3 m/s.
+    Strong locks never meet that limit at the gaps they keep (1e5 N on 747 kg allows
+    1.6 m/s at 1 cm, where position correction asks for 1 m/s).
+
+    | Stand-in or scene | Before | After |
+    |---|---|---|
+    | 50 N lock on a weightless 10 kg ball, 1 m from its target (`a_lock_that_falls_behind_pulls_with_its_full_strength`) | moved 0.5 cm in 0.5 s | 61 cm in 0.5 s, on target (within 0.01 mm) at 0.9 s without swinging past |
+    | Heavy join: Car Hit's join alone, the carrier driving off at 8 m/s and stopping dead at 1 s (`heavy_join_catches_up`) | 23 cm behind at frame 4, still 18 cm at frame 15 and 15-16 cm for the rest of the drive and the second after the stop | 23 cm behind at frame 4, on its carrier (under 1 mm) from frame 11; 23 cm past it at the stop (frame 63), back by frame 71 |
+    | Car Hit, the car's join | 12.0 cm mean drift, 0.3 m from frame 5 to the stop | 2.1 cm mean: 0.38 m at frame 5 as before, on the carrier from frame 14 |
+    | Car Crash, the car caught by "Hold car in place" (full range) | 6.2 cm mean drift | 2.0 cm |
+    | Car Hit's pedestrian, centre of mass x at frames 68/78/88 (endorphin 0.02/-0.11/-0.11 m) | -0.61/-0.91/-1.21 m | -0.55/-0.84/-1.12 m (friction is the rest, lesson 21) |
+
+    The largest drift of each lock, what the sweep prints, is unchanged: Car Hit's
+    0.38 m at frame 5 is the car falling behind as the carrier drives off, which a
+    1e5 N join allows. Every other lock in the sample scenes drifts as before (mean
+    and largest, over each scene's full range). In the 2 s sample sweep only scenes
+    with weak locks move, a little: Rotating Floor (50-2000 N·m) stretches 0.36 cm
+    instead of 0.30, Multi Martial (a 300 N·m guide) is unchanged but for its lowest
+    body (1.4 cm instead of 1.3), and Car Hit stretches 1.12 cm instead of 0.93. Over
+    the full ranges Rotating Floor, which already fails, sinks to -4.73 m instead of
+    -4.55; Catch Rope and Heli Leap fail as before. Of the stand-ins, the back flip
+    standing is unchanged and left alone leaves the box at frame 333 instead of 335;
+    Car carry's car catches up before the hit, which moves its joints by a millimetre
+    or so (over the nudge survey's 9 runs: 0.7-1.6 cm in the hit, 0.4-0.5 without toes
+    and fingers, 0.1-0.5 after the stop). Balance's stepping and Stagger give the same
+    result in every nudged run. Back-Flip-To-Combo, whose toe locks are 25 N, leaves
+    the box at frame 168 instead of 167 and lands at 223 instead of 222. Timings don't
+    change.
 
 ## Status against endorphin's sample scenes
 
@@ -430,7 +483,7 @@ set-up (ground, rigs, events, constraint targets and settings).
 Each failure also gets a stand-in built in code (`src/physics/scenes.rs`) with the
 same pattern, so it can be worked on without endorphin's files.
 
-Last run, with lessons 1-18 and imported behaviours actually running (until the
+Last run, with lessons 1-18 and 20 and imported behaviours actually running (until the
 behaviour names were matched, `docs/behaviours.md`, none of them ran in these
 scenes); 16 scenes, Bridge Escape is skipped for size:
 
@@ -440,8 +493,8 @@ scenes); 16 scenes, Bridge Escape is skipped for size:
 | Failing | None |
 
 Max joint stretch per scene: Arrows 0.23 cm, Balcony 0.36, Bendy Stick 0.61, Car
-Crash 0.04, Car Hit 0.93, Catch Rope 0.15, Catch Run 1.41, Gymnast Rings 0.22, Heli
-Leap 0.29, Multi Martial 1.54, Rotating Floor 0.30, Stagger Walk 0.32, Sword Play
+Crash 0.04, Car Hit 1.12, Catch Rope 0.15, Catch Run 1.41, Gymnast Rings 0.22, Heli
+Leap 0.29, Multi Martial 1.54, Rotating Floor 0.36, Stagger Walk 0.32, Sword Play
 0.46, Tackle 0.68, Trapeze 0.24, Walk With Gun 1.50. Car Hit was the last to fail: a
 clavicle 7.9 cm out, which lessons 15 and 17 (fixed in the Car carry stand-in) didn't
 cure because the real failure was in its transition back to animation (lesson 18).
@@ -479,6 +532,7 @@ What each stand-in reproduces:
 | Hanging weight | A 20-80 kg weight on a rope locked at the top, hanging straight (lesson 10) | 0.36 m stretch, 63 m/s | 1.5 cm, 0.6 m/s |
 | Car carry | Car Hit: a 747 kg car joined (1e5) to a keyed carrier drives into a standing character with clavicles at 8 m/s, catches its arm against its ribs, carries it on the bonnet and stops dead at 1.65 s (lesson 15). The join gives way by 23 cm as the carrier stops, by design. After the stop the pedestrian slides off and the arm whips round against its own chest and neck | 5.8 cm (shoulder) at the hit; 7.0 cm after the stop (#23) | Over 201 nudged runs, up to the stop: 0.5 cm at most for the body (shoulder included), toes and fingers 0.5-2.7 cm at the hit. After the stop: 0.7 cm at most for the body, 2.0 cm for a finger (lesson 17) |
 | Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -73° at 297, leaves the box at 324, lands behind it at 387, -278° in all. Left alone: tips forwards and falls off the front at 335 (both changed by lesson 16) |
+| Heavy join | Car Hit's join alone: a 747 kg car joined (1e5) to a light keyed carrier that drives off at 8 m/s and stops dead 1 s later (lesson 20) | 15-18 cm behind its carrier for the whole drive and after the stop | 23 cm behind at frame 4, on the carrier from frame 11; 23 cm past it at the stop, back 8 frames later |
 | Curl hand-back | Car Hit's hand-back: a character with clavicles curls up on the ground (BodyFoetal), then a 0.75 s transition, overlapping the curl's end, blends it back onto its standing animation (lesson 18) | 16.6 cm (knee) mid-transition | 0.09 cm |
 
 Of endorphin's behaviours, Balance (which now steps), CatchFall and Stagger have
