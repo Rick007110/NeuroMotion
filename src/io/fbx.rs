@@ -410,7 +410,7 @@ pub(crate) fn scene(skeleton: &SkeletonRef, motion: &Motion, units: Units) -> Ve
             vec![leaf("Count", vec![Prop::I32(count)])],
         )
     };
-    let definitions = vec![
+    let definitions = [
         ("GlobalSettings", 1),
         ("NodeAttribute", joints),
         ("Model", joints),
@@ -684,11 +684,11 @@ fn write_ascii(out: &mut String, node: &Node, depth: usize) {
     let indent = "\t".repeat(depth);
     let _ = write!(out, "{indent}{}: ", node.name);
     // A single array value is written as its own block.
-    if let [prop] = node.props.as_slice() {
-        if let Some((count, values)) = ascii_array(prop) {
-            let _ = writeln!(out, "*{count} {{\n{indent}\ta: {values}\n{indent}}}");
-            return;
-        }
+    if let [prop] = node.props.as_slice()
+        && let Some((count, values)) = ascii_array(prop)
+    {
+        let _ = writeln!(out, "*{count} {{\n{indent}\ta: {values}\n{indent}}}");
+        return;
     }
     let props: Vec<String> = node.props.iter().map(ascii_value).collect();
     out.push_str(&props.join(", "));
@@ -1283,11 +1283,11 @@ mod tests {
         // ASCII files carry no file id, and write the curve attribute floats as bit patterns.
         let mut expected: Vec<Parsed> = binary.into_iter().filter(|n| n.name != "FileId").collect();
         fn bits_as_ints(node: &mut Parsed) {
-            if node.name == "KeyAttrDataFloat" {
-                if let Value::Floats(v) = &node.values[0] {
-                    node.values[0] =
-                        Value::Ints(v.iter().map(|x| (*x as f32).to_bits() as i64).collect());
-                }
+            if node.name == "KeyAttrDataFloat"
+                && let Value::Floats(v) = &node.values[0]
+            {
+                node.values[0] =
+                    Value::Ints(v.iter().map(|x| (*x as f32).to_bits() as i64).collect());
             }
             node.children.iter_mut().for_each(bits_as_ints);
         }
