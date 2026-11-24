@@ -51,8 +51,12 @@ NeuroMotion, and we need numbers to prove it.
   now pulls with its full strength, and imported friction is Coulomb, μ = friction
   / 100 (lessons 20 and 21). NeuroMotion's own projects keep force-capped friction
   until Balance and Stagger are tuned for Coulomb
-- 🟡 Back-Flip-To-Combo: the character tips forward before the flip
-  ([#6](https://github.com/Rick007110/NeuroMotion/issues/6))
+- 🟡 Back-Flip-To-Combo ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)):
+  overlapping active poses now each drive their own joints, and the head no longer
+  starts inside its neck (lesson 19), but the character still tips backwards off the
+  box head first (frame 199) before the flip's drive starts at 246. endorphin's
+  character stands, crouches and flips feet first. Open: how endorphin eases a pose
+  in and what holds a joint after its pose ends
 - ⬜ **Reference measurements**: a set of scenes measured in endorphin (frames, angles,
   heights) turned into tests, so "behaves like endorphin" is checked, not eyeballed.
   Anyone with endorphin can help, using the *Reference measurement* issue template.
@@ -173,7 +177,9 @@ What moves NeuroMotion closest to endorphin quality now, in order:
    [#7](https://github.com/Rick007110/NeuroMotion/issues/7)), the behaviour inventory ([#24](https://github.com/Rick007110/NeuroMotion/issues/24)), and record
    reference measurements of a few scenes. Every later physics and behaviour change
    can then be checked against real numbers.
-2. **Back-Flip-To-Combo** ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)): needs the scene file to trace.
+2. **Back-Flip-To-Combo** ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)): traced with the scene
+   file (lesson 19); the character still falls off the back of the box before the
+   flip. Measuring how endorphin eases an active pose in would settle the rest.
 3. **Physics robustness**: the arm whip in Car carry ([#23](https://github.com/Rick007110/NeuroMotion/issues/23)) and sideways
    stepping ([#9](https://github.com/Rick007110/NeuroMotion/issues/9)).
 4. **Import BVH and FBX** ([#25](https://github.com/Rick007110/NeuroMotion/issues/25)): the first step to people's own motion,
