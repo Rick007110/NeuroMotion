@@ -24,7 +24,8 @@ use glam::{Quat, Vec3};
 
 use super::sim::{Simulation, cut_joints, lock_spans, rig_bodies};
 use crate::document::physics::{
-    BodyDef, Frame, Gains, Geometry, JointDef, Limits, MuscleGains, MuscleSet, PhysicsRig, ShapeDef,
+    BodyDef, ContactModel, Frame, Gains, Geometry, JointDef, Limits, MuscleGains, MuscleSet,
+    PhysicsRig, ShapeDef,
 };
 use crate::document::sample::{humanoid_rig, humanoid_skeleton};
 use crate::document::{
@@ -1813,10 +1814,15 @@ pub fn car_carry() -> Project {
 /// slightly different hit changes).
 pub fn car_carry_at(speed: f32) -> Project {
     let mut p = new_scene("Car carry", 2.0);
+    // Friction as endorphin's scenes have it once imported (lesson 21).
+    p.physics.contact = ContactModel::Coulomb;
     let mass = 747.0;
-    // Chassis 0.07-0.77 m above the ground, a cabin behind the bonnet.
+    // Chassis 0.15-0.77 m above the ground, a cabin behind the bonnet. Car Hit's car
+    // clears the ground by about 15 cm too. With 7 cm, which this stand-in had until
+    // friction gripped in proportion to the load (lesson 21), a foot caught under the
+    // chassis is dragged along the road at 8 m/s under the car's weight.
     let chassis = Geometry::Box {
-        size: [1.7, 0.7, 4.2],
+        size: [1.7, 0.62, 4.2],
     };
     let cabin = Geometry::Box {
         size: [1.5, 0.55, 2.0],
@@ -1845,7 +1851,7 @@ pub fn car_carry_at(speed: f32) -> Project {
             mass,
             inertia: chassis.inertia(mass),
             shapes: vec![
-                shape(chassis, Vec3::ZERO),
+                shape(chassis, Vec3::new(0.0, 0.04, 0.0)),
                 shape(cabin, Vec3::new(0.0, 0.6, -0.7)),
             ],
         }],
@@ -1934,6 +1940,179 @@ pub fn car_carry_at(speed: f32) -> Project {
     p
 }
 
+/// Car Hit's join on its own: a 747 kg car on the ground, joined (1e5 N and N·m) to a
+/// light carrier hidden underground, which is keyed to drive off at 8 m/s at once, stop
+/// dead at 1 s and stay. A force of 1e5 N moves 747 kg at 134 m/s², so the car falls
+/// behind for the first few frames (8 m/s takes 60 ms) and runs on past the stop, by
+/// design; what matters is that it then catches up (lesson 20).
+pub fn heavy_join() -> Project {
+    let mut p = new_scene("Heavy join", 2.0);
+    let car = Piece::at(
+        Geometry::Box {
+            size: [1.7, 0.62, 4.2],
+        },
+        747.0,
+        Quat::IDENTITY,
+        Vec3::ZERO,
+    );
+    let carrier = Piece::at(
+        Geometry::Box {
+            size: [0.1, 0.1, 0.1],
+        },
+        0.004,
+        Quat::IDENTITY,
+        Vec3::ZERO,
+    );
+    let still = Limits {
+        twist_min: 0.0,
+        twist_max: 0.0,
+        swing1: 0.0,
+        swing2: 0.0,
+    };
+    let no_muscle = Gains {
+        stiffness: 0.0,
+        damping: 0.0,
+        force_limit: 0.0,
+    };
+    let car = add_prop(
+        &mut p,
+        "car",
+        CharacterKind::Prop,
+        prop_rig(
+            vec![("body", None, Vec3::new(0.0, 0.31, 0.0), car)],
+            still,
+            no_muscle,
+        ),
+        SimLevel::Simulated,
+    );
+    let carrier = add_prop(
+        &mut p,
+        "carrier",
+        CharacterKind::Prop,
+        prop_rig(
+            vec![("box", None, Vec3::new(0.0, -1.0, 0.0), carrier)],
+            still,
+            no_muscle,
+        ),
+        SimLevel::CollisionOnly,
+    );
+    motion(
+        &mut p,
+        carrier,
+        "Drive",
+        0,
+        120,
+        false,
+        vec![channel(
+            "box",
+            Property::PosZ,
+            &[(0, 0.0), (60, 8.0), (120, 8.0)],
+        )],
+    );
+    constrain(
+        &mut p,
+        car,
+        0,
+        120,
+        "JoinBodies",
+        &["car.MetaBodies.body", "carrier.MetaBodies.box"],
+        (STRONG, STRONG),
+    );
+    p
+}
+
+/// How far Heavy join's car is from where its join holds it, m, at each frame.
+pub fn heavy_join_gaps(project: &Project, sim: &Simulation) -> Vec<f32> {
+    let index = |name: &str| {
+        project
+            .characters
+            .iter()
+            .position(|c| c.name == name)
+            .unwrap()
+    };
+    let (car, carrier) = (index("car"), index("carrier"));
+    let offset = |f: i32| {
+        let frame = sim.frame(f).unwrap();
+        let at = |ci: usize| frame[ci].as_ref().unwrap().bodies[0].1;
+        at(car) - at(carrier)
+    };
+    let start = offset(0);
+    (0..=project.settings.range.end)
+        .map(|f| offset(f).distance(start))
+        .collect()
+}
+
+/// Car Hit's pedestrian landing on the bonnet, as a box: Heavy join's car drives at
+/// 8 m/s, and a 75 kg box (0.5 m), thrown at 4 m/s the other way, drops 1.4 m onto
+/// its bonnet half a second in, sliding back over it at 12 m/s. How much of the
+/// car's speed the box picks up is friction's doing, under the load of its landing
+/// and its weight (lesson 21).
+pub fn bonnet_slide() -> Project {
+    let mut p = heavy_join();
+    p.settings.name = "Bonnet slide".into();
+    // Friction as endorphin's scenes have it once imported (lesson 21).
+    p.physics.contact = ContactModel::Coulomb;
+    let piece = Piece::at(
+        Geometry::Box {
+            size: [0.5, 0.5, 0.5],
+        },
+        75.0,
+        Quat::IDENTITY,
+        Vec3::ZERO,
+    );
+    let free = Limits {
+        twist_min: 0.0,
+        twist_max: 0.0,
+        swing1: 0.0,
+        swing2: 0.0,
+    };
+    let no_muscle = Gains {
+        stiffness: 0.0,
+        damping: 0.0,
+        force_limit: 0.0,
+    };
+    let id = add_prop(
+        &mut p,
+        "box",
+        CharacterKind::Prop,
+        prop_rig(
+            vec![("body", None, Vec3::new(0.0, 2.0, 7.0), piece)],
+            free,
+            no_muscle,
+        ),
+        SimLevel::Simulated,
+    );
+    push(
+        &mut p,
+        id,
+        0,
+        "box.MetaBodies.body",
+        Vec3::new(0.0, 0.0, -4.0),
+    );
+    p
+}
+
+/// Bonnet slide measured: the box's velocity along the road (m/s) at each frame, and
+/// the first frame it touches the car.
+pub fn bonnet_slide_track(project: &Project, sim: &Simulation) -> (Vec<f32>, i32) {
+    let ci = project
+        .characters
+        .iter()
+        .position(|c| c.name == "box")
+        .unwrap();
+    let z = |f: i32| sim.frame(f).unwrap()[ci].as_ref().unwrap().bodies[0].1.z;
+    let fps = project.settings.fps;
+    let end = project.settings.range.end;
+    let speeds = (0..=end)
+        .map(|f| (z((f + 1).min(end)) - z((f - 1).max(0))) * fps / 2.0)
+        .collect();
+    // Landed: its centre within 0.3 m of the bonnet (0.62 m up).
+    let landed = (0..=end)
+        .find(|&f| sim.frame(f).unwrap()[ci].as_ref().unwrap().bodies[0].1.y < 0.92)
+        .unwrap_or(end);
+    (speeds, landed)
+}
+
 /// Car carry's hit and carry: from the start until the carrier's keys end and the car
 /// stops, frame 99 (the hit is around frame 15). Lesson 15 is about this part.
 pub const CAR_CARRY_HIT: std::ops::RangeInclusive<i32> = 0..=99;
@@ -1983,11 +2162,15 @@ pub fn car_carry_numbers(speed: f32) -> CarCarry {
 /// The scene's character stands until the flip; the placeholder, without the scene's
 /// animation, doesn't: left alone it tips forwards from about frame 70 and is leaning
 /// about 25° when the drive starts, too far for 200 N·m to bring back. With `balance`,
-/// Balance keeps it standing until the drive starts.
+/// Balance keeps it standing until the drive starts. 5 s long: with Coulomb friction
+/// (lesson 21) its feet grip the box for longer, and left alone it lands at frame 412
+/// and only settles by 520.
 pub fn backflip(balance: bool) -> Project {
-    let mut p = new_scene("Back flip", 4.0);
+    let mut p = new_scene("Back flip", 5.0);
+    // Friction as endorphin's scenes have it once imported (lesson 21).
+    p.physics.contact = ContactModel::Coulomb;
     p.settings.fps = 120.0;
-    p.settings.range.end = 480;
+    p.settings.range.end = 600;
     let block = Geometry::Box {
         size: [1.2, 2.5, 1.2],
     };
@@ -2158,6 +2341,8 @@ mod tests {
             "roof_edge" => roof_edge(),
             "cut_rope" => cut_rope(),
             "car_hit" => car_hit(),
+            "heavy_join" => heavy_join(),
+            "bonnet_slide" => bonnet_slide(),
             "car_carry" => car_carry(),
             "backflip" => backflip(true),
             "backflip_passive" => backflip(false),
@@ -2707,6 +2892,64 @@ mod tests {
         check(car_hit());
     }
 
+    /// Heavy join (lesson 20): the car falls behind its carrier as it drives off (23 cm
+    /// at frame 4) and runs on past the stop (23 cm), as 1e5 N allows, but catches up
+    /// within 7 frames each time. It used to stay 15-18 cm behind for the whole drive
+    /// and the second after the stop: a lock at its strength only ever closed the gap
+    /// at strength × substep / mass, 0.3 m/s here.
+    #[test]
+    fn heavy_join_catches_up() {
+        let project = heavy_join();
+        let (sim, _) = simulate(&project);
+        let gaps = heavy_join_gaps(&project, &sim);
+        let worst = |frames: std::ops::RangeInclusive<usize>| {
+            gaps[frames].iter().copied().fold(0.0f32, f32::max)
+        };
+        println!(
+            "heavy join: gap {:.3} m at frame 5, {:.3} at 15, {:.3} worst over 20-60, {:.3} worst after the stop, {:.3} over 80-120",
+            gaps[5],
+            gaps[15],
+            worst(20..=60),
+            worst(61..=120),
+            worst(80..=120)
+        );
+        assert!(worst(20..=60) < 0.01, "behind while driving: {gaps:?}");
+        assert!(worst(80..=120) < 0.01, "not back after the stop: {gaps:?}");
+    }
+
+    /// Bonnet slide (lesson 21): the box, moving at 4 m/s against the car, is stopped
+    /// dead as it lands, as endorphin's Car Hit pedestrian is (-0.3 m/s 3 frames after
+    /// landing, -0.05 after 6), and the car then drags it along. With friction capped
+    /// at 100 N per contact, as before, it slid on at 3.7 m/s and only slowly lost
+    /// that (2.7 m/s 24 frames after landing).
+    #[test]
+    fn bonnet_slide_stops_the_box() {
+        let mut after = Vec::new();
+        for contact in [ContactModel::Coulomb, ContactModel::ForceCapped] {
+            let mut project = bonnet_slide();
+            project.physics.contact = contact;
+            let (sim, _) = simulate(&project);
+            let (speeds, landed) = bonnet_slide_track(&project, &sim);
+            let at = |f: i32| speeds[f as usize];
+            println!(
+                "bonnet slide ({contact:?}): lands at frame {landed}; along the road {:.2} m/s before, \
+                 {:.2} 3 frames after, {:.2} 6 after, {:.2} 12 after, {:.2} 24 after",
+                at(landed - 2),
+                at(landed + 3),
+                at(landed + 6),
+                at(landed + 12),
+                at(landed + 24)
+            );
+            after.push(at(landed + 6));
+        }
+        assert_eq!(bonnet_slide().physics.contact, ContactModel::Coulomb);
+        assert!(
+            after[0].abs() < 1.0,
+            "still {} m/s 6 frames after landing",
+            after[0]
+        );
+    }
+
     /// endorphin's Car Hit: a heavy car joined to a keyed carrier catches the
     /// character's arm against their ribs, carries them on the bonnet and stops dead.
     /// The shoulder came apart by 5.8 cm in the hit (lesson 15). The join is meant to
@@ -2725,6 +2968,10 @@ mod tests {
     /// than 0.7 cm after the stop (2.1 cm here before), and none at all more than
     /// 2.7 cm in the whole scene (the toes at the hit), so the whole scene is held to
     /// 3.5 cm and the body after the stop to 1.5 cm.
+    ///
+    /// Since lesson 21 (Coulomb friction, and the car 15 cm off the ground) the same
+    /// 201 runs give, up to the stop, 0.3 to 0.7 cm for the body and 0.5 to 2.2 cm in
+    /// all; after the stop, 0.1 to 1.1 cm.
     #[test]
     fn car_carry_keeps_joints_together() {
         let CarCarry {

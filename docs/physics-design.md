@@ -15,10 +15,10 @@ target is the same model, the same parameters, and the same behaviour.
 | Ball joints: twist range + swing cone between a parent-side and a child-side limit frame; soft zone inside a hard stop | Same frames, ranges and soft-zone springs (elliptical cone) |
 | Effectors: force-limited PD on twist and swing; calibration presets | Same gains and presets, solved as implicit force-capped springs |
 | Velocity-level constraint solver at 120 Hz | Velocity-level sequential-impulse solver at the scene's rate (120 Hz), substepped |
-| Material pairs → restitution, friction, adhesion, softness | Same table. Friction defaults to endorphin-style force caps (newtons per contact) |
+| Material pairs → restitution, friction, adhesion, softness | Same table. Imported friction is Coulomb with μ = friction / 100 (lesson 21); NeuroMotion's own projects still cap friction at that many newtons per contact |
 | Simulation levels; momentum carried into physics | Same four levels; kinematic bodies carry animation velocity into the switch |
 | Force events are velocity changes on bodies | Same |
-| Lock and join constraints, with per-axis position and orientation strengths | Rigid constraints whose force on each axis is capped by its strength (read as Karma's relative-position-relative-orientation joint; 0 = free; a negative strength pushes or turns instead, lesson 13) |
+| Lock and join constraints, with per-axis position and orientation strengths | Rigid constraints whose force on each axis is capped by its strength (read as Karma's relative-position-relative-orientation joint; 0 = free; a negative strength pushes or turns instead, lesson 13); one that has fallen behind pulls with its full strength until it catches up (lesson 20) |
 | Transitions blend simulation back to animation | Same, linear window, then the required level |
 
 ## Solver
@@ -35,7 +35,8 @@ Each tick (1/rate s) runs 4 substeps. Each substep:
    - joint anchor points (3-row block);
    - twist and swing limits (one-sided rows; springs in the soft zone);
    - muscles;
-   - locks (one 6-row block each, each row capped at its strength);
+   - locks (one 6-row block each, each row capped at its strength, closing a gap no
+     faster than that strength could stop it, lesson 20);
    - bodies that locks tie together, with the joints between them, solved directly as
      one system (lesson 12), and the same for characters something much heavier
      presses on (lesson 15) or with a joint open more than 1.5 cm (lesson 17);
@@ -43,6 +44,7 @@ Each tick (1/rate s) runs 4 substeps. Each substep:
    - friction.
 5. Integrate positions.
 6. Relax: one pass without position bias, so error correction doesn't add energy.
+   Lock axes still at their strength after step 4 are left as they are (lesson 20).
 7. Restitution, for impacts faster than 0.5 m/s.
 
 Keyed bodies (animated, collision-only, collision with momentum) are moved by the
@@ -408,14 +410,148 @@ and not where Car carry does.
 
     Car Hit still reports 0.38 m of drift on the car's join to its 4 g carrier from
     frame 5. The sweep doesn't check drift, and the carrier is lighter than the car
-    by a factor of about 180 000; that is a separate question.
+    by a factor of about 180 000; that was a separate question (lesson 20).
+
+A frame-by-frame comparison of Car Hit with a recording of endorphin's showed two
+general mismatches. The first was in locks.
+
+20. **A lock that has fallen behind pulls with its full strength until it catches
+    up.** In Car Hit a 747 kg car is joined (1e5 N) to a 4 g keyed carrier, which
+    switches to its keys at frame 2 and drives off at 8.2 m/s (16.5 m/s for that first
+    frame, as it catches up with its keys). 1e5 N moves the car at 134 m/s², so it
+    can't keep up at once: it fell 0.38 m behind by frame 5. Then it stayed behind,
+    closing the gap at 0.3 m/s, 0.3 m behind still at frame 100. In endorphin the car
+    follows the carrier from the start; in the recording it is 0.4-0.6 m ahead of
+    NeuroMotion's at frames 8-30.
+    The force cap wasn't the problem; how a capped lock corrects position was.
+    Position correction adds velocity that the relax pass (step 6) takes back, so
+    each substep the lock could close the gap by at most strength × h² / mass and
+    keep none of the speed: the 0.3 m/s is 1e5 N × (1/480 s) / 747 kg. A force-capped
+    constraint in Karma, which corrects errors in the same velocity solve that it
+    caps, pulls with its full strength while it can't keep up, and the body gains
+    speed. Now, too: a lock axis still at its strength when the position-correcting
+    iterations end keeps that impulse through the relax pass, in the per-lock block
+    and in the direct solve. Pulling with all its strength, a lock would arrive
+    faster than it can stop and swing past (a weak lock round and round its target),
+    so each axis also closes no faster than its strength could stop it on target:
+    √(2 × strength × e / effective mass) for a gap e, as well as the usual 3 m/s.
+    Strong locks never meet that limit at the gaps they keep (1e5 N on 747 kg allows
+    1.6 m/s at 1 cm, where position correction asks for 1 m/s).
+
+    | Stand-in or scene | Before | After |
+    |---|---|---|
+    | 50 N lock on a weightless 10 kg ball, 1 m from its target (`a_lock_that_falls_behind_pulls_with_its_full_strength`) | moved 0.5 cm in 0.5 s | 61 cm in 0.5 s, on target (within 0.01 mm) at 0.9 s without swinging past |
+    | Heavy join: Car Hit's join alone, the carrier driving off at 8 m/s and stopping dead at 1 s (`heavy_join_catches_up`) | 23 cm behind at frame 4, still 18 cm at frame 15 and 15-16 cm for the rest of the drive and the second after the stop | 23 cm behind at frame 4, on its carrier (under 1 mm) from frame 11; 23 cm past it at the stop (frame 63), back by frame 71 |
+    | Car Hit, the car's join | 12.0 cm mean drift, 0.3 m from frame 5 to the stop | 2.1 cm mean: 0.38 m at frame 5 as before, on the carrier from frame 14 |
+    | Car Crash, the car caught by "Hold car in place" (full range) | 6.2 cm mean drift | 2.0 cm |
+    | Car Hit's pedestrian, centre of mass x at frames 68/78/88 (endorphin 0.02/-0.11/-0.11 m) | -0.61/-0.91/-1.21 m | -0.55/-0.84/-1.12 m (friction is the rest, lesson 21) |
+
+    The largest drift of each lock, what the sweep prints, is unchanged: Car Hit's
+    0.38 m at frame 5 is the car falling behind as the carrier drives off, which a
+    1e5 N join allows. Every other lock in the sample scenes drifts as before (mean
+    and largest, over each scene's full range). In the 2 s sample sweep only scenes
+    with weak locks move, a little: Rotating Floor (50-2000 N·m) stretches 0.36 cm
+    instead of 0.30, Multi Martial (a 300 N·m guide) is unchanged but for its lowest
+    body (1.4 cm instead of 1.3), and Car Hit stretches 1.12 cm instead of 0.93. Over
+    the full ranges Rotating Floor, which already fails, sinks to -4.73 m instead of
+    -4.55; Catch Rope and Heli Leap fail as before. Of the stand-ins, the back flip
+    standing is unchanged and left alone leaves the box at frame 333 instead of 335;
+    Car carry's car catches up before the hit, which moves its joints by a millimetre
+    or so (over the nudge survey's 9 runs: 0.7-1.6 cm in the hit, 0.4-0.5 without toes
+    and fingers, 0.1-0.5 after the stop). Balance's stepping and Stagger give the same
+    result in every nudged run. Back-Flip-To-Combo, whose toe locks are 25 N, leaves
+    the box at frame 168 instead of 167 and lands at 223 instead of 222. Timings don't
+    change.
+
+The second was friction.
+
+21. **endorphin's friction is Coulomb friction: μ is its friction value / 100.** The
+    second mismatch in Car Hit was the pedestrian. Running at about -4 m/s into the
+    car, which drives at +8, endorphin's is stopped dead: its centre of mass is at
+    x = 0.02, -0.11 and -0.11 m at frames 68, 78 and 88, and it lands at -0.3 to
+    -0.44 m around frame 96. NeuroMotion's kept -1.8 m/s through the air
+    (-0.55, -0.84, -1.12 m with lesson 20) and landed 1.2 m further, at frame 98.
+    NeuroMotion read a material interaction's friction as a force cap per contact:
+    100 N for endorphin's Default, whatever the load. Grip then depends on how many
+    contacts the collision code happens to make rather than on how hard bodies
+    press: a 10 kg box sliding from 4 m/s stops in 0.7 m, a 100 kg one in 2.0 m, and
+    a body landing on a bonnet at several metres a second gets the same 100 N a
+    resting one does. The files' values read better as Coulomb coefficients × 100:
+    Icy 1 (μ = 0.01), Default 100 (μ = 1), Grippy 300 (rubber feet on tarmac, μ = 3),
+    Sticky 700 with 700 N of adhesion; Karma's friction is Coulomb-style, limited in
+    proportion to the normal force (the friction "box" is Karma's square
+    approximation of the cone, which NeuroMotion's two tangent rows also make). So
+    imported scenes now use `ContactModel::Coulomb`, the cap being friction / 100 ×
+    the normal impulse, which already existed. Car Hit:
+
+    | Car Hit (60 fps) | endorphin | Before (force caps, lesson 20) | Coulomb |
+    |---|---|---|---|
+    | Pedestrian's speed along the road at frame 70 | about 0 | -1.7 m/s | -0.1 m/s |
+    | Centre of mass x at frames 68 / 78 / 88 | 0.02 / -0.11 / -0.11 m | -0.55 / -0.84 / -1.12 m | -0.14 / -0.15 / -0.17 m |
+    | First touches the ground | around frame 96, at -0.3 to -0.44 m | frame 98, at -1.12 m | frame 90, at -0.17 m |
+
+    μ is not tuned: Coulomb at μ = 1 without lesson 20 overshot (0.21 m at landing),
+    and half of it (μ = 0.5) kept -1.6 m/s. The new stand-ins pin the difference down:
+    `coulomb_friction_scales_with_the_load` (both boxes stop in 0.82 m, v²/2μg) and
+    Bonnet slide, a 75 kg box landing on Heavy join's car at 4 m/s against it, which
+    is stopped dead (-0.33 m/s three frames after landing, against -3.9 with force
+    caps) as endorphin's pedestrian is.
+
+    Two stand-ins needed a look, and one change to the scene:
+    - Car carry, given Coulomb friction like the scene it stands in for, opened an
+      ankle by 1.8 cm after the stop, and by up to 7.8 cm in nudged runs. Its car
+      cleared the ground by 7 cm, and a foot caught under the chassis was dragged
+      along the road at 8 m/s under the car's weight: in proportion to that load,
+      friction held it back while the car carried the body on. Car Hit's car clears
+      the ground by about 15 cm, and so does the stand-in's now. Over the 201 nudged
+      runs the body then opens 0.3-0.7 cm up to the stop and 0.1-1.1 cm after it (the
+      test holds it to 2 and 1.5 cm), toes and fingers 0.5-2.2 cm (3.5). A foot
+      crushed under a car, with friction to match, still tears an ankle open; the
+      direct solve covers joints, not contacts (see *Not yet*).
+    - The back flip with Coulomb friction: standing, it leaves the box at frame 319
+      instead of 324 and lands at 385 instead of 387, -281° in all. Left alone, its
+      feet grip the box longer: it falls off the front at 338 and lands at 412
+      instead of 399, still settling at frame 480, where the stand-in ended; it now
+      runs 5 s.
+
+    NeuroMotion's own projects, and stand-ins other than those built from Car Hit and
+    Back-Flip-To-Combo, keep force-capped friction for now. Balance and Stagger were
+    tuned on it, and their margins shrink with grip in proportion to load: a
+    lightly loaded foot landing a step slides where a force cap held it. Over the
+    nudge survey with Coulomb friction everywhere, Balance survives 4-7 of its 8 hard
+    backward pushes (6-8 before; the test wants 4) and falls after 2.9-3.0 m/s
+    forward pushes it used to stand through, so Stagger's feet go only 0.9-1.9 times
+    as far as Balance's (2.3-4.0; the test wants 1.5). Imported scenes run Balance
+    and Stagger on Coulomb friction already.
+
+    The sample sweep stays 16 of 16 clean (2 s each):
+
+    | Scene | Before (lesson 20) | Coulomb |
+    |---|---|---|
+    | Car Hit | 1.12 cm stretch, lowest body 2.0 cm | 2.94 cm (a knee, frame 93, landing), 0.6 cm |
+    | Catch Rope | 0.15 cm | 0.95 cm |
+    | Walk With Gun | 1.50 cm stretch, hands' join 2.6 cm drift | 0.78 cm; 6.6 cm drift and a finger 2.4 cm into the ground at frame 37, as the character falls with its 549 kg gun |
+    | Trapeze | lowest body 3.08 m | 2.12 m (it swings differently) |
+    | Sword Play | 12.6 cm drift (sword to hand) | 5.9 cm |
+    | Heli Leap | lowest body -4.1 cm | 0.0 cm |
+    | The others | | within a few millimetres |
+
+    Over each scene's full range, the 13 clean scenes stay clean, and the three that
+    already failed still fail: Catch Rope stretches 17.6 m instead of 18.0 after 2 s,
+    Heli Leap's lowest body sinks to -2.16 m instead of -3.42 and Rotating Floor's to
+    -4.69 m instead of -4.55 (-4.73 with lesson 20 alone). Back-Flip-To-Combo is no
+    nearer endorphin's: its character still falls off the back of the box long
+    before the flip (lesson 13), at frame 174 instead of 168, but its rubber feet,
+    gripping at μ = 3, now catch on the box's edge and it hangs there until about
+    frame 450, landing at 488 instead of 223 (endorphin: crouched on the box until
+    the flip at about 280, landed behind it by 340). Timings don't change.
 
 Sweeping the sample scenes over their whole range instead of their first two seconds
 failed three of them: Catch Rope (a joint stretched 18.0 m), Heli Leap (a body 3.42 m
 below y = 0) and Rotating Floor (4.55 m below). Tracing them found one bug in the
 simulation and two in the sweep's own measures.
 
-(Number to be assigned at integration.) **A force pushes the bodies it names, and a
+22. **A force pushes the bodies it names, and a
 massless body never moves.** Catch Rope's environment drifted at 1 m/s from its first
 frame, carrying the roof and the character standing on it. The scene's "Start rope
 moving" force, a 1 m/s push on the rope's end, sits on the environment's track but
@@ -442,7 +578,7 @@ cut. Every other scene and stand-in, and `nudge_survey`, give the same numbers a
 before: no other one has a force on another character's track or a moving massless
 body.
 
-(Number to be assigned at integration.) **Without a ground plane, measure from the
+23. **Without a ground plane, measure from the
 scenery; a cut joint is no joint.** The other failures were the sweep's:
 - Heli Leap and Rotating Floor set `useDefaultGround="false"`, and the sweep failed
   any body 10 cm below y = 0 all the same. Heli Leap's roof top is at y = 0, with
@@ -483,7 +619,7 @@ catch, and hold that offset. Heli Leap's jump (a squat, downward pushes on the p
 then a legs-out pose at frames 58-62) doesn't lift its jumper either: the pelvis sinks
 from 0.90 m to 0.52 m over frames 54-62 and the jumper steps off the roof's edge.
 
-19. **(Number to be assigned at integration; "transition end".) A transition's blend
+24. **A transition's blend
     includes its last frame.** In Car Hit's 90-112 transition the drawn pose jumped
     for exactly one frame: the root was at x = -0.65 m at frame 111 (blended), -1.94 m
     at 112 (the raw simulated pose, lying on the road) and -0.62 m at 113 (animated).
@@ -527,7 +663,7 @@ set-up (ground, rigs, events, constraint targets and settings).
 Each failure also gets a stand-in built in code (`src/physics/scenes.rs`) with the
 same pattern, so it can be worked on without endorphin's files.
 
-Last run, over each scene's whole range, with lessons 1-18, the two above and
+Last run, over each scene's whole range, with lessons 1-18 and 20-24 and
 imported behaviours actually running (until the behaviour names were matched,
 `docs/behaviours.md`, none of them ran in these scenes); 16 scenes, Bridge Escape is
 skipped for size:
@@ -537,15 +673,15 @@ skipped for size:
 | Clean | All 16: Arrows, Balcony, Bendy Stick, Car Crash, Car Hit, Catch Rope, Catch Run, Gymnast Rings, Heli Leap, Multi Martial, Rotating Floor, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
 | Failing | None |
 
-Max joint stretch per scene over its whole range: Arrows 0.23 cm, Balcony 0.91,
-Bendy Stick 0.61, Car Crash 1.08, Car Hit 0.93, Catch Rope 0.90, Catch Run 1.41,
-Gymnast Rings 0.47, Heli Leap 0.29, Multi Martial 1.54, Rotating Floor 0.85, Stagger
-Walk 0.32, Sword Play 0.46, Tackle 0.68, Trapeze 0.52, Walk With Gun 1.50 (the whole
-sweep takes about 11 s). Heli Leap's lowest body is 3.42 m and Rotating Floor's 4.55 m
-below y = 0, in scenes without a ground (see the lessons above). Over the first two
-seconds only, as the sweep used to run, Car Hit was the last to fail: a clavicle
-7.9 cm out, which lessons 15 and 17 (fixed in the Car carry stand-in) didn't cure
-because the real failure was in its transition back to animation (lesson 18).
+Max joint stretch per scene over its whole range: Arrows 1.27 cm, Balcony 1.16,
+Bendy Stick 0.61, Car Crash 1.26, Car Hit 2.94, Catch Rope 1.12, Catch Run 1.41,
+Gymnast Rings 0.40, Heli Leap 0.29, Multi Martial 1.74, Rotating Floor 0.41, Stagger
+Walk 0.46, Sword Play 0.46, Tackle 0.66, Trapeze 0.82, Walk With Gun 0.78 (the whole
+sweep takes about 12 s). Heli Leap's lowest body is 2.16 m and Rotating Floor's 4.69 m
+below y = 0, in scenes without a ground (lesson 23). Over the first two seconds only,
+as the sweep used to run, Car Hit was the last to fail: a clavicle 7.9 cm out, which
+lessons 15 and 17 (fixed in the Car carry stand-in) didn't cure because the real
+failure was in its transition back to animation (lesson 18).
 
 Four of the five scenes still failing after lesson 12 weren't solver problems at all:
 the importer set them up wrongly. Looking at Balcony in the app showed it: one
@@ -578,8 +714,10 @@ What each stand-in reproduces:
 | Rotating Floor | No ground; a thin collision-only slab spinning and rocking | sinks through | rides it |
 | Turntable | No ground; a flat cylinder spinning | floats 0.9 m above it | rests on it |
 | Hanging weight | A 20-80 kg weight on a rope locked at the top, hanging straight (lesson 10) | 0.36 m stretch, 63 m/s | 1.5 cm, 0.6 m/s |
-| Car carry | Car Hit: a 747 kg car joined (1e5) to a keyed carrier drives into a standing character with clavicles at 8 m/s, catches its arm against its ribs, carries it on the bonnet and stops dead at 1.65 s (lesson 15). The join gives way by 23 cm as the carrier stops, by design. After the stop the pedestrian slides off and the arm whips round against its own chest and neck | 5.8 cm (shoulder) at the hit; 7.0 cm after the stop (#23) | Over 201 nudged runs, up to the stop: 0.5 cm at most for the body (shoulder included), toes and fingers 0.5-2.7 cm at the hit. After the stop: 0.7 cm at most for the body, 2.0 cm for a finger (lesson 17) |
-| Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -73° at 297, leaves the box at 324, lands behind it at 387, -278° in all. Left alone: tips forwards and falls off the front at 335 (both changed by lesson 16) |
+| Car carry | Car Hit: a 747 kg car joined (1e5) to a keyed carrier drives into a standing character with clavicles at 8 m/s, catches its arm against its ribs, carries it on the bonnet and stops dead at 1.65 s (lesson 15). The join gives way by 23 cm as the carrier stops, by design. After the stop the pedestrian slides off and the arm whips round against its own chest and neck. Coulomb friction, and the car 15 cm off the ground, as Car Hit's is (lesson 21) | 5.8 cm (shoulder) at the hit; 7.0 cm after the stop (#23) | Over 201 nudged runs, up to the stop: 0.7 cm at most for the body (shoulder included), toes and fingers 0.5-2.2 cm at the hit. After the stop: 1.1 cm at most (lessons 17 and 21) |
+| Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps, Coulomb friction (lesson 21) | floats above the box | standing (Balance until the drive): flips backwards, 1° at frame 246, -76° at 297, leaves the box at 319, lands behind it at 385, -281° in all. Left alone: tips forwards and falls off the front at 338, landing at 412 (changed by lessons 16 and 21) |
+| Bonnet slide | Car Hit's pedestrian landing on the bonnet: a 75 kg box thrown at 4 m/s against Heavy join's car drops onto it (lesson 21) | slides on at 3.7-3.9 m/s | stopped dead: -0.33 m/s three frames after landing |
+| Heavy join | Car Hit's join alone: a 747 kg car joined (1e5) to a light keyed carrier that drives off at 8 m/s and stops dead 1 s later (lesson 20) | 15-18 cm behind its carrier for the whole drive and after the stop | 23 cm behind at frame 4, on the carrier from frame 11; 23 cm past it at the stop, back 8 frames later |
 | Curl hand-back | Car Hit's hand-back: a character with clavicles curls up on the ground (BodyFoetal), then a 0.75 s transition, overlapping the curl's end, blends it back onto its standing animation (lesson 18) | 16.6 cm (knee) mid-transition | 0.09 cm |
 | Tilting floor | Rotating Floor's end: no ground; a long collision-only slab with a wall at its low end tilts 20°, carrying a character 1.9 m below y = 0 | fails the sweep (lowest -1.9 m) | rides it (nothing under the slab) |
 | Roof edge | Heli Leap's jumper: no ground; a character runs off a roof whose top is at y = 0 and falls past the building's side | fails the sweep (lowest -10.6 m) | falls 10.6 m beside the building |
@@ -616,11 +754,16 @@ hasn't been re-run against endorphin's scene since.
   goal, the physics could use pure-Rust maths that rounds the same everywhere (the
   `libm` crate, say) instead of the platform's.
 - Interpolated output between frames.
+- Contacts in the direct solve. A foot crushed under a car, with Coulomb friction
+  holding it to the road, tears its ankle open (lesson 21): the direct solve holds
+  the joints, but contacts are solved after it.
+- Saved projects keep the friction model they were saved with: one imported before
+  lesson 21 keeps force-capped friction until it is imported again.
 
 ## Improvements planned beyond endorphin
 
 - Re-simulate automatically from the edited frame onward, instead of from the start.
 - Muscle strength as keyable curves per body region.
 - Pose-matched hand-back from simulation to animation.
-- Coulomb friction mode for physically scaled grip (available now as
-  `ContactModel::Coulomb`).
+- Coulomb friction for NeuroMotion's own projects too (imported scenes have it,
+  lesson 21), once Balance and Stagger are tuned for it.

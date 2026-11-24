@@ -47,6 +47,10 @@ NeuroMotion, and we need numbers to prove it.
   stand-in. Bridge Escape is skipped for size
 - ✅ Heavy bodies pressing on a character, friction only where surfaces touch, and
   characters with a joint come apart solved directly (lessons 15, 16 and 17)
+- ✅ Car Hit measured against a recording of endorphin's: a lock that falls behind
+  now pulls with its full strength, and imported friction is Coulomb, μ = friction
+  / 100 (lessons 20 and 21). NeuroMotion's own projects keep force-capped friction
+  until Balance and Stagger are tuned for Coulomb
 - 🟡 Back-Flip-To-Combo: the character tips forward before the flip
   ([#6](https://github.com/Rick007110/NeuroMotion/issues/6))
 - ⬜ **Reference measurements**: a set of scenes measured in endorphin (frames, angles,

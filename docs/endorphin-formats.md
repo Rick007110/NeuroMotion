@@ -156,13 +156,28 @@ These are what the importer relies on:
   means cut) or, if no target resolves, does nothing. To verify
   against a real scene: look at the clip's *Other imported settings* in the inspector
   and rename the keys in `physics/sim.rs` and `document/events.rs`.
-- Constraint events give a strength per axis for position and for orientation
-  (newtons and newton-metres; 1e5 is effectively unbreakable, 0 leaves the axis free).
+- Constraint events give a strength per axis for position and for orientation:
+  the most force (N) or torque (N·m) the lock may use on that axis, as Karma's
+  relative-position-relative-orientation joint has; 0 leaves the axis free. The
+  values the scenes use read sensibly as forces on a human or a car: 25 N toe locks,
+  a 500 N ring hold, 100-1000 N·m "guides" to turn a character, and 1e5, which
+  carries a 747 kg car at up to 134 m/s² (13.6 g) and is effectively unbreakable for
+  a character. A lock that can't hold pulls towards its target with all of it
+  (`physics-design.md`, lesson 20). The files don't say how fast endorphin closes
+  a gap; that a strong join follows its keyed carrier, as Car Hit's car does, is
+  what was checked.
   endorphin's help doesn't document negative strengths; scenes use them as drives.
   Back-Flip-To-Combo spins its character into the flip with an orientation strength
   of (-100, 0, 0) on pelvis and spine. NeuroMotion reads a negative axis as a steady
   force or torque of that value along the axis (world axes for locks, the anchor's
   for joins), on the locked body and the opposite on its anchor, instead of a hold.
+- `MaterialInteraction`s give `friction`, `restitution`, `maxAdhesiveForce` (N) and
+  `softness`; `MaterialPair`s name the interaction for two materials. The friction
+  value is a Coulomb coefficient × 100: the sample scenes use 1 (Icy), 100
+  (Default), 300 (Grippy, rubber on tarmac) and 700 (Sticky, with 700 N of
+  adhesion), and Car Hit only behaves as endorphin's does read that way
+  (`physics-design.md`, lesson 21). NeuroMotion used to read it as a force cap per
+  contact in newtons.
 - A body's mass is its inertial shape's volume times its density (g/cm³). A
   character's body can come out with none: Back-Flip-To-Combo's NormalMass is a
   zero-sized Sphyl. Only the environment's massless pieces stay fixed in place;
