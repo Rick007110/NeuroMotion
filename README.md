@@ -192,6 +192,11 @@ kind is welcome, and you don't need to write Rust to help.
 Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md). Security
 problems go privately through [SECURITY.md](SECURITY.md), not in a public issue.
 
+
+## Join the community
+
+[![Join the NeuroMotion Discord](https://discord.com/api/guilds/1574736785282703381/widget.png?style=banner2)](https://discord.gg/99V7nXXe5G)
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE). NeuroMotion is not affiliated with
