@@ -430,17 +430,19 @@ set-up (ground, rigs, events, constraint targets and settings).
 Each failure also gets a stand-in built in code (`src/physics/scenes.rs`) with the
 same pattern, so it can be worked on without endorphin's files.
 
-Last run, with lessons 1-18 (16 scenes; Bridge Escape is skipped for size):
+Last run, with lessons 1-18 and imported behaviours actually running (until the
+behaviour names were matched, `docs/behaviours.md`, none of them ran in these
+scenes); 16 scenes, Bridge Escape is skipped for size:
 
 | Result | Scenes |
 |---|---|
 | Clean | All 16: Arrows, Balcony, Bendy Stick, Car Crash, Car Hit, Catch Rope, Catch Run, Gymnast Rings, Heli Leap, Multi Martial, Rotating Floor, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
 | Failing | None |
 
-Max joint stretch per scene: Arrows 0.12 cm, Balcony 0.47, Bendy Stick 0.61, Car
+Max joint stretch per scene: Arrows 0.23 cm, Balcony 0.36, Bendy Stick 0.61, Car
 Crash 0.04, Car Hit 0.93, Catch Rope 0.15, Catch Run 1.41, Gymnast Rings 0.22, Heli
-Leap 0.29, Multi Martial 1.54, Rotating Floor 0.09, Stagger Walk 0.07, Sword Play
-0.46, Tackle 0.68, Trapeze 0.14, Walk With Gun 1.50. Car Hit was the last to fail: a
+Leap 0.29, Multi Martial 1.54, Rotating Floor 0.30, Stagger Walk 0.32, Sword Play
+0.46, Tackle 0.68, Trapeze 0.24, Walk With Gun 1.50. Car Hit was the last to fail: a
 clavicle 7.9 cm out, which lessons 15 and 17 (fixed in the Car carry stand-in) didn't
 cure because the real failure was in its transition back to animation (lesson 18).
 
