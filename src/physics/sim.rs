@@ -661,7 +661,22 @@ fn plan(project: &Project, character_index: usize) -> Plan {
             .and_then(|v| v.trim().parse::<f32>().ok())
     };
     for clip in &project.clips {
-        if !clip.props.enabled || project.clip_character(clip).map(|c| c.id) != Some(character.id) {
+        if !clip.props.enabled {
+            continue;
+        }
+        // A force pushes the bodies it names, whichever character's track holds it.
+        if matches!(&clip.kind, ClipKind::Event { event } if event == "Force") {
+            let own = project.clip_character(clip).map(|c| c.id) == Some(character.id);
+            if let (Some(rig), Some(dv)) = (
+                &character.physics,
+                clip.source.get("matrix.Vi").and_then(|v| parse_vec3(v)),
+            ) && let Some(bodies) = force_bodies(clip, &character.name, rig, own)
+            {
+                plan.forces.push((clip.props.start, dv, bodies));
+            }
+            continue;
+        }
+        if project.clip_character(clip).map(|c| c.id) != Some(character.id) {
             continue;
         }
         let (start, end) = (clip.props.start, clip.props.end());
@@ -693,26 +708,6 @@ fn plan(project: &Project, character_index: usize) -> Plan {
                         .and_then(|v| SimLevel::from_endorphin(v))
                         .unwrap_or(SimLevel::Animated);
                     plan.switches.push((end, level));
-                }
-                "Force" => {
-                    let Some(rig) = &character.physics else {
-                        continue;
-                    };
-                    let Some(dv) = clip.source.get("matrix.Vi").and_then(|v| parse_vec3(v)) else {
-                        continue;
-                    };
-                    let bodies: Vec<usize> = clip
-                        .source
-                        .get("targets")
-                        .map(|t| {
-                            t.split(',')
-                                .filter_map(|name| {
-                                    rig.body_index(name.trim().rsplit('.').next().unwrap_or(""))
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    plan.forces.push((start, dv, bodies));
                 }
                 "Behaviour" => {
                     let name = clip.source.get("behaviourName").unwrap_or(&clip.props.name);
@@ -772,6 +767,25 @@ fn plan(project: &Project, character_index: usize) -> Plan {
     plan.switches.sort_by_key(|s| s.0);
     plan.momentum.sort_by_key(|s| s.0);
     plan
+}
+
+/// The bodies of a character's rig (`rig`, named `character`) a force event pushes:
+/// every body it names as `character.MetaBodies.<body>`, or a bare body name when the
+/// clip is on the character's own track (`own`). A force naming no body pushes every
+/// body of its own character (an empty list). `None` when it pushes none of them: a
+/// force aimed at another character's body (Catch Rope's push on its rope sits on the
+/// environment's track) must not fall back to pushing everything here.
+fn force_bodies(clip: &Clip, character: &str, rig: &PhysicsRig, own: bool) -> Option<Vec<usize>> {
+    let targets = crate::document::events::targets(&clip.source);
+    if targets.is_empty() {
+        return own.then(Vec::new);
+    }
+    let bodies: Vec<usize> = targets
+        .iter()
+        .filter(|t| t.character == character || (t.character.is_empty() && own))
+        .filter_map(|t| rig.body_index(&t.body))
+        .collect();
+    (!bodies.is_empty()).then_some(bodies)
 }
 
 fn parse_vec3(text: &str) -> Option<Vec3> {

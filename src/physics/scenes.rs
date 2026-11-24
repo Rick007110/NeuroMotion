@@ -1664,6 +1664,79 @@ pub fn roof_edge() -> Project {
     p
 }
 
+/// Catch Rope after the catch: a rope locked at the top beside a roof is set swinging by
+/// a force event that sits on the environment's track but names the rope's end (as the
+/// real scene's does), and its last link is cut at 1 s. The roof is the environment's
+/// massless piece, with a character standing on it.
+pub fn cut_rope() -> Project {
+    let mut p = new_scene("Cut rope", 2.0);
+    let roof = Geometry::Box {
+        size: [4.0, 0.4, 4.0],
+    };
+    let (skeleton, mut rig) = scenery(&[(roof, Quat::IDENTITY, Vec3::new(0.0, 2.8, 0.0))]);
+    rig.bodies[0].mass = 0.0;
+    rig.bodies[0].inertia = [0.0; 3];
+    let building = add_prop(
+        &mut p,
+        "building",
+        CharacterKind::Environment,
+        (skeleton, rig),
+        SimLevel::Simulated,
+    );
+    let rig = chain(
+        Vec3::new(0.0, 6.5, 2.6),
+        10,
+        0.3,
+        0.02,
+        0.15,
+        None,
+        Limits {
+            twist_min: -0.5,
+            twist_max: 0.5,
+            swing1: 1.2,
+            swing2: 1.2,
+        },
+        Gains {
+            stiffness: 0.5,
+            damping: 0.05,
+            force_limit: 5.0,
+        },
+    );
+    let rope = add_prop(
+        &mut p,
+        "rope",
+        CharacterKind::Prop,
+        rig,
+        SimLevel::Simulated,
+    );
+    constrain(
+        &mut p,
+        rope,
+        0,
+        120,
+        "Lock",
+        &["rope.MetaBodies.seg0"],
+        (Vec3::new(1e5, 1e5, 0.0), Vec3::ZERO),
+    );
+    push(
+        &mut p,
+        building,
+        1,
+        "rope.MetaBodies.seg9",
+        Vec3::new(0.31, 0.0, 0.95),
+    );
+    event(
+        &mut p,
+        rope,
+        "Sever",
+        60,
+        1,
+        &[("targets", "rope.MetaBodies.seg9")],
+    );
+    person(&mut p, "climber", Vec3::new(0.0, 3.0, -1.0), 0.0, &[]);
+    p
+}
+
 /// Car Hit: a car (collision with momentum) drives through a standing character at
 /// 15 m/s, bumper first.
 pub fn car_hit() -> Project {
@@ -2083,6 +2156,7 @@ mod tests {
             "turntable" => turntable(),
             "tilting_floor" => tilting_floor(),
             "roof_edge" => roof_edge(),
+            "cut_rope" => cut_rope(),
             "car_hit" => car_hit(),
             "car_carry" => car_carry(),
             "backflip" => backflip(true),
@@ -2386,6 +2460,23 @@ mod tests {
             !report.ok() && report.under > 0.5,
             "a dancer under the floor passed: {report}"
         );
+    }
+
+    /// Catch Rope: a force naming the rope's end, on the environment's track, pushes the
+    /// rope and not the environment, whose massless roof stays put; the link a sever
+    /// event cuts falls away without counting as a joint coming apart.
+    #[test]
+    fn force_on_another_track_pushes_what_it_names() {
+        let project = cut_rope();
+        let sim = check(project.clone());
+        let roof = |frame: i32| sim.frame(frame).unwrap()[0].as_ref().unwrap().bodies[0].1;
+        let moved = roof(120).distance(roof(0));
+        assert!(moved < 1e-4, "the massless roof moved {moved} m");
+        let end = |frame: i32| sim.frame(frame).unwrap()[1].as_ref().unwrap().bodies[9].1;
+        let swing = end(30).z - end(0).z;
+        assert!(swing > 0.05, "the rope's end only swung {swing} m");
+        let fell = end(60).y - end(120).y;
+        assert!(fell > 2.0, "the cut end only fell {fell} m");
     }
 
     /// A rope hanging straight down from a Lock with a heavy weight on the end stays

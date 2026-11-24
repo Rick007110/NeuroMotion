@@ -569,6 +569,17 @@ impl World {
 
     fn substep(&mut self, h: f32) {
         self.forget_switched_bodies();
+        // A dynamic body without mass is fixed in place, whatever velocity it was handed
+        // (a force event, or its animation's before it went simulated). Kept, it would
+        // drift forever, carrying whatever stands on it.
+        for body in self
+            .bodies
+            .iter_mut()
+            .filter(|b| b.motion == Motion::Dynamic && !b.is_dynamic())
+        {
+            body.linear_velocity = Vec3::ZERO;
+            body.angular_velocity = Vec3::ZERO;
+        }
         for body in self.bodies.iter_mut().filter(|b| b.is_dynamic()) {
             body.linear_velocity += self.gravity * h;
         }

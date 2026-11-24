@@ -85,7 +85,9 @@ events behave identically and project files stay format v2:
 | `Sever` | `severType` (`Cut`, `MuscleOff`), `targets` (guessed, see below) |
 
 `targets` lists bodies as `character.MetaBodies.Body`, comma separated. A force with no
-targets pushes every body of its character.
+targets pushes every body of its character. A force pushes the bodies it names whichever
+character's track holds it (Catch Rope keeps its push on the rope on the environment's
+track), and one naming only bodies that don't exist pushes nothing.
 
 `src/document/tests.rs` rebuilds the physics demo's events through the editor's own
 operations and checks the simulation is identical to the built-in demo's, and that
