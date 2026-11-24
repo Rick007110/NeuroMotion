@@ -7,7 +7,7 @@
 //! Controllers are stateless (everything comes from the bodies each tick), so they keep
 //! the simulation deterministic.
 
-use glam::{Quat, Vec3};
+use glam::{Mat3, Quat, Vec3};
 
 use super::sim::rig_bodies;
 use super::world::{Body, Joint, World};
@@ -27,6 +27,10 @@ pub enum Behaviour {
     Writhe,
     /// Balance that steps to keep up with a push, with a looser trunk.
     Stagger,
+    /// Reach for a target with either hand and turn the head to look at another
+    /// (endorphin's Look and Reach, "Hands reach and look at"); the rest of the body
+    /// holds its pose. Its targets and settings come from the event: [`LookAndReach`].
+    LookAndReach,
 }
 
 impl Behaviour {
@@ -51,6 +55,7 @@ impl Behaviour {
             "bodyfoetal" | "bodyfetal" | "foetal" | "fetal" => Some(Behaviour::BodyFoetal),
             "writhe" | "bodywrithe" => Some(Behaviour::Writhe),
             "stagger" => Some(Behaviour::Stagger),
+            "lookandreach" | "handsreachandlookat" => Some(Behaviour::LookAndReach),
             _ => None,
         }
     }
@@ -62,6 +67,7 @@ impl Behaviour {
             Behaviour::BodyFoetal => body_foetal(d),
             Behaviour::Writhe => writhe(d),
             Behaviour::Stagger => stagger(d),
+            Behaviour::LookAndReach => look_and_reach(d),
         }
     }
 }
@@ -92,6 +98,8 @@ pub struct Layout {
     /// Each leg's side, flat, in the pelvis's frame: from the pelvis out to its hip.
     outward: Vec<Vec3>,
     arms: Vec<Limb>,
+    /// What lies beyond each arm's forearm, in the same order as `arms`.
+    hands: Vec<Hand>,
     /// Rig joint moving each body.
     joint_of: Vec<Option<usize>>,
     /// The trunk chain from the pelvis's trunk branch upwards: spine, chest, neck, head.
@@ -184,6 +192,7 @@ impl Layout {
             .copied()
             .max_by(|&a, &b| extreme(a, &high).total_cmp(&extreme(b, &high)));
         let mut arms = Vec::new();
+        let mut hand_chains = Vec::new();
         let mut chest = None;
         let mut trunk_chain = Vec::new();
         if let Some(trunk) = trunk {
@@ -220,6 +229,7 @@ impl Layout {
                         lower: chain[i + 1],
                         end: chain[i + 2],
                     });
+                    hand_chains.push(chain.clone());
                     chest.get_or_insert(s);
                 }
             }
@@ -291,6 +301,46 @@ impl Layout {
             .iter()
             .map(|l| rest[pelvis].0.inverse() * flat(pivot(l.upper) - at(pelvis)))
             .collect();
+        // Each hand, for reaching: the tip of the arm's furthest body (the fingers), and
+        // the upper arm and forearm as two bones out to it. Those are the consecutive
+        // pair with the longest reach, shoulder joint to tip, weighed by how evenly it
+        // splits at the elbow (shorter / longer): a collarbone is short, and an arm whose
+        // forearm is split in two (endorphin's, with a forearm twist) would otherwise be
+        // bent at the twist. `arms` keeps its own pick, which the other behaviours use.
+        let hands = arms
+            .iter()
+            .zip(hand_chains)
+            .map(|(arm, chain)| {
+                let start = pivot(chain[0]);
+                let tip = chain
+                    .iter()
+                    .map(|&b| at(b))
+                    .max_by(|a, b| a.distance(start).total_cmp(&b.distance(start)))
+                    .unwrap_or(start);
+                let score = |i: usize| {
+                    let upper = pivot(chain[i]).distance(pivot(chain[i + 1]));
+                    let lower = tip.distance(pivot(chain[i + 1]));
+                    (upper + lower) * upper.min(lower) / upper.max(lower).max(1e-6)
+                };
+                let i = (0..chain.len() - 1)
+                    .max_by(|&a, &b| score(a).total_cmp(&score(b)))
+                    .unwrap_or(0);
+                let (upper, lower) = (chain[i], chain[(i + 1).min(chain.len() - 1)]);
+                let (fr, fp) = rest[lower];
+                // Where the arm points at rest, shoulder to tip, seen from the trunk body
+                // it hangs from.
+                let trunk = joint_of[chain[0]].map_or(pelvis, |j| rig.joints[j].parent_body);
+                Hand {
+                    upper,
+                    lower,
+                    collar: chain[..i].to_vec(),
+                    rest_reach: rest[trunk].0.inverse() * (tip - pivot(upper)).normalize_or_zero(),
+                    chain: chain[(i + 2).min(chain.len())..].to_vec(),
+                    tip: fr.inverse() * (tip - fp),
+                    left: (pivot(arm.upper) - at(pelvis)).dot(Vec3::Y.cross(forward)) > 0.0,
+                }
+            })
+            .collect();
         let fwd = forward;
         let bend = Vec3::Y.cross(fwd);
         let rest_rel = (0..n)
@@ -316,6 +366,7 @@ impl Layout {
             feet,
             outward,
             arms,
+            hands,
             joint_of,
         })
     }
@@ -353,6 +404,26 @@ fn shape_bottom(geometry: Geometry, rotation: Quat, at: Vec3) -> Vec<Vec3> {
     }
 }
 
+/// The end of an arm, for reaching.
+#[derive(Clone, Debug)]
+struct Hand {
+    /// The upper arm and forearm, as reaching bends them.
+    upper: usize,
+    lower: usize,
+    /// Bodies between the trunk and the upper arm (a collarbone).
+    collar: Vec<usize>,
+    /// The way the arm points at rest, shoulder to tip, in the frame of the trunk body
+    /// it hangs from.
+    rest_reach: Vec3,
+    /// The bodies past the forearm, outwards: forearm twist, hand, fingers.
+    chain: Vec<usize>,
+    /// The hand's tip (the centre of its furthest body) in the forearm's frame, wrist
+    /// straight as at rest.
+    tip: Vec3,
+    /// The character's left hand (left is up × the way it faces).
+    left: bool,
+}
+
 /// A foot's shape, for stepping: where it touches the ground, measured at rest.
 #[derive(Clone, Debug)]
 struct Foot {
@@ -382,6 +453,9 @@ pub struct Drive<'a> {
     pub gains: &'a mut [MuscleGains],
     /// Seconds since the behaviour event started.
     pub elapsed: f32,
+    /// The event's targets and settings, for the behaviours that read them (Look and
+    /// Reach); `None` runs a behaviour with its defaults and no target.
+    pub settings: Option<&'a LookAndReach>,
 }
 
 impl Drive<'_> {
@@ -681,6 +755,16 @@ impl Drive<'_> {
 /// The shortest rotation taking direction `from` to direction `to`.
 fn arc(from: Vec3, to: Vec3) -> Quat {
     Quat::from_rotation_arc(from.normalize_or(Vec3::NEG_Y), to.normalize_or(Vec3::NEG_Y))
+}
+
+/// The rotation taking X to `along` and Y to `front` (made square to it), Z to their
+/// cross product.
+fn basis(along: Vec3, front: Vec3) -> Quat {
+    let along = along.normalize_or(Vec3::X);
+    let front = front
+        .reject_from(along)
+        .normalize_or(along.any_orthonormal_vector());
+    Quat::from_mat3(&Mat3::from_cols(along, front, along.cross(front))).normalize()
 }
 
 /// Used when a rig has no muscle presets.
@@ -1233,6 +1317,452 @@ fn writhe(d: &mut Drive) {
     d.curl(0.5, Some(Wander { elapsed }));
 }
 
+// ---------------------------------------------------------------------------------
+// Look and Reach
+
+/// A point to reach for or look at: a world body and a point in its frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Aim {
+    /// Index into the world's bodies.
+    pub body: usize,
+    /// The point in the body's frame (its centre, or its collision shape's).
+    pub offset: Vec3,
+}
+
+/// How one hand reaches, from a Look and Reach event's `LeftHand_...` or
+/// `RightHand_...` settings. A setting the event doesn't carry takes the value most of
+/// endorphin's scenes give it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Reach {
+    /// What to reach for (`...HandTarget`); `None`: the hand keeps its pose.
+    pub target: Option<Aim>,
+    /// Arm muscle strength, a fraction of the rig's "Strong" preset (`Strength`, 0.8).
+    pub strength: f32,
+    /// How fast the hand goes for the target, 0 to 1 (`Speed`, 0.8).
+    pub speed: f32,
+    /// Seconds after the event starts before the hand moves (`Delay`, 0).
+    pub delay: f32,
+    /// Seconds over which it then takes over from the pose (`Blend`, 0).
+    pub blend: f32,
+    /// Furthest the hand reaches, a fraction of the arm's length (`MaxExtension`, 1).
+    pub max_extension: f32,
+    /// Added to the target point, world axes, m (`CatchOffsetX/Y/Z`, 0).
+    pub offset: Vec3,
+    /// Aim where a moving target will be when the hand gets there (`UsePrediction`,
+    /// false).
+    pub predict: bool,
+    /// How much the wrist and fingers are held straight along the forearm, 0 to 1:
+    /// `Orientation` (0.5) when `applyHandOrientation` (true) is set, else 0.
+    pub orientation: f32,
+}
+
+/// Where the head looks, from the event's `LookAt...` settings.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Look {
+    /// What to look at (`LookAtTarget`); `None`: the head keeps its pose.
+    pub target: Option<Aim>,
+    /// How fast the head turns, 0 to 1 (`LookAtSpeed`, 0.5).
+    pub speed: f32,
+    /// Seconds before it turns (`LookAtDelay`, 0) and over which it takes over
+    /// (`LookAtBlend`, 0).
+    pub delay: f32,
+    pub blend: f32,
+    /// The world direction the top of the head keeps to (`LookAt_HeadUpVectorX/Y/Z`,
+    /// up) when `LookAt_UseUpVector` (true) is set; `None`: it keeps the roll it has.
+    pub up: Option<Vec3>,
+}
+
+/// A Look and Reach event's settings and targets: [`Behaviour::LookAndReach`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct LookAndReach {
+    pub left: Reach,
+    pub right: Reach,
+    pub look: Look,
+    /// Strength of the legs and trunk, which hold the timeline's pose, as a fraction of
+    /// the rig's "Normal" preset (`LegTorsoStiffness`, 0.8).
+    pub leg_torso: f32,
+}
+
+impl LookAndReach {
+    /// Reads an event's settings, as imported from endorphin (`LeftHand_Speed`, ...).
+    /// `aim` turns a target as the scene names it (`character.MetaBodies.Body`, or a
+    /// collision surface's path) into a point on a body in the world.
+    pub fn read(
+        settings: &std::collections::BTreeMap<String, String>,
+        aim: &dyn Fn(&str) -> Option<Aim>,
+    ) -> Self {
+        let number = |key: &str, default: f32| {
+            settings
+                .get(key)
+                .and_then(|v| v.trim().parse::<f32>().ok())
+                .filter(|v| v.is_finite())
+                .unwrap_or(default)
+        };
+        let flag = |key: &str, default: bool| {
+            settings
+                .get(key)
+                .map_or(default, |v| v.trim().eq_ignore_ascii_case("true"))
+        };
+        // A selection may list several; the first that resolves is used.
+        let target = |key: &str| {
+            settings
+                .get(key)
+                .and_then(|list| list.split(',').find_map(|t| aim(t.trim())))
+        };
+        let hand = |side: &str| {
+            let key = |name: &str| format!("{side}Hand_{name}");
+            Reach {
+                target: target(&format!("{side}HandTarget")),
+                strength: number(&key("Strength"), 0.8).clamp(0.0, 2.0),
+                speed: number(&key("Speed"), 0.8).clamp(0.0, 1.0),
+                delay: number(&key("Delay"), 0.0).max(0.0),
+                blend: number(&key("Blend"), 0.0).max(0.0),
+                max_extension: number(&key("MaxExtension"), 1.0).clamp(0.1, 1.0),
+                offset: Vec3::new(
+                    number(&key("CatchOffsetX"), 0.0),
+                    number(&key("CatchOffsetY"), 0.0),
+                    number(&key("CatchOffsetZ"), 0.0),
+                ),
+                predict: flag(&key("UsePrediction"), false),
+                orientation: if flag(&key("applyHandOrientation"), true) {
+                    number(&key("Orientation"), 0.5).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                },
+            }
+        };
+        let up = Vec3::new(
+            number("LookAt_HeadUpVectorX", 0.0),
+            number("LookAt_HeadUpVectorY", 1.0),
+            number("LookAt_HeadUpVectorZ", 0.0),
+        );
+        LookAndReach {
+            left: hand("Left"),
+            right: hand("Right"),
+            look: Look {
+                target: target("LookAtTarget"),
+                speed: number("LookAtSpeed", 0.5).clamp(0.0, 1.0),
+                delay: number("LookAtDelay", 0.0).max(0.0),
+                blend: number("LookAtBlend", 0.0).max(0.0),
+                up: flag("LookAt_UseUpVector", true)
+                    .then(|| up.try_normalize())
+                    .flatten(),
+            },
+            leg_torso: number("LegTorsoStiffness", 0.8).clamp(0.0, 2.0),
+        }
+    }
+}
+
+/// How far ahead of the hand (m) the point its arm aims for is put, at full speed. The
+/// muscles pull the hand towards a point at most this far ahead, which sets how fast
+/// it travels. Fitted to endorphin's run of "Hands reach and look at" (behaviours.md).
+const REACH_LEAD: f32 = 0.8;
+/// How far ahead of the head (rad) its aim is turned, at full speed.
+const LOOK_LEAD: f32 = 1.5;
+/// The furthest the neck and head together turn from the chest to look, rad.
+const MAX_LOOK: f32 = 1.4;
+/// How far apart (m) two hands reaching for the same point are aimed: close, as
+/// endorphin's hands come together on a target.
+const HAND_GAP: f32 = 0.08;
+/// The share of an arm's turn towards its aim that the collarbone takes.
+const COLLAR_SHARE: f32 = 0.3;
+/// Speed (m/s) a predicting hand is taken to travel at, to work out when it gets there.
+const HAND_SPEED: f32 = 2.0;
+/// Furthest ahead (s) a moving target is predicted.
+const MAX_PREDICT: f32 = 0.5;
+
+/// How far a part with a delay and a blend (s) has taken over at `elapsed` s, 0 to 1.
+fn ramp(elapsed: f32, delay: f32, blend: f32) -> f32 {
+    if blend > 0.0 {
+        ((elapsed - delay) / blend).clamp(0.0, 1.0)
+    } else if elapsed >= delay {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+/// Look and Reach. Each hand with a target reaches for it, and the head turns to look
+/// at its own target, while the legs and trunk hold the timeline's pose at
+/// `leg_torso` × "Normal".
+///
+/// Reaching: the target point (plus the catch offset, and moved on to where a moving
+/// target will be if the hand predicts) is brought within `max_extension` of the
+/// arm's length from the shoulder. The arm bends to put the hand's tip there, the
+/// elbow out and down from the chest (two bones: the upper arm, and the forearm out to
+/// the tip). The point the arm aims for is never more than `REACH_LEAD` × speed ahead
+/// of where the tip is, so the muscles carry the hand there at a pace `speed` sets.
+/// The wrist and fingers are held straight along the forearm by `orientation`. Arm
+/// muscles use the rig's "Strong" preset × strength.
+///
+/// Looking: the head turns to face its target, the top of the head towards the up
+/// vector, at most `MAX_LOOK` from straight on the chest. The neck and head joints
+/// share the turn, and the head is never aimed more than `LOOK_LEAD` × speed past
+/// where it is.
+///
+/// Delay and blend ease each part in. Everything is worked out afresh from the bodies
+/// each tick.
+fn look_and_reach(d: &mut Drive) {
+    let layout = d.layout;
+    let Some(chest) = layout.chest else { return };
+    let defaults;
+    let settings = match d.settings {
+        Some(s) => s,
+        None => {
+            defaults = LookAndReach::read(&Default::default(), &|_| None);
+            &defaults
+        }
+    };
+    // The legs and trunk hold their pose at `leg_torso`. Arms and neck keep what the
+    // timeline gives them until a reach or the look takes them over: Heli Leap joins a
+    // hand that only reaches later to another character's, and an arm held stiffly in
+    // its old pose pulled the join 20 cm apart.
+    let mut own: Vec<usize> = layout
+        .hands
+        .iter()
+        .flat_map(|h| h.collar.iter().chain([&h.upper, &h.lower]).chain(&h.chain))
+        .copied()
+        .collect();
+    if let Some(from) = layout.spine.iter().position(|&b| b == chest) {
+        own.extend(&layout.spine[from + 1..]);
+    }
+    let trunk_and_legs: Vec<usize> = d.all_bodies().filter(|b| !own.contains(b)).collect();
+    d.preset("Normal", settings.leg_torso, trunk_and_legs.into_iter());
+    let reaches: Vec<(Limb, &Hand, &Reach)> = layout
+        .arms
+        .iter()
+        .zip(&layout.hands)
+        .map(|(&arm, hand)| {
+            let reach = if hand.left {
+                &settings.left
+            } else {
+                &settings.right
+            };
+            (arm, hand, reach)
+        })
+        .collect();
+    // Where each hand is going, to keep two hands going for one point apart.
+    let goals: Vec<Option<Vec3>> = reaches
+        .iter()
+        .map(|&(_, _, reach)| reach.target.map(|aim| d.reach_point(aim, reach)))
+        .collect();
+    for (i, &(arm, hand, reach)) in reaches.iter().enumerate() {
+        let Some(goal) = goals[i] else { continue };
+        let w = ramp(d.elapsed, reach.delay, reach.blend);
+        if w <= 0.0 {
+            continue;
+        }
+        let shared = goals
+            .iter()
+            .enumerate()
+            .any(|(j, g)| j != i && g.is_some_and(|g| g.distance(goal) < HAND_GAP));
+        d.reach(chest, arm, hand, reach, goal, shared, w);
+    }
+    d.look(chest, &settings.look);
+}
+
+impl Drive<'_> {
+    /// Where a hand reaching for `aim` goes: the target point plus the catch offset,
+    /// moved on to where the target will be when the hand gets there if it predicts.
+    fn reach_point(&self, aim: Aim, reach: &Reach) -> Vec3 {
+        let body = &self.world.bodies[aim.body];
+        let mut at = body.position + body.rotation * aim.offset + reach.offset;
+        if reach.predict {
+            let chest = self.layout.chest.map_or(at, |c| self.body(c).position);
+            let ahead = (at.distance(chest) / HAND_SPEED).min(MAX_PREDICT);
+            at += body.linear_velocity * ahead;
+        }
+        at
+    }
+
+    /// Bends `arm` to put the hand's tip at `goal` (see `look_and_reach`), by `w`
+    /// (0: the timeline's pose, 1: reaching). `shared`: the other hand goes for the
+    /// same point, so the two are kept a little apart.
+    #[allow(clippy::too_many_arguments)]
+    fn reach(
+        &mut self,
+        chest: usize,
+        arm: Limb,
+        hand: &Hand,
+        reach: &Reach,
+        goal: Vec3,
+        shared: bool,
+        w: f32,
+    ) {
+        let layout = self.layout;
+        let (up, _, out) = self.chest_frame(chest, arm);
+        let shoulder = self.pivot(hand.upper);
+        let elbow = self.pivot(hand.lower);
+        let upper_rot = self.body(hand.upper).rotation;
+        let forearm = self.body(hand.lower);
+        let tip = forearm.position + forearm.rotation * hand.tip;
+        let forearm_rot = forearm.rotation;
+        let upper_len = elbow.distance(shoulder);
+        let lower_len = tip.distance(elbow);
+        let mut goal = goal;
+        if shared {
+            // Apart across the direction of reach, each hand on its own side.
+            let dir = (goal - shoulder).normalize_or_zero();
+            goal += (out - dir * out.dot(dir)).normalize_or_zero() * (HAND_GAP * 0.5);
+        }
+        // Within reach, and no closer than the arm can fold.
+        let longest = reach.max_extension * (upper_len + lower_len);
+        let shortest = ((upper_len - lower_len).abs() + 0.05).min(longest);
+        let clamp = |p: Vec3| {
+            let v = p - shoulder;
+            shoulder + v.normalize_or(-up) * v.length().clamp(shortest, longest)
+        };
+        let goal = clamp(goal);
+        let lead = REACH_LEAD * reach.speed.max(0.05);
+        let aim = clamp(tip + (goal - tip).clamp_length_max(lead));
+
+        // Two bones, the elbow out (and a little down) from the line to the aim. The
+        // upper arm is turned whole, twist included, so that its front (the way the
+        // character faces at rest, whether the arms hang or stretch out in a T-pose, the
+        // side an elbow folds towards) faces the way the forearm goes: the elbow then
+        // bends about its own hinge. Swinging the arm by the shortest arc instead left
+        // the twist of the T-pose, and elbows that should bend down bent up. An elbow
+        // pointing down needs more twist than endorphin's shoulder allows: there the
+        // hands fell 15° short of their aim, 10° now (docs/behaviours.md).
+        let to = aim - shoulder;
+        let dist = to.length().max(1e-4);
+        let dir = to / dist;
+        let away = (out - up * 0.3)
+            .reject_from(dir)
+            .try_normalize()
+            .unwrap_or_else(|| dir.any_orthonormal_vector());
+        let cos = ((upper_len * upper_len + dist * dist - lower_len * lower_len)
+            / (2.0 * upper_len * dist).max(1e-6))
+        .clamp(-1.0, 1.0);
+        let want_elbow = shoulder + (dir * cos + away * (1.0 - cos * cos).sqrt()) * upper_len;
+        let along = (want_elbow - shoulder) / upper_len.max(1e-6);
+        let front = (aim - want_elbow)
+            .reject_from(along)
+            .try_normalize()
+            .unwrap_or_else(|| (-away).reject_from(along).normalize_or_zero());
+        let local_along = (upper_rot.inverse() * (elbow - shoulder)).normalize_or(Vec3::NEG_Y);
+        let local_front = layout.fwd_local[hand.upper]
+            .reject_from(local_along)
+            .normalize_or(local_along.any_orthonormal_vector());
+        let upper = basis(along, front) * basis(local_along, local_front).inverse();
+        // The forearm straight on the upper arm (as at rest), then folded at the elbow to
+        // bring the tip to the aim.
+        let on_upper = layout.joint_of[hand.lower]
+            .is_some_and(|j| self.rig.joints[j].parent_body == hand.upper);
+        let straight = if on_upper {
+            upper * layout.rest_rel[hand.lower]
+        } else {
+            upper * upper_rot.inverse() * forearm_rot
+        };
+        let reach_local = forearm_rot.inverse() * (tip - elbow);
+        let lower = arc(straight * reach_local, aim - want_elbow) * straight;
+
+        let mut bodies = vec![hand.upper, hand.lower];
+        // The collarbone takes a share of the turn from where the arm points at rest to
+        // the aim, as a shoulder comes forwards or up to reach: the shoulder joint alone
+        // can't bring a hand across the chest.
+        if let Some(&first) = hand.collar.first() {
+            let trunk = self.parent_rotation(first);
+            let turn = arc(trunk * hand.rest_reach, aim - shoulder);
+            let mut parent = trunk;
+            let mut child = Quat::IDENTITY.slerp(turn, COLLAR_SHARE) * trunk;
+            for &b in &hand.collar {
+                child *= layout.rest_rel[b];
+                if let Some(j) = layout.joint_of[b] {
+                    let held = self.targets[j];
+                    self.aim(b, parent, child);
+                    self.targets[j] = held.slerp(self.targets[j], w);
+                    bodies.push(b);
+                }
+                parent = child;
+            }
+        }
+        let parent = self.parent_rotation(hand.upper);
+        for (b, parent, child) in [(hand.upper, parent, upper), (hand.lower, upper, lower)] {
+            if let Some(j) = layout.joint_of[b] {
+                let held = self.targets[j];
+                self.aim(b, parent, child);
+                self.targets[j] = held.slerp(self.targets[j], w);
+            }
+        }
+        // The wrist and fingers straight along the forearm, by `orientation`.
+        let mut parent = lower;
+        for &b in &hand.chain {
+            let Some(j) = layout.joint_of[b] else { break };
+            let held = self.targets[j];
+            let child = parent * layout.rest_rel[b];
+            self.aim(b, parent, child);
+            self.targets[j] = held.slerp(self.targets[j], reach.orientation * w);
+            bodies.push(b);
+            parent = child;
+        }
+        self.preset_of(&["Strong", "Normal"], reach.strength, bodies.into_iter());
+    }
+
+    /// Turns the neck and head to look at `look`'s target (see `look_and_reach`).
+    fn look(&mut self, chest: usize, look: &Look) {
+        let layout = self.layout;
+        let Some(aim) = look.target else { return };
+        let w = ramp(self.elapsed, look.delay, look.blend);
+        let Some(from) = layout.spine.iter().position(|&b| b == chest) else {
+            return;
+        };
+        let neck = &layout.spine[from + 1..];
+        let Some(&head) = neck.last() else { return };
+        if w <= 0.0 {
+            return;
+        }
+        let body = &self.world.bodies[aim.body];
+        let target = body.position + body.rotation * aim.offset;
+        let head_rot = self.body(head).rotation;
+        let Some(dir) = (target - self.body(head).position).try_normalize() else {
+            return;
+        };
+        // The head as it sits on the chest at rest, then turned to face the target with
+        // its top towards the up vector.
+        let chest_rot = self.body(chest).rotation;
+        let straight = neck.iter().fold(chest_rot, |r, &b| r * layout.rest_rel[b]);
+        let (front, top) = (layout.fwd_local[head], layout.up_local[head]);
+        let facing = Quat::from_rotation_arc((straight * front).normalize(), dir);
+        let up = look.up.unwrap_or(head_rot * top);
+        let roll = {
+            let now = facing * straight * top;
+            let now = now - dir * now.dot(dir);
+            let want = up - dir * up.dot(dir);
+            match (now.try_normalize(), want.try_normalize()) {
+                (Some(a), Some(b)) => Quat::from_rotation_arc(a, b),
+                _ => Quat::IDENTITY,
+            }
+        };
+        let mut turn = roll * facing;
+        let (axis, angle) = turn.to_axis_angle();
+        if angle > MAX_LOOK {
+            turn = Quat::from_axis_angle(axis, MAX_LOOK);
+        }
+        // No further than the lead past where the head is now.
+        let wanted = turn * straight;
+        let step = head_rot.angle_between(wanted);
+        let lead = LOOK_LEAD * look.speed.max(0.05);
+        if step > lead {
+            turn = head_rot.slerp(wanted, lead / step) * straight.inverse();
+        }
+        // Shared evenly by the joints from the chest to the head.
+        let n = neck.len() as f32;
+        let (mut parent, mut rest) = (chest_rot, chest_rot);
+        for (i, &b) in neck.iter().enumerate() {
+            rest *= layout.rest_rel[b];
+            let child = Quat::IDENTITY.slerp(turn, (i + 1) as f32 / n) * rest;
+            if let Some(j) = layout.joint_of[b] {
+                let held = self.targets[j];
+                self.aim(b, parent, child);
+                self.targets[j] = held.slerp(self.targets[j], w);
+            }
+            parent = child;
+        }
+        self.preset_of(&["Strong", "Normal"], 1.0, neck.iter().copied());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1276,7 +1806,16 @@ mod tests {
             Behaviour::from_name("Bob2: BodyWrithe"),
             Some(Behaviour::Writhe)
         );
-        assert_eq!(Behaviour::from_name("Bob2: Look and Reach 2.0"), None);
+        for name in [
+            "Bob2: Look and Reach 2.0",
+            "Bob2: Look and Reach 2.5",
+            "Bob2: Look and Reach",
+            "Hands reach and look at 2.5",
+            "Hands reach and look at2.0",
+            "LookAndReach",
+        ] {
+            assert_eq!(Behaviour::from_name(name), Some(Behaviour::LookAndReach));
+        }
         assert_eq!(Behaviour::from_name("Bob2: Explosion 2.0"), None);
     }
 
@@ -1357,5 +1896,60 @@ mod tests {
                 ["r_shoulder", "r_elbow", "r_wrist"]
             ]
         );
+    }
+
+    /// The two bones reaching bends, and which hand is which.
+    #[test]
+    fn finds_the_placeholders_hands() {
+        let skeleton = humanoid_skeleton();
+        let rig = humanoid_rig(&skeleton);
+        let layout = Layout::new(&rig, &skeleton).unwrap();
+        let name = |b: usize| rig.bodies[b].name.as_str();
+        for hand in &layout.hands {
+            let side = if hand.left { "l" } else { "r" };
+            assert_eq!(name(hand.upper), format!("{side}_shoulder"));
+            assert_eq!(name(hand.lower), format!("{side}_elbow"));
+            assert!(hand.collar.is_empty());
+        }
+        assert_eq!(layout.hands.iter().filter(|h| h.left).count(), 1);
+    }
+
+    /// Settings as an imported event carries them; missing ones take the defaults, and a
+    /// target that doesn't resolve leaves the hand alone.
+    #[test]
+    fn reads_look_and_reach_settings() {
+        let source: std::collections::BTreeMap<String, String> = [
+            ("LeftHandTarget", "background.MetaBodies.Prop0"),
+            ("RightHandTarget", "nobody.MetaBodies.Nothing"),
+            ("LeftHand_Speed", "0.700"),
+            ("LeftHand_CatchOffsetZ", "0.200"),
+            ("LeftHand_applyHandOrientation", "false"),
+            (
+                "LookAtTarget",
+                "nobody.MetaBodies.Nothing, background.MetaBodies.Prop0",
+            ),
+            ("LookAt_UseUpVector", "true"),
+            ("LegTorsoStiffness", "0.5"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+        let aim = |name: &str| {
+            (name == "background.MetaBodies.Prop0").then_some(Aim {
+                body: 7,
+                offset: Vec3::ZERO,
+            })
+        };
+        let s = LookAndReach::read(&source, &aim);
+        assert_eq!(s.left.target.map(|a| a.body), Some(7));
+        assert_eq!(s.right.target, None);
+        assert_eq!(s.left.speed, 0.7);
+        assert_eq!(s.right.speed, 0.8);
+        assert_eq!(s.left.offset, Vec3::new(0.0, 0.0, 0.2));
+        assert_eq!(s.left.orientation, 0.0);
+        assert_eq!(s.right.orientation, 0.5);
+        assert_eq!(s.look.target.map(|a| a.body), Some(7));
+        assert_eq!(s.look.up, Some(Vec3::Y));
+        assert_eq!(s.leg_torso, 0.5);
     }
 }

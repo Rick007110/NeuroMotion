@@ -70,7 +70,7 @@ Keep these boundaries: `document`, `timeline` and `physics` must never depend on
 - `collide.rs`: contact generation between shapes (spheres, capsules, boxes,
   cylinders).
 - `behaviour.rs`: controllers that drive muscles while a character is simulated
-  (Balance, CatchFall, Stagger). New behaviours go here; see [docs/behaviours.md](docs/behaviours.md).
+  (Balance, Stagger, CatchFall, BodyFoetal, Writhe, Look and Reach). New behaviours go here; see [docs/behaviours.md](docs/behaviours.md).
 - `sim.rs`: runs a project through the world frame by frame, following its physics
   events, and caches the results for the timeline.
 - `scenes.rs` (tests only): small test scenes ("stand-ins") that pin down physical

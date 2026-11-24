@@ -26,9 +26,11 @@ character keeps doing what the timeline otherwise asks.
 The behaviour starts from the targets and strengths the timeline gives (active pose,
 active animation, or the pose held since simulation began) and changes what it needs
 to. Controllers keep no state between ticks; everything is read from the bodies, so
-simulations stay deterministic. The one thing they are told besides the bodies is how
-many seconds the behaviour has been running (`Drive::elapsed`), which Writhe uses for
-its slow wandering; that comes from the frame number, so it is deterministic too.
+simulations stay deterministic. Besides the bodies they are told how many seconds the
+behaviour has been running (`Drive::elapsed`), which Writhe uses for its slow
+wandering and Look and Reach for its delays; that comes from the frame number, so it
+is deterministic too. Look and Reach also reads its event's settings and targets
+(`Drive::settings`); the others don't read theirs yet.
 
 ## Finding the limbs
 
@@ -298,6 +300,172 @@ Results (test `writhe_keeps_moving_and_is_deterministic`): after 3 s, 14 of the
 placeholder's 17 bodies still move at over 0.1 m/s (mean 0.25 m/s), no NaN, joints
 stretched at most 1.4 mm, fastest body 5.8 m/s. Two runs give bit-identical bodies.
 
+## Look and Reach
+
+endorphin's most used behaviour (11 of its scenes, as `Bob2: Look and Reach` and
+the demo "Hands reach and look at"): each hand reaches for a target and the head
+looks at one, while the rest of the body holds its pose. NeuroMotion runs it for
+events named `Look and Reach` or `Hands reach and look at`.
+
+### What endorphin does
+
+Measured from a recording of endorphin 2.5.2 running its demo scene "Hands reach and
+look at2.5", with the frame counter, and a camera fitted to the view (3 px rms on 9
+points of the first frame), which lets NeuroMotion's run be drawn into the same view.
+Two characters stand in a T-pose, each held by a lock on its upper spine, so the trunk
+and legs don't move; both reach and look at a 0.5 m box that NeuroMotion knows to be
+animated: frames 0-100 it rises 0.94 m, 1.35 m in front of the left character
+(character01), from shoulder height; frames 100-200 it slides 2.4 m sideways over
+both, 2.5-2.7 m up; frames 200-300 it comes down 1.35 m in front of the right
+character (character02), 0.5 m to its left. Settings: hand speed 0.7, strength 0.7,
+`MaxExtension` 0.9, look-at speed 1; palms facing (`applyHandOrientation`) on for
+character02, off for character01.
+
+- **The arms point at the target, from the shoulders, and the hands come together on
+  it.** character01's arms swing in from the T-pose: by frame 6 the far arm has
+  dropped and swings in, by 12 its forearm folds across the chest, by frame 18-24
+  both arms are straight ahead at the box with the hands together, and from 24 to
+  40 the hands move less than 15 px (about 10 cm). So a reach of about 90° takes
+  0.3-0.4 s.
+- **They don't stretch out fully**: the elbows stay a little bent and out
+  (`MaxExtension` 0.9). A box out of reach is pointed at, not chased: nothing leans or
+  steps (here the trunk is locked, so that can't be seen).
+- **An arm that has to cross the chest is slower.** For character02 (box 62° to its
+  right) the near arm is already roughly on the line, but the far one stays out until
+  frame 24-30, crosses the chest by 40 and points at the box by about 60.
+- **The head turns to the target quickly**: character02's head faces the box by frame
+  12-18 at look-at speed 1.
+- **They follow it**: with the box overhead (frames 130-180) the hands go up, elbows
+  bent, by the face; as it comes down beside character02 (240-300) its arms point
+  down at it.
+
+### Design
+
+`LookAndReach` in `behaviour.rs`, stateless like the others. The importer now keeps
+a behaviour's settings ([endorphin-formats.md](endorphin-formats.md#behaviour-parameters));
+the simulation finds each target, a body (`character.MetaBodies.Body`, its centre) or
+a collision surface (its path; the body, or the shape's centre when the body has only
+one), in the world once all characters are built, so a character can reach for
+another, a prop or the scenery. A setting a scene leaves out takes the value most of
+endorphin's scenes give it (speed and strength 0.8, `MaxExtension` 1, look-at speed
+0.5, `LegTorsoStiffness` 0.8).
+
+Each tick:
+
+1. **Hold the rest.** The legs and trunk are set to the rig's `Normal` preset ×
+   `LegTorsoStiffness` and keep the timeline's pose (active pose, animation or the
+   pose held since simulation began). Arms and neck keep the timeline's muscles until
+   a reach or the look takes them over.
+2. **Where each hand goes**: the target point plus `CatchOffset` (world axes), moved on
+   to where a moving target will be when the hand gets there if `UsePrediction` (its
+   velocity × distance / 2 m/s, at most 0.5 s ahead). Two hands going for one point
+   are aimed 8 cm apart across the reach, so they come together without fighting.
+   The point is brought within `MaxExtension` of the arm's length (shoulder to finger
+   tips) from the shoulder.
+3. **How fast**: the arm aims at a point at most 0.8 m × `Speed` ahead of the finger
+   tips, on the way to the goal. The muscles pull the hand towards a point never far
+   ahead, which sets its pace; fitted so that the 2.5 scene's speed 0.7 reaches in
+   endorphin's 20-24 frames.
+4. **Two bones**: the elbow goes out from the chest (and a little down) from the line
+   to that point, the forearm reaching to the finger tips. The upper arm is turned
+   whole, twist included, so its front (the way the character faces at rest, which is
+   the side an elbow folds towards, in a T-pose as with hanging arms) faces the way the
+   forearm goes, and the elbow bends about its own hinge. The collarbone (any bodies
+   between the trunk and the upper arm) takes 30% of the turn from where the arm
+   points at rest to the aim: the shoulder joint alone can't bring a hand across the
+   chest. Wrist and fingers are held straight along the forearm by `Orientation` when
+   `applyHandOrientation` is set. Arm muscles use the rig's `Strong` preset ×
+   `Strength`.
+5. **Look**: the head is turned to face the target, the top of the head towards
+   `HeadUpVector` (up) when `UseUpVector`, at most 80° from straight on the chest; the
+   neck and head joints share the turn evenly, at the `Strong` preset. The head is
+   never aimed more than 1.5 rad × `LookAtSpeed` past where it is.
+6. `Delay` and `Blend` (and `LookAtDelay`, `LookAtBlend`) ease each hand and the head
+   in from the timeline's pose, from the time since the event began.
+
+`Layout` gets the bones for this from the rig's shape: the arm branch's finger tips,
+and the consecutive pair of bodies with the longest reach from shoulder joint to
+tip, weighed by how evenly the elbow splits it. On endorphin's character, whose
+forearm is two bodies (forearm and forearm twist), the pair the other behaviours use
+(the longest two segments) is the collarbone and the upper arm; reaching bent at the
+wrong joint until it had its own pick (`Hand` in `Layout`).
+
+### Results
+
+On endorphin's scene (NeuroMotion's run drawn into endorphin's view), arms (shoulder to finger tips) and head
+pointing off the box, in degrees:
+
+| frame | character01 arms, endorphin | ours | character02 far arm, endorphin | ours | character02 head, ours |
+|---|---|---|---|---|---|
+| 0 | T-pose | 104, 92 | T-pose | 153 | 61 |
+| 12 | swinging in | 52, 42 | still out | 97 | 24 |
+| 24 | on the box | 12, 11 | starting | 33 | 13 |
+| 40 | on the box | 9, 10 | across the chest | 17 | 9 |
+| 60 | on the box | 9, 9 | on the box | 14 | 8 |
+
+The finger tips drawn into endorphin's view land on average 24 px from where
+endorphin's hands are at 14 points read off its frames (12 to 60), at most 45 px; an
+arm is about 105 px long there. Before Look and Reach (the characters standing in
+their T-pose) it was 81 px on average, at most 206. Ours sit about 10° below their aim
+(the finger tips 10 cm under it): endorphin's shoulder doesn't twist far enough for
+the elbow to fold upwards, and an elbow pointing straight down had them 15° low.
+character02's far arm sets off at once where endorphin's waits until frame 24-30,
+and both get there by 40-60.
+
+On the stand-in (test `look_and_reach_points_the_arms_and_head_at_the_target`): the
+placeholder with fingers, chest locked, a ball 1.2 m in front of it, up to its left,
+out of reach, the 2.5 scene's settings. Both arms point within 20° of it at frame 22
+starting with hanging arms and 23 from a T-pose (endorphin: 20-24); the head within
+15° at frame 4 (its neck is light); at 2 s the arms are 3° off and the head 1°.
+Following a ball moving 1.5 m sideways over 3 s, the arms stay within 8° of it and
+the head within 6°; a ball within reach gets both hands' finger tips to 4-5 cm of its
+centre. Two runs are identical to the bit, and with the ball moved by up to 4e-4 m
+(`nudges`) the arms arrive at the same frame and end within 0.001° of where they did.
+No joint stretches over 0.5 mm.
+
+On Tackle, the sample scene, Look and Reach runs for frames 40-48 on the runner
+(character01), its left hand reaching for the tackler's head: the runner is only
+simulated from frame 42, and the tackle comes in at once. By frame 48 its left hand is
+0.68 m from the tackler's head (0.78 m without the behaviour) and its head 90° off
+the tackler where it had turned away to 109°: the tackler is 83° off at the start, past
+the 80° the head may turn, and there are 6 frames. Drawn into endorphin's view
+(camera fitted to 6 points, 7 px rms), the two runs agree on where the bodies are
+through the tackle, the runner's right arm flung out included, but endorphin's
+recording is too tangled in those frames to read its left hand or head from.
+
+Of the 16 sample scenes (`sample_scenes_simulate_stably`, whole range), the six that
+run Look and Reach change and still pass; the rest are unchanged to the last digit:
+
+| Scene | Before | After |
+|---|---|---|
+| Catch Rope | lowest 0.017 m, stretch 11.2 mm, fastest 21.4 m/s, lock drift 12 mm | 0.013 m, 15.1 mm, 19.3 m/s, 1 mm |
+| Catch Run | lock drift 14 mm | 29 mm |
+| Heli Leap | lowest -1.906 m, lock drift 24 mm | -1.614 m, 39 mm |
+| Rotating Floor | lowest -4.734 m, stretch 5.6 mm, lock drift 2 mm | -4.671 m, 8.1 mm, 6 mm |
+| Tackle | lowest 0.015 m, fastest 9.2 m/s | 0.019 m, 9.3 m/s |
+| Trapeze | lowest 0.017 m, stretch 10.9 mm, fastest 29.3 m/s | 0.010 m, 9.9 mm, 15.9 m/s |
+
+Heli Leap first drifted 20 cm: its catcher's hand reaches only after a 1.5 s delay,
+while a join already holds it to the other character's, and Look and Reach held that
+arm stiffly in its old pose meanwhile. Now arms and neck keep the timeline's muscles
+until a reach or the look takes them over; only the legs and trunk are set to
+`LegTorsoStiffness`.
+
+### Not yet
+
+- `DistanceScale` (endorphin's "slowdown"), `PredictionRate`, `FingerAngle`,
+  `Exaggeration`, `MissilePathOffset` and the acceleration thresholds are imported but
+  not read. Prediction uses the target's velocity alone.
+- The hands come in about 10° low (above).
+- What `CatchOffset` is relative to is a guess (world axes, added to the target);
+  Catch Run's (-3.4, 0, -4.2) suggests it may be something else.
+- A collision surface on a body with several shapes is aimed at by the body's centre,
+  as NeuroMotion doesn't keep shape names: Bridge Escape looks at a piece of its
+  scenery that way (`background.root.background.Box14`).
+- Only the demo scene has been compared with endorphin by numbers; the trunk was
+  locked there, so how endorphin's trunk and legs follow a reach (`LegTorsoStiffness`)
+  hasn't been seen.
+
 ## Solver changes behind them
 
 Balance exposed a limit in the spring cap (lesson 4 in `physics-design.md`): an
@@ -314,8 +482,9 @@ move it. Friction now only acts on contacts that touch or push.
 ## Next
 
 The rest of endorphin's library still needs designs: protective reactions (protect the
-head, brace for impact), reaching and grabbing, looking at a target, hit and shot
+head, brace for impact), grabbing and holding on, hit and shot
 reactions, and others found in imported scenes. [behaviour-inventory.md](behaviour-inventory.md)
-lists what the sample scenes use and ranks the missing ones (Look and Reach, 11 scenes,
-comes first). Behaviour event settings (strengths, speeds, targets) aren't read yet;
-that comes before tuning any of them against endorphin. See [ROADMAP.md](../ROADMAP.md), milestone 2.
+lists what the sample scenes use and ranks the missing ones; Look and Reach, first
+there, is done. Behaviour event settings are imported now; only Look and Reach reads
+them so far, and the others should before they are tuned against endorphin. See
+[ROADMAP.md](../ROADMAP.md), milestone 2.

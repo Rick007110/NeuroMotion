@@ -359,7 +359,7 @@ pub fn import_scene(path: &Path) -> Result<Import, IoError> {
         ));
     }
     if counts.contains_key("Behaviour") {
-        notes.push("Behaviours are kept; Balance and CatchFall run NeuroMotion's own controllers, the others (stagger, writhe, ...) aren't simulated yet.".into());
+        notes.push("Behaviours are kept with their settings; Balance, Stagger, CatchFall, BodyFoetal, BodyWrithe and Look and Reach run NeuroMotion's own controllers, the others aren't simulated yet.".into());
     }
     if skipped_joints > 0 {
         notes.push(format!(
@@ -977,7 +977,38 @@ fn event_settings(event: Node) -> BTreeMap<String, String> {
     if !targets.is_empty() {
         out.insert("targets".to_owned(), targets.join(", "));
     }
+    behaviour_parameters(event, &mut out);
     out
+}
+
+/// A behaviour event's own settings (`Parameters`): one `Variable` per setting, named
+/// by `fk`, its value in `ja`. A setting without `ja` takes the behaviour's default,
+/// which the scene doesn't say, so it is left out. A selection of bodies or collision
+/// surfaces (`ja="MetaBodyAndCollisionSelection"`, a reach or look-at target) lists them
+/// as `ValuePtr`s, kept comma separated (and left out when empty). Helper graphics (the
+/// locators endorphin draws) aren't settings.
+fn behaviour_parameters(event: Node, out: &mut BTreeMap<String, String>) {
+    for var in elements(child(event, "Parameters")).filter(|v| v.has_tag_name("Variable")) {
+        let (Some(key), Some(value)) = (var.attribute("fk"), var.attribute("ja")) else {
+            continue;
+        };
+        match value {
+            "HelperGraphic" => {}
+            "MetaBodyAndCollisionSelection" => {
+                let picked: Vec<&str> = var
+                    .children()
+                    .filter(|c| c.has_tag_name("ValuePtr"))
+                    .filter_map(|c| c.attribute("ja"))
+                    .collect();
+                if !picked.is_empty() {
+                    out.insert(key.to_owned(), picked.join(", "));
+                }
+            }
+            _ => {
+                out.insert(key.to_owned(), value.to_owned());
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------
@@ -1610,6 +1641,44 @@ mod tests {
         assert_eq!(track.name, "Forces");
     }
 
+    /// A behaviour's parameters become its settings, by name; a target selection lists
+    /// what it picked. Defaults (no `ja`), empty selections and helper graphics are left
+    /// out.
+    #[test]
+    fn behaviour_parameters_become_settings() {
+        let reach = r#"  <SecondaryBehaviours>
+    <SecondaryBehaviour behaviourName="Bob2: Look and Reach 2.5" index="18" name="Behaviour01" startFrameNumber="0" endFrameNumber="30" priority="0" character="hero">
+      <Parameters>
+        <Variable fk="LeftHandTarget" kg="5" ja="MetaBodyAndCollisionSelection" numRequiredObjects="0">
+          <ValuePtr kg="3" ja="background.MetaBodies.Prop0"/>
+        </Variable>
+        <Variable fk="RightHandTarget" kg="5" ja="MetaBodyAndCollisionSelection" numRequiredObjects="0"/>
+        <Variable fk="LeftHand_Speed" kg="0" ja="0.700" de="HandReach_Speed"/>
+        <Variable fk="LeftHand_Delay" kg="0" de="HandReach_Delay"/>
+        <Variable fk="LeftHand_UsePrediction" kg="2" ja="false" de="HandReach_UsePrediction"/>
+        <Variable fk="LookAtTargetLocator" kg="5" ja="HelperGraphic" de="UserHelperGraphic"/>
+      </Parameters>
+      <TargetSelection numRequiredObjects="0"/>
+      <Objects/>
+    </SecondaryBehaviour>
+  </SecondaryBehaviours>
+</Scene>"#;
+        let Import { project, .. } = import(&scene_xml().replace("</Scene>", reach));
+        let reach = project
+            .clips
+            .iter()
+            .find(|c| matches!(&c.kind, ClipKind::Event { event } if event == "Behaviour"))
+            .unwrap();
+        let get = |key: &str| reach.source.get(key).map(String::as_str);
+        assert_eq!(get("behaviourName"), Some("Bob2: Look and Reach 2.5"));
+        assert_eq!(get("LeftHandTarget"), Some("background.MetaBodies.Prop0"));
+        assert_eq!(get("LeftHand_Speed"), Some("0.700"));
+        assert_eq!(get("LeftHand_UsePrediction"), Some("false"));
+        assert_eq!(get("RightHandTarget"), None);
+        assert_eq!(get("LeftHand_Delay"), None);
+        assert_eq!(get("LookAtTargetLocator"), None);
+    }
+
     /// A crate placed at (3, 2, 0) and turned 90° about Y, with a start pose, a mass
     /// object whose collision surface has no geometry of its own, and keys in the scene's
     /// own animation (plus a camera's, which no character owns).
@@ -1960,30 +2029,9 @@ mod tests {
                     }
                 }
             }
-
-            // The importer doesn't carry a behaviour's parameters yet, so read them from
-            // the scene's own XML: one `Variable` per parameter, its value in `ja`.
-            let text = read_document(path).unwrap();
-            let xml = parse(&text).unwrap();
-            for node in xml
-                .descendants()
-                .filter(|n| n.has_tag_name("SecondaryBehaviour"))
-            {
-                let Some(behaviour) = node.attribute("behaviourName") else {
-                    continue;
-                };
-                let usage = behaviours.entry(behaviour.to_owned()).or_default();
-                for var in node.descendants().filter(|n| n.has_tag_name("Variable")) {
-                    let (Some(key), value) = (var.attribute("fk"), var.attribute("ja")) else {
-                        continue;
-                    };
-                    usage
-                        .settings
-                        .entry(format!("param {key}"))
-                        .or_default()
-                        .insert(value.unwrap_or("(default)").to_owned());
-                }
-            }
+            // A behaviour's parameters arrive with the clip's settings (the importer's
+            // `behaviour_parameters`); those a scene leaves at endorphin's default
+            // aren't listed.
         }
 
         let have = |name: &str| {

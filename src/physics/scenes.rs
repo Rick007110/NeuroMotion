@@ -1109,6 +1109,63 @@ pub fn catch_fall_shove(shove: Vec3, behaviour: bool) -> Project {
     p
 }
 
+/// Look and Reach, as endorphin's "Hands reach and look at" sets it up: the stand-in
+/// (with fingers) stands with its chest locked in place, both hands reaching for a
+/// small animated ball and the head looking at it, from the start, at the 2.5 scene's
+/// settings (speed 0.7, strength 0.7, at most 0.9 of the arm's length, look-at speed
+/// 1). The ball starts at `ball` and moves by `moves` over the 3 s; with `t_pose`, the
+/// arms start straight out to the sides, as endorphin's characters rest.
+pub fn reach_for(ball: Vec3, moves: Vec3, t_pose: bool) -> Project {
+    let mut p = new_scene("Look and Reach", 3.0);
+    let arms = [
+        ("l_shoulder", Property::RotZ, 90.0),
+        ("r_shoulder", Property::RotZ, -90.0),
+    ];
+    let pose: &[(&str, Property, f32)] = if t_pose { &arms } else { &[] };
+    let id = person(&mut p, "reacher", Vec3::ZERO, 0.0, pose);
+    let sphere = Geometry::Sphere { radius: 0.05 };
+    let target = add_prop(
+        &mut p,
+        "ball",
+        CharacterKind::Prop,
+        scenery(&[(sphere, Quat::IDENTITY, ball)]),
+        SimLevel::Animated,
+    );
+    let end = p.settings.range.end;
+    let path = vec![
+        channel("root", Property::PosX, &[(0, 0.0), (end, moves.x)]),
+        channel("root", Property::PosY, &[(0, 0.0), (end, moves.y)]),
+        channel("root", Property::PosZ, &[(0, 0.0), (end, moves.z)]),
+    ];
+    motion(&mut p, target, "Path", 0, end, false, path);
+    constrain(
+        &mut p,
+        id,
+        0,
+        end,
+        "Lock",
+        &["reacher.MetaBodies.chest"],
+        (STRONG, STRONG),
+    );
+    let ball = "ball.MetaBodies.piece0";
+    let settings = [
+        ("behaviourName", "Bob2: Look and Reach 2.5"),
+        ("LeftHandTarget", ball),
+        ("RightHandTarget", ball),
+        ("LookAtTarget", ball),
+        ("LeftHand_Speed", "0.700"),
+        ("RightHand_Speed", "0.700"),
+        ("LeftHand_Strength", "0.700"),
+        ("RightHand_Strength", "0.700"),
+        ("LeftHand_MaxExtension", "0.900"),
+        ("RightHand_MaxExtension", "0.900"),
+        ("LookAtSpeed", "1.000"),
+        ("LegTorsoStiffness", "0.8"),
+    ];
+    event(&mut p, id, "Behaviour", 0, end, &settings);
+    p
+}
+
 // ---------------------------------------------------------------------------------
 // The stand-ins
 
@@ -2445,6 +2502,10 @@ mod tests {
             "balance_steps" => balance_push(HARD_PUSHES[1], Vec3::Z, true),
             "stagger" => pushed(Some("Stagger"), HARD_PUSHES[1], Vec3::Z),
             "catch_fall" => catch_fall_shove(Vec3::new(0.0, 0.0, 3.5), true),
+            "look_and_reach" => reach_for(Vec3::new(0.4, 1.8, 1.2), Vec3::ZERO, true),
+            "look_and_reach_moving" => {
+                reach_for(Vec3::new(-0.6, 1.5, 1.0), Vec3::new(1.5, 0.0, 0.0), true)
+            }
             path if path.ends_with(".ens") => {
                 let mut project = crate::io::endorphin::import_scene(std::path::Path::new(path))
                     .unwrap()
@@ -3732,6 +3793,161 @@ mod behaviour_tests {
             .map(|(j, a)| j.1.distance(a.1))
             .fold(0.0_f32, f32::max);
         assert!(off < 1e-3, "frame {end} is {off:.3} m from the animation");
+    }
+
+    /// Look and Reach at a frame: how far each arm (shoulder joint to finger tips)
+    /// points off the ball and how far its fingers are from it, and how far the head's
+    /// forward points off it, in degrees and metres.
+    struct Reaching {
+        arm_off: [f32; 2],
+        hand_gap: [f32; 2],
+        head_off: f32,
+    }
+
+    fn reaching(project: &Project, sim: &Simulation, frame: i32) -> Reaching {
+        let c = &project.characters[0];
+        let rig = c.physics.as_ref().unwrap();
+        let cf = sim.frame(frame).unwrap()[0].as_ref().unwrap();
+        let ball = sim.frame(frame).unwrap()[1].as_ref().unwrap().bodies[0].1;
+        let deg = |a: Vec3, b: Vec3| a.angle_between(b).to_degrees();
+        let body = |name: &str| cf.bodies[rig.body_index(name).unwrap()];
+        let arm = |side: &str| {
+            let shoulder =
+                cf.joints[c.skeleton.joint_index(&format!("{side}_shoulder")).unwrap()].1;
+            let tip = body(&format!("{side}_fingers")).1;
+            (deg(tip - shoulder, ball - shoulder), tip.distance(ball))
+        };
+        let (l, r) = (arm("l"), arm("r"));
+        // The head faces +Z at rest.
+        let rest = rig_bodies(
+            rig,
+            &world_transforms(&c.skeleton, &Pose::rest(c.skeleton.joints.len())),
+        );
+        let head = rig.body_index("head").unwrap();
+        let (rotation, at) = cf.bodies[head];
+        let forward = rotation * rest[head].0.inverse() * Vec3::Z;
+        Reaching {
+            arm_off: [l.0, r.0],
+            hand_gap: [l.1, r.1],
+            head_off: deg(forward, ball - at),
+        }
+    }
+
+    /// The first frame both arms point within `degrees` of the ball.
+    fn reached(project: &Project, sim: &Simulation, degrees: f32) -> Option<i32> {
+        (0..=project.settings.range.end).find(|&f| {
+            let r = reaching(project, sim, f);
+            r.arm_off[0] < degrees && r.arm_off[1] < degrees
+        })
+    }
+
+    /// Look and Reach with the ball in front of the chest, up to the left (out of
+    /// reach, as in endorphin's scene): measured against endorphin's run of "Hands
+    /// reach and look at" (docs/behaviours.md). There both arms swing from a T-pose to
+    /// point at the box by frame 20-24 and the head has turned to it by frame 15.
+    #[test]
+    fn look_and_reach_points_the_arms_and_head_at_the_target() {
+        let ball = Vec3::new(0.4, 1.8, 1.2);
+        for t_pose in [false, true] {
+            let project = reach_for(ball, Vec3::ZERO, t_pose);
+            let (sim, time) = simulate(&project);
+            let report = measure(&project, &sim, time);
+            let first = reached(&project, &sim, 20.0);
+            let head = (0..=180).find(|&f| reaching(&project, &sim, f).head_off < 15.0);
+            let end = reaching(&project, &sim, 120);
+            println!(
+                "look and reach (T-pose {t_pose}): arms within 20° at frame {first:?}, head \
+                 within 15° at {head:?}; at 2 s arms {:.1}° {:.1}° off, fingers {:.2} {:.2} m \
+                 from the ball, head {:.1}° off. {report}",
+                end.arm_off[0], end.arm_off[1], end.hand_gap[0], end.hand_gap[1], end.head_off
+            );
+            assert!(report.ok(), "{report}");
+            // endorphin: frame 20-24. Here 22 (hanging arms) and 23 (T-pose).
+            assert!(
+                first.is_some_and(|f| (16..=30).contains(&f)),
+                "arms not there at endorphin's pace: {first:?}"
+            );
+            assert!(head.is_some_and(|f| f <= 20), "head too slow: {head:?}");
+            assert!(end.arm_off.iter().all(|&a| a < 8.0), "arms off");
+            assert!(end.head_off < 8.0, "head off {}", end.head_off);
+        }
+    }
+
+    /// A ball within reach: both hands get to it (fingers' centres within 8 cm of its
+    /// centre, the two hands kept 8 cm apart).
+    #[test]
+    fn look_and_reach_gets_the_hands_to_a_target_in_reach() {
+        let project = reach_for(Vec3::new(0.1, 1.35, 0.45), Vec3::ZERO, true);
+        let (sim, time) = simulate(&project);
+        let report = measure(&project, &sim, time);
+        let end = reaching(&project, &sim, 120);
+        println!(
+            "in reach: fingers {:.3} {:.3} m from the ball at 2 s. {report}",
+            end.hand_gap[0], end.hand_gap[1]
+        );
+        assert!(report.ok(), "{report}");
+        assert!(end.hand_gap.iter().all(|&g| g < 0.08), "{:?}", end.hand_gap);
+    }
+
+    /// The hands follow a ball moving 1.5 m sideways over 3 s, and the head with them.
+    #[test]
+    fn look_and_reach_follows_a_moving_target() {
+        let project = reach_for(Vec3::new(-0.6, 1.5, 1.0), Vec3::new(1.5, 0.0, 0.0), true);
+        let (sim, time) = simulate(&project);
+        let report = measure(&project, &sim, time);
+        assert!(report.ok(), "{report}");
+        let worst = (60..=180).map(|f| reaching(&project, &sim, f)).fold(
+            (0.0f32, 0.0f32),
+            |(arm, head), r| {
+                (
+                    arm.max(r.arm_off[0]).max(r.arm_off[1]),
+                    head.max(r.head_off),
+                )
+            },
+        );
+        println!(
+            "following: arms at most {:.1}° off, head {:.1}° off from 1 s to 3 s. {report}",
+            worst.0, worst.1
+        );
+        assert!(worst.0 < 12.0 && worst.1 < 10.0, "{worst:?}");
+    }
+
+    /// Two runs give the same bodies, bit for bit, and moving the ball by up to 4e-4 m
+    /// (as another platform's rounding might move a body) moves the numbers above only
+    /// a little.
+    #[test]
+    fn look_and_reach_is_deterministic_and_robust() {
+        let ball = Vec3::new(0.4, 1.8, 1.2);
+        let project = reach_for(ball, Vec3::ZERO, true);
+        let (sim, _) = simulate(&project);
+        let (again, _) = simulate(&project);
+        for frame in [30, 90, 180] {
+            assert_eq!(
+                sim.frame(frame).unwrap()[0].as_ref().unwrap().bodies,
+                again.frame(frame).unwrap()[0].as_ref().unwrap().bodies,
+                "frame {frame} differs between runs"
+            );
+        }
+        let base = (
+            reached(&project, &sim, 20.0).unwrap(),
+            reaching(&project, &sim, 120),
+        );
+        for nudge in nudges() {
+            let project = reach_for(ball + Vec3::splat(nudge), Vec3::ZERO, true);
+            let (sim, _) = simulate(&project);
+            let first = reached(&project, &sim, 20.0).unwrap();
+            let end = reaching(&project, &sim, 120);
+            let moved = (0..2)
+                .map(|i| (end.arm_off[i] - base.1.arm_off[i]).abs())
+                .fold(0.0f32, f32::max);
+            println!(
+                "nudge {nudge:+.0e}: within 20° at frame {first} (unnudged {}), arms moved by \
+                 at most {moved:.3}°",
+                base.0
+            );
+            assert!((first - base.0).abs() <= 2, "{first} vs {}", base.0);
+            assert!(moved < 0.5, "arms moved {moved}°");
+        }
     }
 
     #[test]
