@@ -65,7 +65,8 @@ Keep these boundaries: `document`, `timeline` and `physics` must never depend on
 ### `physics`
 
 - `world.rs`: bodies, joints, muscles, locks and contacts, and the solver (substepped
-  sequential impulses with soft constraints; locked groups solved directly).
+  sequential impulses with soft constraints; locked groups, and characters something
+  heavy presses on, solved directly).
 - `collide.rs`: contact generation between shapes (spheres, capsules, boxes,
   cylinders).
 - `behaviour.rs`: controllers that drive muscles while a character is simulated
