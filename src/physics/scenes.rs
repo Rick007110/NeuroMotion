@@ -1943,7 +1943,7 @@ mod tests {
     use super::*;
 
     /// `NM_TRACE=<stand-in> cargo test --release trace_stand_in -- --ignored --nocapture`
-    /// (or `NM_TRACE=<path to an .ens scene>`: its first two seconds)
+    /// (or `NM_TRACE=<path to an .ens scene>`: its first two seconds, or `NM_SECONDS`)
     #[test]
     #[ignore = "debugging aid"]
     fn trace_stand_in() {
@@ -2944,10 +2944,8 @@ mod endorphin_scenes {
             if name.contains("Large File") {
                 continue;
             }
-            let mut project = crate::io::endorphin::import_scene(&path).unwrap().project;
-            // Keep the check quick: the first 2 seconds.
-            let fps = project.settings.fps as i32;
-            project.settings.range.end = project.settings.range.start + 2 * fps;
+            // The whole range: a scene can go wrong long after its first seconds.
+            let project = crate::io::endorphin::import_scene(&path).unwrap().project;
             let report = sweep(&project);
             let ok = report.ok();
             println!(

@@ -412,8 +412,8 @@ and not where Car carry does.
 
 ## Status against endorphin's sample scenes
 
-`cargo test --release -- --ignored --nocapture` simulates the first two seconds of
-every bundled scene. It checks for:
+`cargo test --release -- --ignored --nocapture` simulates every bundled scene over
+its whole frame range (about 12 s in all). It checks for:
 
 - non-finite values;
 - simulated bodies sinking more than 10 cm below the ground (fixed scenery, and bodies
@@ -425,7 +425,7 @@ It also prints lock drift and bodies buried in fixed scenery, says where each wo
 value happened, and for failing scenes and scenes with constraints prints the physics
 set-up (ground, rigs, events, constraint targets and settings).
 `NM_TRACE=<path to an .ens scene> cargo test --release trace_stand_in -- --ignored
---nocapture` prints a scene frame by frame.
+--nocapture` prints a scene frame by frame (its first two seconds, or `NM_SECONDS`).
 
 Each failure also gets a stand-in built in code (`src/physics/scenes.rs`) with the
 same pattern, so it can be worked on without endorphin's files.
