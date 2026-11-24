@@ -98,7 +98,9 @@ Research on how endorphin behaves is in [docs/endorphin-physics.md](docs/endorph
 
 ## Principles
 
-- **Deterministic simulation.** The same project gives the same motion every time.
+- **Deterministic simulation.** The same project gives the same motion every time
+  with the same build on the same machine (other platforms can differ in the last
+  bits: docs/physics-design.md).
   Behaviours are stateless; nothing in the physics reads the clock or randomness.
 - **Undo covers everything.** If the user can change it, it's an `Edit`.
 - **Tests pin down behaviour.** Physics changes come with a stand-in scene in

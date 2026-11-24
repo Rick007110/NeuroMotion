@@ -60,7 +60,14 @@ to ±(force limit × h). This makes them unconditionally stable at any gain, whi
 what makes endorphin's 1000–6000 N·m/rad presets usable.
 
 Everything is single-threaded with a fixed order, so a scene always simulates the same
-way. That determinism is what allows automatic re-simulation.
+way with the same build on the same machine. That determinism is what allows
+automatic re-simulation. It isn't bit-identical across platforms: `sin`, `cos`,
+`atan2`, `acos` and `powf` come from the platform's maths library, which can round
+differently in the last bit (glibc even picks FMA variants by CPU at run time).
+Usually that stays in the last bits, but a chaotic moment (a foot landing near the
+edge of a recovery, a light limb whipping round) amplifies it into a visibly different
+outcome. Tests therefore check statements that hold when the scene is nudged slightly
+(`nudge_survey`), not one exact number near a limit.
 
 ## Muscle targets (what the muscles try to reach)
 
@@ -273,6 +280,21 @@ Car Hit, the last sample scene failing the sweep, added one more.
     Floor two to three times slower. Solving every character directly all the time
     slowed single characters about twice and made Balance lose its footing, so the
     direct solve stays where a heavy body needs it.
+    Since lesson 16, nudging the car's speed by up to ±1e-3 over 201 runs
+    (`nudge_survey`) shows how much of this holds: up to the stop (frame 99) no joint
+    of the body, shoulders and clavicles included, opens more than 0.5 cm (an ankle);
+    the toes' and fingers' hinges, which the bonnet strikes directly, open 0.5 to
+    2.7 cm at the hit. After the stop is another matter, and still open. Friction no
+    longer holds the pedestrian on the bonnet (lesson 16), so they slide off, and the
+    arm whips round (fingers at 11-15 m/s) with nothing heavy on it: a light chain
+    moving fast, not a crush, so this lesson's direct solve doesn't apply. The
+    shoulder then opens by 1.3 cm in a typical run, over 2 cm in a third of them,
+    over 4.3 cm in a tenth and over the sweep's 5 cm in 11 of the 201 (7.0 cm worst),
+    always between frames 113 and 120. On CI it reached 3.9 cm (Linux), 4.6 (macOS)
+    and 3.8 (Windows), against 2.1 here. The test (`car_carry_keeps_joints_together`)
+    holds the hit and carry to lesson 15's bound (2 cm for the body, 3.5 for the toes
+    and fingers) and the whole scene only to the sweep's checks, which the whip could
+    fail on a platform that rounds differently.
 
 Teaching Balance to step (docs/behaviours.md) showed one more.
 
@@ -288,7 +310,8 @@ Teaching Balance to step (docs/behaviours.md) showed one more.
     0.5 s; it now goes 0.50 m (test `friction_grips_only_what_touches`). Of the
     stand-ins only the back flip changed: standing, it leaves the box at frame 324
     instead of 329 and lands at 387 instead of 393; left alone, it falls off the
-    front at 335 instead of 348.
+    front at 335 instead of 348. Car carry changed after its stop: its pedestrian now
+    slides off the bonnet (lesson 15).
 
 ## Status against endorphin's sample scenes
 
@@ -353,7 +376,7 @@ What each stand-in reproduces:
 | Rotating Floor | No ground; a thin collision-only slab spinning and rocking | sinks through | rides it |
 | Turntable | No ground; a flat cylinder spinning | floats 0.9 m above it | rests on it |
 | Hanging weight | A 20-80 kg weight on a rope locked at the top, hanging straight (lesson 10) | 0.36 m stretch, 63 m/s | 1.5 cm, 0.6 m/s |
-| Car carry | Car Hit: a 747 kg car joined (1e5) to a keyed carrier drives into a standing character with clavicles at 8 m/s, catches its arm against its ribs, carries it on the bonnet and stops dead at 1.65 s (lesson 15). The join gives way by 23 cm as the carrier stops, by design | 5.8 cm (shoulder) | 1.0 cm; with lesson 16, 2.1 cm for a few frames as the arm whips round when the pedestrian slides off the bonnet after the stop |
+| Car carry | Car Hit: a 747 kg car joined (1e5) to a keyed carrier drives into a standing character with clavicles at 8 m/s, catches its arm against its ribs, carries it on the bonnet and stops dead at 1.65 s (lesson 15). The join gives way by 23 cm as the carrier stops, by design | 5.8 cm (shoulder) | 1.0 cm. Since lesson 16, up to the stop: 0.5 cm at most for the body (shoulder included), toes and fingers 0.5-2.7 cm at the hit (201 nudged runs). After the stop, as the pedestrian slides off and the arm whips round: the shoulder 1.3 cm typically, but up to 7.0 cm, over the sweep's 5 cm in 11 of 201 runs (open, lesson 15) |
 | Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -73° at 297, leaves the box at 324, lands behind it at 387, -278° in all. Left alone: tips forwards and falls off the front at 335 (both changed by lesson 16) |
 
 Of endorphin's behaviours, Balance (which now steps), CatchFall and Stagger have
@@ -374,7 +397,16 @@ hasn't been re-run against endorphin's scene since.
   flat things at six rim points, the lowest rim point and the point nearest them.
 - An exact solve for joint anchors where no lock holds the chain and nothing heavy
   presses on it (lessons 12 and 15 cover those). Keyed bodies pressing on a character
-  don't count as heavy yet: lesson 15 says what that cost.
+  don't count as heavy yet: lesson 15 says what that cost. A light limb whipping round
+  fast is the case that shows: Car carry's shoulder opens up to 7 cm after the stop,
+  past the sweep's 5 cm in about one run in twenty when the car's speed is nudged
+  (lesson 15).
+- Bit-identical results across platforms. Results are identical run to run with the
+  same build on the same machine, but `sin`, `cos`, `atan2`, `acos` and `powf` come
+  from the platform's maths library and can differ in the last bit, which a chaotic
+  moment can grow into a different outcome. If identical results everywhere become a
+  goal, the physics could use pure-Rust maths that rounds the same everywhere (the
+  `libm` crate, say) instead of the platform's.
 - Interpolated output between frames.
 
 ## Improvements planned beyond endorphin

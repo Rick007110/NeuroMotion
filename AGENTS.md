@@ -22,8 +22,13 @@ further ([ROADMAP.md](ROADMAP.md)).
    green, and never change expected numbers without explaining why in the commit.
    If something doesn't work yet, say so in the code, docs and your report.
 3. **Deterministic physics.** The same project must simulate identically on every run
-   and platform. No randomness, no wall-clock time, no iteration over `HashMap` where
-   order matters. Behaviours are stateless: they read the bodies every tick.
+   of the same build on the same machine. No randomness, no wall-clock time, no
+   iteration over `HashMap` where order matters. Behaviours are stateless: they read
+   the bodies every tick. Other platforms aren't bit-identical: their maths libraries
+   round `sin`, `atan2` and the like differently in the last bit, and a chaotic moment
+   (a foot landing, a limb whipping round) can turn that into a different outcome. So
+   tests must not hang on a knife edge: check how far a number moves when the scene
+   is nudged (`nudge_survey` in `src/physics/scenes.rs`) and keep bounds clear of it.
 4. **Module boundaries.** `document`, `timeline` and `physics` never depend on `ui` or
    egui. Every user-visible change to a project goes through `Document::apply` as an
    `Edit`, so it can be undone.

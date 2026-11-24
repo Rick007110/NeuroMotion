@@ -39,8 +39,10 @@ NeuroMotion, and we need numbers to prove it.
   "drive" strengths)
 - ✅ Scenery props, characters placed in the world, the scene's own keys
 - 🟡 All 16 sample scenes clean: Car Hit's cause is fixed in a stand-in (a heavy body
-  pressing on a character now gets an exact joint solve, lesson 15), but the real scene
-  still needs confirming on a machine with endorphin
+  pressing on a character now gets an exact joint solve, lesson 15; after the car
+  stops, the arm whipping round still opens the shoulder past 5 cm in about one run
+  in twenty when the scene is nudged), and the real scene still needs confirming on
+  a machine with endorphin
   ([#7](https://github.com/Rick007110/NeuroMotion/issues/7)); Bridge Escape is skipped
   for size
 - 🟡 Back-Flip-To-Combo: the character tips forward before the flip

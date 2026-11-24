@@ -151,13 +151,31 @@ means the head stayed above 1.45 m for the next 3 s (`push_sweep`, an ignored te
 | Balance (stepping) | `########.#.##########` | `########.###.........` | `##########........#..` | `#########............` |
 
 In all: 29 of 84 pushes before, 50 now, and every push survived before is still
-survived. In speeds: forwards up to 1.6 m/s before, now up to 3.0 (1.8 and 2.0 aside);
-backwards up to 1.3, now up to 2.1 (1.8 aside); to the left 1.9 both before and now;
-to the right 1.7 before, 1.8 now. The steps leave the feet 0.25 to 0.6 m from where
-they stood, in 2 to 7 steps, with joints stretching under 3 mm. Tests:
-`balance_steps_when_the_ankles_cannot_hold` (backwards 1.5, 1.7 and 2.0 m/s; sideways
-1.9 and 1.7–1.8; at least 6 of the 12 forward pushes from 1.7 to 2.8, of which 10
-pass), and `balance_keeps_the_placeholder_upright_after_a_push` unchanged.
+survived in this run. In speeds: forwards up to 1.6 m/s before, now up to 3.0 (1.8
+and 2.0 aside); backwards up to 1.3, now up to 2.1 (1.8 aside); to the left 1.9 both
+before and now; to the right 1.7 before, 1.8 now. The steps leave the feet 0.25 to
+0.6 m from where they stood, in 2 to 7 steps, with joints stretching under 3 mm.
+
+Each row is one run on one machine, and near the limit it is sharper than the truth:
+whether a push is survived turns on small differences in where a foot lands, and
+another platform's rounding is enough to change it (CI fell at 1.9 m/s to the left on
+Linux and at 1.8 to the right on Windows). With each push's speed nudged by up to
+±1e-3 (101 runs, `nudge_survey`), the share of runs in which Balance stepped and stayed
+up (head above 1.45 m, hips above 0.8 m):
+
+| | |
+|---|---|
+| backwards | 1.4-1.7 m/s: 91-100%; 1.8: 36%; 1.9 and 2.0: 91-95%; 2.1: 53% |
+| forwards | 1.7: 77%; 1.8: 6%; 1.9: 64%; 2.0: never; 2.1: 58%; 2.2 and 2.3: 90-95%; 2.4: 53%; 2.5-2.8: 94-100% |
+| to its left | 1.9: 71%; 2.0-2.4: never; 2.5: 47%; 2.6: 3%; 2.7: 63%; 2.8: always |
+| to its right | 1.7: always; 1.8: 42%; 1.9-2.8: never |
+
+So the test, `balance_steps_when_the_ankles_cannot_hold`, counts, in each set of pushes
+past what the ankles hold, how many Balance steps and stays up after: at least 4 of
+the 8 backwards from 1.4 to 2.1 m/s, 2 of the 22 sideways (left 1.9-2.8, right
+1.7-2.8) and 5 of the 12 forwards from 1.7 to 2.8. Over the nudged runs the counts
+were 5-8, 3-7 and 6-11. `balance_keeps_the_placeholder_upright_after_a_push`, what
+the ankle strategy held before stepping, is unchanged.
 
 ### Not yet
 
@@ -169,10 +187,10 @@ pass), and `balance_keeps_the_placeholder_upright_after_a_push` unchanged.
   with the ankle strategy alone: far too slow against a fall already under way), or a
   crossover step that goes around the other leg.
 - **Which pushes it survives is erratic** past what the ankles hold: 1.8 m/s
-  backwards falls where 1.7 and 1.9 don't. A recovery near the limit depends on small
-  differences in where a foot lands; the settings were chosen on the whole sweep, not
-  on any one push. The tests check a band of forward pushes rather than single speeds
-  for that reason.
+  backwards falls where 1.7 and 1.9 don't (in about two runs in three when nudged).
+  A recovery near the limit depends on small differences in where a foot lands; the
+  settings were chosen on the whole sweep, not on any one push. The tests count sets
+  of pushes rather than check single speeds for that reason (table above).
 - After a long step the feet stay staggered, a narrow stance across the line between
   them; the body sometimes drifts out sideways from it later. Bringing the back foot
   up beside the front one once settled was tried and made no difference.
@@ -203,10 +221,14 @@ Results (`push_sweep` with `NM_SWEEP=Stagger`, same pushes as above):
 |---|---|---|---|---|
 | Stagger | `#######.#....#..#....` | `#####.####.#.........` | `##########...........` | `#########............` |
 
-39 of 84 stay up, fewer than with Balance, as meant: pushed forwards at 2.5 m/s it
-takes 6 steps over 1.1 m before going down to its knees (test
-`stagger_keeps_stepping_after_a_hard_push`), where Balance stops in 5 steps over 0.4 m
-and stands.
+39 of 84 stay up, fewer than with Balance, as meant. Pushed hard forwards (2.7 to
+3.0 m/s) it keeps stepping, 3 to 10 steps a push, and goes down, its feet going 4.5
+to 8.3 m over the four pushes, where Balance stops in a few steps and nearly always
+stands, its feet going 1.9 to 2.3 m (101 runs with the speeds nudged by up to ±1e-3,
+`nudge_survey`). The test, `stagger_keeps_stepping_after_a_hard_push`, checks those
+four pushes for at least 2 steps after each, 12 in all, and feet going more than 1.5
+times as far as Balance's. A single push can't be checked on its own: at 2.5 m/s it
+took 6 steps over 1.1 m here, 2 on every CI platform, and 2 to 6 over 9 nudged runs.
 
 **Not yet.** Settings on the behaviour event aren't read, and nothing has been
 compared with endorphin. It inherits Balance's limits (above), sideways most of all.
