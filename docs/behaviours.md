@@ -309,6 +309,15 @@ ankles from 1000 to 110-200, under the ~370 an ankle needs to hold a standing bo
 fix), the same controller steps back twice, stops the body by frame 60 and stands
 until the walk takes over at frame 99, pelvis within 6° of upright.
 
+A fix was tried and not kept: estimating the cap from each side of a joint as a
+whole (the child's branch, and the rest), a side resting on the ground counting as
+immovable, as lesson 9 does for single bodies. Stagger Walk then steps back twice
+(the feet end 0.3 and 0.8 m back), stands with the pelvis within 5° of upright, and
+endorphin's sweep stays 16 of 16 clean. But the placeholder's stance muscles get
+stronger too, and Balance then holds only 3 of its 8 hard backward pushes (the test
+wants 4; 51 of 84 in `push_sweep`): the controllers were tuned on the capped
+muscles. That change needs Balance retuned with it, which is the next step.
+
 **Not yet.** Settings on the behaviour event (ArmsWindmill, MaxSteps, ArmsSpeed,
 ArmsStrength in Stagger Walk) aren't read, the arms don't windmill, and nothing but
 Stagger Walk's first second has been compared with endorphin. It inherits Balance's
