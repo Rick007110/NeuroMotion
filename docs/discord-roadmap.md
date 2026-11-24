@@ -7,7 +7,8 @@
 - Friction and constraints that behave like endorphin's, smooth transitions back to animation
 - Behaviours: **Balance** (with stepping), **Stagger**, **CatchFall**, **BodyFoetal**, **Writhe**, now running in imported scenes too
 - Sever events, constraints, active poses, forces
-- Export to **FBX** and **BVH**, bake simulation to keys
+- Export to **FBX** and **BVH**, bake simulation to keys, optionally at 2x or 4x the frame rate
+- Smooth playback on 60 Hz+ displays: frames are interpolated between physics frames
 - **v0.1.0 beta** with downloads for Windows, macOS and Linux, and our new logo
 
 ### 🔨 In progress

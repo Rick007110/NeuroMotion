@@ -78,7 +78,11 @@ NeuroMotion, and we need numbers to prove it.
 - ⬜ **Virtual muscles**: the chest-to-hand and pelvis-to-foot springs endorphin uses for
   reaching and planting (now skipped on import)
 - ⬜ **Exact cylinders** ([#14](https://github.com/Rick007110/NeuroMotion/issues/14))
-- ⬜ **Interpolated output** between physics ticks, for smooth 60 fps playback
+- ✅ **Interpolated output** between cached frames, for smooth 60 fps playback: the
+  viewport blends the two neighbouring simulated frames at the fractional playhead, and
+  export can write 2x or 4x the project's frame rate (the simulation itself still runs
+  at 120 Hz and caches one state per scene frame; scrubbing clicks still snap to whole
+  frames)
 - ⬜ **Large scenes**: Bridge Escape and other big scenes simulate at a usable speed
 - ⬜ Legacy poses that store muscle targets (`dp.nma`)
 - ⬜ Bit-identical results across platforms (optional): today the same build on the
