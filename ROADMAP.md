@@ -79,7 +79,8 @@ scenes then run something sensible.
   gathered from scenes (not from the protected `.nmb` files), to plan the rest:
   [docs/behaviour-inventory.md](docs/behaviour-inventory.md)
   ([#24](https://github.com/Rick007110/NeuroMotion/issues/24)). It found that
-  imported names like `Bob2: Balance 2.5` don't match our controllers yet
+  imported names like `Bob2: Balance 2.5` matched none of our controllers, so no
+  imported scene ran a behaviour; that is fixed
 - 🟡 **Stepping** when Balance can't hold ([#9](https://github.com/Rick007110/NeuroMotion/issues/9)):
   forwards and backwards it now stands after pushes up to about twice as hard
   (50 of 84 test pushes, from 29); sideways it barely helps yet, because the foot on
@@ -93,9 +94,7 @@ scenes then run something sensible.
 - ⬜ The rest of the library, in the inventory's order by scenes using them: Look and
   Reach (11), Explosion (7), JumpDive, Jump and LandCrouch (5), Legs Kick and Arms
   Windmill (4 each), Tackle and Fall Back and Twist (3 each), the arm poses (8 scenes
-  between them), then stiffness, leg straightening and velocity damping. First, match
-  imported names (`Bob2: ` prefix, version suffix, `BodyWrithe`) so the controllers we
-  have run in imported scenes
+  between them), then stiffness, leg straightening and velocity damping
 - ⬜ **Behaviour settings in the inspector**, so animators can tune them, as with other
   events
 - ⬜ A **guide to writing a behaviour**, so the community can add them in parallel

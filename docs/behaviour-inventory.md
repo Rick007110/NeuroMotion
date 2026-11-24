@@ -37,8 +37,8 @@ rest of this page is about the 135 behaviour events.
 Grouped by family: endorphin's names carry a library prefix and a version
 (`Bob2: Balance 2.5`), and the 2.0 and 2.5 versions of a behaviour take the same
 settings, so they are counted together. Sorted by scenes, then events. "Have" means
-`Behaviour::from_name` knows the family name (see [the name problem](#the-name-problem)
-for why that is not the whole story).
+`Behaviour::from_name` knows the family name, so imported events of that family run
+our controller (see [the name problem](#the-name-problem)).
 
 | Family | Scenes | Events | Have | Settings the events carry (besides `index`, `priority`, `targets`) |
 |---|---:|---:|:---:|---|
@@ -90,13 +90,12 @@ Reading the settings:
 Scenes name behaviours with a library prefix and often a version: `Bob2: Balance`,
 `Bob2: Balance 2.5`, `Bob2: CatchFall 2.0`, `Bob2: BodyWrithe 2.0`. `Behaviour::from_name`
 ignores case, spaces and punctuation but not words, so it turns `Bob2: Balance 2.5`
-into `bob2balance25` and finds nothing. As the importer and simulation stand, no
-imported behaviour event matches a controller, including Balance, CatchFall, Stagger
-and BodyFoetal. The controllers are reached today only through names written without
-the prefix, as the stand-in scenes do. Likewise `BodyWrithe` is our `Writhe` under
-another name. Matching by family (drop the prefix and trailing version, accept
-`BodyWrithe`) is a small separate change and the first thing to do with this inventory;
-the "Have" column above is what it would give.
+into `bob2balance25` and found nothing: no imported behaviour event matched a
+controller, Balance, CatchFall, Stagger and BodyFoetal included; only the stand-in
+scenes, which use bare names, reached them. Likewise `BodyWrithe` is our `Writhe` under
+another name. This inventory found it, and it is fixed: `from_name` now drops the part
+up to the last `:` and a trailing version, and accepts `BodyWrithe`. The "Have" column
+is what imported scenes now run.
 
 Also not carried yet: the parameters (the settings above) are read straight from the
 scene's XML by the inventory test; the importer keeps only `index`, `priority` and
