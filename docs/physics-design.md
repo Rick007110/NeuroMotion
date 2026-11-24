@@ -410,6 +410,79 @@ and not where Car carry does.
     frame 5. The sweep doesn't check drift, and the carrier is lighter than the car
     by a factor of about 180 000; that is a separate question.
 
+Sweeping the sample scenes over their whole range instead of their first two seconds
+failed three of them: Catch Rope (a joint stretched 18.0 m), Heli Leap (a body 3.42 m
+below y = 0) and Rotating Floor (4.55 m below). Tracing them found one bug in the
+simulation and two in the sweep's own measures.
+
+(Number to be assigned at integration.) **A force pushes the bodies it names, and a
+massless body never moves.** Catch Rope's environment drifted at 1 m/s from its first
+frame, carrying the roof and the character standing on it. The scene's "Start rope
+moving" force, a 1 m/s push on the rope's end, sits on the environment's track but
+names the rope's body (`FBXImport03.MetaBodies.joint13MB`). Force targets were looked
+up by their last name segment in the clip's own character; none matched, an empty list
+meant "every body", and every body of the environment got the push, its massless root
+included. A massless body is fixed (lesson 11), so the solver never writes its velocity
+back, but nothing reset it either, and the integrator moved it at 1 m/s for the rest of
+the scene. The rope never got its push. Two changes:
+- A force pushes the bodies it names on whichever character they are, as constraints
+  already did (a bare body name still means the clip's own character, and no targets
+  still means every body of it); one naming only bodies that don't exist pushes
+  nothing.
+- The world zeroes a massless dynamic body's velocity every substep, whatever handed
+  it one: a force, or its animation's velocity before it went simulated.
+
+The Cut rope stand-in reproduces it: a rope locked at the top beside a roof that is the
+environment's massless piece, pushed by a force on the environment's track. Before,
+the roof drifted 1.98 m in 2 s, the climber standing on it fell off, and the rope's
+end didn't move; after, the roof stays put and the end swings 0.14 m in 0.5 s. In
+the real scene the character, carried along by the roof before, now rolls off its edge,
+hangs from the rope's end by the hands' join and falls 16 m with it when the rope is
+cut. Every other scene and stand-in, and `nudge_survey`, give the same numbers as
+before: no other one has a force on another character's track or a moving massless
+body.
+
+(Number to be assigned at integration.) **Without a ground plane, measure from the
+scenery; a cut joint is no joint.** The other failures were the sweep's:
+- Heli Leap and Rotating Floor set `useDefaultGround="false"`, and the sweep failed
+  any body 10 cm below y = 0 all the same. Heli Leap's roof top is at y = 0, with
+  nothing modelled under its 8.5 m building; the jumper leaves the roof's edge, is
+  joined to the hand reaching down from the helicopter (frame 77) and dangles 3.4 m
+  below roof level, beside the building. Rotating Floor's slab tilts by up to 37°;
+  once its hands let go of the rail, the character slides down the slab to the wall at
+  its low end, 4.5 m below y = 0 and on the slab all the while (its bodies 0.19-0.58 m
+  above the slab's centre line, the slab being 0.3 m thick). Neither falls through
+  anything. The sweep now measures the lowest body from the ground plane and only
+  checks it when there is one. Without one, it checks that no body centre is more than
+  10 cm under the underside of fixed scenery it is beneath, "up" being the shape's own
+  axis closest to vertical, so a tilting floor keeps its top and underside. With a
+  ground that check is off: bodies under a balcony or a beam are meant to be there
+  (Balcony and Gymnast Rings have them, 2.8 and 4.9 m under).
+- Catch Rope's 18 m is the rope's last link, which the scene's own Sever event ("Cut
+  rope", frame 160) cuts so the character falls with it. A joint a sever event cuts no
+  longer counts from the frame it is cut, as free props' missing joints never did.
+
+The Tilting floor (a slab tilting 20° carries a character 1.9 m below y = 0) and Roof
+edge (a character runs off a roof with no ground under it and falls 10.6 m) stand-ins
+failed the old measure and pass the new one; Rotating Floor's dancer started 1 m under
+its slab fails it, as it should. Imported BodyWrithe runs in all three scenes and isn't
+involved: with it switched off they pass too (Catch Rope 2.4 cm, Heli Leap 0.29 cm,
+Rotating Floor 0.45 cm).
+
+| Sample scene, full range | Before | After |
+|---|---|---|
+| Catch Rope | 18.0 m stretch (the cut link), environment drifting at 1 m/s: failing | 0.90 cm, environment still: clean |
+| Heli Leap | lowest body -3.42 m: failing | -3.42 m with no ground, nothing under scenery: clean |
+| Rotating Floor | lowest body -4.55 m: failing | -4.55 m with no ground, nothing under scenery: clean |
+| The other 13 | clean | unchanged |
+
+Both scenes still differ from endorphin before the sweep can see it: their catches are
+made by behaviours NeuroMotion doesn't have yet (JumpDive, Look and Reach), so the
+joins switch on with the hands 1.8 m (Catch Rope) and 2 m (Heli Leap) from what they
+catch, and hold that offset. Heli Leap's jump (a squat, downward pushes on the pelvis,
+then a legs-out pose at frames 58-62) doesn't lift its jumper either: the pelvis sinks
+from 0.90 m to 0.52 m over frames 54-62 and the jumper steps off the roof's edge.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over
@@ -418,7 +491,10 @@ its whole frame range (about 12 s in all). It checks for:
 - non-finite values;
 - simulated bodies sinking more than 10 cm below the ground (fixed scenery, and bodies
   without collision shapes, aside; keyed bodies sit where their animation puts them);
-- joints stretching more than 5 cm (free props have no joint to stretch);
+  in a scene without a ground plane, bodies more than 10 cm under the underside of
+  fixed scenery they are beneath instead;
+- joints stretching more than 5 cm (free props have no joint to stretch, and a joint a
+  sever event cuts none from then on);
 - simulated bodies moving faster than 40 m/s.
 
 It also prints lock drift and bodies buried in fixed scenery, says where each worst
@@ -430,21 +506,25 @@ set-up (ground, rigs, events, constraint targets and settings).
 Each failure also gets a stand-in built in code (`src/physics/scenes.rs`) with the
 same pattern, so it can be worked on without endorphin's files.
 
-Last run, with lessons 1-18 and imported behaviours actually running (until the
-behaviour names were matched, `docs/behaviours.md`, none of them ran in these
-scenes); 16 scenes, Bridge Escape is skipped for size:
+Last run, over each scene's whole range, with lessons 1-18, the two above and
+imported behaviours actually running (until the behaviour names were matched,
+`docs/behaviours.md`, none of them ran in these scenes); 16 scenes, Bridge Escape is
+skipped for size:
 
 | Result | Scenes |
 |---|---|
 | Clean | All 16: Arrows, Balcony, Bendy Stick, Car Crash, Car Hit, Catch Rope, Catch Run, Gymnast Rings, Heli Leap, Multi Martial, Rotating Floor, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
 | Failing | None |
 
-Max joint stretch per scene: Arrows 0.23 cm, Balcony 0.36, Bendy Stick 0.61, Car
-Crash 0.04, Car Hit 0.93, Catch Rope 0.15, Catch Run 1.41, Gymnast Rings 0.22, Heli
-Leap 0.29, Multi Martial 1.54, Rotating Floor 0.30, Stagger Walk 0.32, Sword Play
-0.46, Tackle 0.68, Trapeze 0.24, Walk With Gun 1.50. Car Hit was the last to fail: a
-clavicle 7.9 cm out, which lessons 15 and 17 (fixed in the Car carry stand-in) didn't
-cure because the real failure was in its transition back to animation (lesson 18).
+Max joint stretch per scene over its whole range: Arrows 0.23 cm, Balcony 0.91,
+Bendy Stick 0.61, Car Crash 1.08, Car Hit 0.93, Catch Rope 0.90, Catch Run 1.41,
+Gymnast Rings 0.47, Heli Leap 0.29, Multi Martial 1.54, Rotating Floor 0.85, Stagger
+Walk 0.32, Sword Play 0.46, Tackle 0.68, Trapeze 0.52, Walk With Gun 1.50 (the whole
+sweep takes about 11 s). Heli Leap's lowest body is 3.42 m and Rotating Floor's 4.55 m
+below y = 0, in scenes without a ground (see the lessons above). Over the first two
+seconds only, as the sweep used to run, Car Hit was the last to fail: a clavicle
+7.9 cm out, which lessons 15 and 17 (fixed in the Car carry stand-in) didn't cure
+because the real failure was in its transition back to animation (lesson 18).
 
 Four of the five scenes still failing after lesson 12 weren't solver problems at all:
 the importer set them up wrongly. Looking at Balcony in the app showed it: one
@@ -480,6 +560,9 @@ What each stand-in reproduces:
 | Car carry | Car Hit: a 747 kg car joined (1e5) to a keyed carrier drives into a standing character with clavicles at 8 m/s, catches its arm against its ribs, carries it on the bonnet and stops dead at 1.65 s (lesson 15). The join gives way by 23 cm as the carrier stops, by design. After the stop the pedestrian slides off and the arm whips round against its own chest and neck | 5.8 cm (shoulder) at the hit; 7.0 cm after the stop (#23) | Over 201 nudged runs, up to the stop: 0.5 cm at most for the body (shoulder included), toes and fingers 0.5-2.7 cm at the hit. After the stop: 0.7 cm at most for the body, 2.0 cm for a finger (lesson 17) |
 | Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -73° at 297, leaves the box at 324, lands behind it at 387, -278° in all. Left alone: tips forwards and falls off the front at 335 (both changed by lesson 16) |
 | Curl hand-back | Car Hit's hand-back: a character with clavicles curls up on the ground (BodyFoetal), then a 0.75 s transition, overlapping the curl's end, blends it back onto its standing animation (lesson 18) | 16.6 cm (knee) mid-transition | 0.09 cm |
+| Tilting floor | Rotating Floor's end: no ground; a long collision-only slab with a wall at its low end tilts 20°, carrying a character 1.9 m below y = 0 | fails the sweep (lowest -1.9 m) | rides it (nothing under the slab) |
+| Roof edge | Heli Leap's jumper: no ground; a character runs off a roof whose top is at y = 0 and falls past the building's side | fails the sweep (lowest -10.6 m) | falls 10.6 m beside the building |
+| Cut rope | Catch Rope: a force on the environment's track names a rope's end; the environment's roof is massless; the rope's last link is cut at 1 s | roof drifts 1.98 m in 2 s, rope end not pushed; the cut link counts as 0.83 m stretch | roof still, end swings 0.14 m; cut link not counted |
 
 Of endorphin's behaviours, Balance (which now steps), CatchFall and Stagger have
 controllers of their own (docs/behaviours.md). Scenes that depend on others simulate

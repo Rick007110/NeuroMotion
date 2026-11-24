@@ -10,9 +10,10 @@ toward a modern physics engine that behaves like endorphin's and then goes furth
 > **Status: early development.** The editor, timeline, undo/redo and endorphin import
 > work. The physics engine runs imported endorphin characters with their own bodies,
 > joint limits and muscles; all 16 bundled sample scenes checked simulate
-> cleanly. Of endorphin's *behaviours*, balance (which steps when pushed too hard to
-> stand still), stagger, catch fall, body foetal and writhe have original controllers;
-> scenes that rely on the others behave like a limp character instead.
+> cleanly over their whole length. Of endorphin's *behaviours*, balance (which steps
+> when pushed too hard to stand still), stagger, catch fall, body foetal and writhe
+> have original controllers; scenes that rely on the others behave like a limp
+> character instead.
 
 > **Want to help build it?** NeuroMotion is open to everyone: animators, programmers,
 > testers and writers. See [Contributing](#contributing) below, or go straight to

@@ -18,7 +18,7 @@ each other, and [what's next](#next-up). Each open item is, or will become, a Gi
 | Area | endorphin 2.5 | NeuroMotion today |
 |---|---|---|
 | Open endorphin files | – | ✅ `.ens`, `.nmc`, `.nma` (160 of 163 bundled files) |
-| Physics engine | Karma, 120 Hz, stiff muscles | ✅ own engine, 120 Hz, deterministic on one machine; all 16 sample scenes checked clean |
+| Physics engine | Karma, 120 Hz, stiff muscles | ✅ own engine, 120 Hz, deterministic on one machine; all 16 sample scenes checked clean over their whole range |
 | Event types | 9 | 🟡 7 of 9 (no motion transfer; behaviours partly) |
 | Behaviours | a library of them | 🟡 5 (Balance with stepping, Stagger, CatchFall, BodyFoetal, Writhe) |
 | Your own characters | yes (rigs, motion transfer) | ⬜ only endorphin's own `.nmc` characters |
@@ -165,7 +165,7 @@ Planned once 1.0 is in sight:
 What moves NeuroMotion closest to endorphin quality now, in order:
 
 1. **Measure endorphin** (needs someone with endorphin installed): run
-   `cargo test --release -- --ignored` (every sample scene; all 16 are clean since
+   `cargo test --release -- --ignored` (every sample scene over its whole range; all 16 are clean since
    [#7](https://github.com/Rick007110/NeuroMotion/issues/7)), the behaviour inventory ([#24](https://github.com/Rick007110/NeuroMotion/issues/24)), and record
    reference measurements of a few scenes. Every later physics and behaviour change
    can then be checked against real numbers.
