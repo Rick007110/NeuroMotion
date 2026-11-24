@@ -1942,18 +1942,10 @@ pub fn nudges() -> Vec<f32> {
 mod tests {
     use super::*;
 
-    /// `NM_TRACE=<stand-in> cargo test --release trace_stand_in -- --ignored --nocapture`
-    /// (or `NM_TRACE=<path to an .ens scene>`: its first two seconds)
-    #[test]
-    #[ignore = "debugging aid"]
-    fn trace_stand_in() {
-        // Runs with every `--ignored` sweep; only does something when asked to.
-        let Ok(name) = std::env::var("NM_TRACE") else {
-            return;
-        };
-        let describe_only = name.starts_with("describe:");
-        let name = name.trim_start_matches("describe:");
-        let project = match name {
+    /// A stand-in by name, or an endorphin scene by path (`.ens`) cut to its first
+    /// `NM_SECONDS` (`seconds` if unset), for the debugging aids below.
+    fn named_project(name: &str, seconds: f32) -> Project {
+        match name {
             "tackle" => tackle(),
             "balcony" => balcony(),
             "catch_rope" => catch_rope(),
@@ -1979,21 +1971,174 @@ mod tests {
                 let seconds = std::env::var("NM_SECONDS")
                     .ok()
                     .and_then(|s| s.parse().ok())
-                    .unwrap_or(2.0);
-                project.settings.range.end =
-                    project.settings.range.end.min(
-                        project.settings.range.start + (seconds * project.settings.fps) as i32,
-                    );
+                    .unwrap_or(seconds);
+                let frames = (seconds * project.settings.fps) as i32;
+                project.settings.range.end = project
+                    .settings
+                    .range
+                    .end
+                    .min(project.settings.range.start.saturating_add(frames));
                 project
             }
-            _ => panic!("set NM_TRACE to a stand-in's name or an .ens scene"),
+            _ => panic!("expected a stand-in's name or an .ens scene, got {name:?}"),
+        }
+    }
+
+    /// `NM_TRACE=<stand-in> cargo test --release trace_stand_in -- --ignored --nocapture`
+    /// (or `NM_TRACE=<path to an .ens scene>`: its first two seconds)
+    #[test]
+    #[ignore = "debugging aid"]
+    fn trace_stand_in() {
+        // Runs with every `--ignored` sweep; only does something when asked to.
+        let Ok(name) = std::env::var("NM_TRACE") else {
+            return;
         };
+        let describe_only = name.starts_with("describe:");
+        let project = named_project(name.trim_start_matches("describe:"), 2.0);
         if describe_only {
             let report = sweep(&project);
             print!("{report}\n{}{}", report.places(), describe(&project));
             return;
         }
         trace(&project);
+    }
+
+    /// `NM_DUMP=<stand-in or .ens path> cargo test --release dump_scene_motion -- --ignored --nocapture`
+    ///
+    /// Simulates a scene and writes its motion as CSV, for comparing it with a
+    /// reference (endorphin's own run, exported or measured) outside the tests. Into
+    /// `NM_DUMP_OUT` (default `target/dump/<scene name>`):
+    ///
+    /// - `bodies.csv`: per frame, character and rig body, the body's world position
+    ///   (m) and rotation (quaternion x, y, z, w) and the character's simulation level;
+    /// - `joints.csv`: the same for every skeleton joint, characters without a rig
+    ///   included (they follow their animation). This is the pose the viewport draws
+    ///   and exports write: while a transition blends back to animation the joints
+    ///   are blended and the bodies aren't;
+    /// - `rig.csv`: every body's mass and its frame relative to the joint it hangs
+    ///   from, to place bodies on the joints;
+    /// - `shapes.csv`: every collision shape, relative to its body, for drawing.
+    ///
+    /// `NM_SECONDS` sets how long to simulate from the start of the range, past its
+    /// end if need be (endorphin runs a scene for its own number of ticks, which can be
+    /// longer than the playback range); the whole range by default.
+    #[test]
+    #[ignore = "debugging aid"]
+    fn dump_scene_motion() {
+        use std::fmt::Write as _;
+        let Ok(name) = std::env::var("NM_DUMP") else {
+            return;
+        };
+        let mut project = named_project(&name, f32::MAX);
+        if let Some(seconds) = std::env::var("NM_SECONDS")
+            .ok()
+            .and_then(|s| s.parse::<f32>().ok())
+        {
+            let range = &mut project.settings.range;
+            range.end = range.start + (seconds * project.settings.fps).round() as i32;
+        }
+        let out = std::path::PathBuf::from(std::env::var("NM_DUMP_OUT").unwrap_or_else(|_| {
+            format!(
+                "{}/target/dump/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                project.settings.name
+            )
+        }));
+        std::fs::create_dir_all(&out).unwrap();
+        let (sim, elapsed) = simulate(&project);
+        let range = project.settings.range;
+        let fps = project.settings.fps;
+        let level_name = |level: Option<SimLevel>| match level {
+            Some(SimLevel::Animated) => "animated",
+            Some(SimLevel::CollisionOnly) => "collision_only",
+            Some(SimLevel::CollisionWithMomentum) => "collision_with_momentum",
+            Some(SimLevel::Simulated) => "simulated",
+            None => "no_rig",
+        };
+        let row = |csv: &mut String, head: &str, (q, p): (Quat, Vec3)| {
+            writeln!(
+                csv,
+                "{head},{:.5},{:.5},{:.5},{:.6},{:.6},{:.6},{:.6}",
+                p.x, p.y, p.z, q.x, q.y, q.z, q.w
+            )
+            .unwrap();
+        };
+        const POSE: &str = "x,y,z,qx,qy,qz,qw";
+        let mut bodies = format!("frame,seconds,character,level,body,{POSE}\n");
+        let mut joints = format!("frame,seconds,character,level,joint,parent,{POSE}\n");
+        for frame in range.start..=range.end {
+            let state = sim.frame(frame).unwrap();
+            let poses = project.evaluate(frame as f32);
+            let t = (frame - range.start) as f32 / fps;
+            for (ci, c) in project.characters.iter().enumerate() {
+                let cf = state[ci].as_ref();
+                let level = level_name(cf.map(|cf| cf.level));
+                let at = match cf {
+                    Some(cf) => cf.joints.clone(),
+                    None => world_transforms(&c.skeleton, &poses[ci]),
+                };
+                for (j, joint) in c.skeleton.joints.iter().enumerate() {
+                    let parent = joint
+                        .parent
+                        .map_or("", |p| c.skeleton.joints[p].name.as_str());
+                    let head = format!("{frame},{t:.4},{},{level},{},{parent}", c.name, joint.name);
+                    row(&mut joints, &head, at[j]);
+                }
+                let (Some(cf), Some(rig)) = (cf, &c.physics) else {
+                    continue;
+                };
+                for (body, at) in rig.bodies.iter().zip(&cf.bodies) {
+                    let head = format!("{frame},{t:.4},{},{level},{}", c.name, body.name);
+                    row(&mut bodies, &head, *at);
+                }
+            }
+        }
+        let mut bodies_on_joints = format!("character,body,joint,mass,{POSE}\n");
+        let mut shapes =
+            format!("character,body,mass,shape,geometry,radius,length,sx,sy,sz,{POSE}\n");
+        let frame_of = |f: &crate::document::physics::Frame| {
+            (Quat::from_array(f.rotation), Vec3::from(f.position))
+        };
+        for c in &project.characters {
+            let Some(rig) = &c.physics else { continue };
+            for body in &rig.bodies {
+                let joint = &c.skeleton.joints[body.joint].name;
+                let head = format!("{},{},{joint},{}", c.name, body.name, body.mass);
+                row(&mut bodies_on_joints, &head, frame_of(&body.frame));
+                for (si, shape) in body.shapes.iter().enumerate() {
+                    let (kind, r, l, size) = match shape.geometry {
+                        Geometry::Sphere { radius } => ("sphere", radius, 0.0, [0.0; 3]),
+                        Geometry::Capsule { radius, length } => {
+                            ("capsule", radius, length, [0.0; 3])
+                        }
+                        Geometry::Cylinder { radius, length } => {
+                            ("cylinder", radius, length, [0.0; 3])
+                        }
+                        Geometry::Box { size } => ("box", 0.0, 0.0, size),
+                    };
+                    let head = format!(
+                        "{},{},{},{si},{kind},{r},{l},{},{},{}",
+                        c.name, body.name, body.mass, size[0], size[1], size[2]
+                    );
+                    row(&mut shapes, &head, frame_of(&shape.frame));
+                }
+            }
+        }
+        for (file, text) in [
+            ("bodies.csv", bodies),
+            ("joints.csv", joints),
+            ("rig.csv", bodies_on_joints),
+            ("shapes.csv", shapes),
+        ] {
+            std::fs::write(out.join(file), text).unwrap();
+        }
+        println!(
+            "{}: frames {}-{} at {fps} fps simulated in {elapsed:.0?}, written to {}",
+            project.settings.name,
+            range.start,
+            range.end,
+            out.display()
+        );
     }
 
     fn check(project: Project) -> Simulation {
