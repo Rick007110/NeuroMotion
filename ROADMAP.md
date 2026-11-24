@@ -20,7 +20,7 @@ each other. Each open item is, or will become, a GitHub
 | Open endorphin files | – | ✅ `.ens`, `.nmc`, `.nma` (160 of 163 bundled files) |
 | Physics engine | Karma, 120 Hz, stiff muscles | ✅ own engine, 120 Hz, deterministic; 15 of 16 sample scenes clean |
 | Event types | 9 | 🟡 6 of 9 (no sever, motion transfer; behaviours partly) |
-| Behaviours | a library of them | 🟡 2 (Balance, CatchFall) |
+| Behaviours | a library of them | 🟡 3 (Balance with stepping, CatchFall, Stagger) |
 | Your own characters | yes (rigs, motion transfer) | ⬜ only endorphin's own `.nmc` characters |
 | Import motion capture | yes | ⬜ |
 | Export | FBX, BVH | 🟡 FBX and BVH |
@@ -64,8 +64,14 @@ scenes then run something sensible.
 - ✅ Balance (ankle strategy), CatchFall
 - ⬜ **Inventory**: the list of behaviour names and settings that endorphin scenes use,
   gathered from scenes (not from the protected `.nmb` files), to plan the rest
-- ⬜ **Stepping** when Balance can't hold ([#9](https://github.com/Rick007110/NeuroMotion/issues/9))
-- ⬜ **Stagger** ([#8](https://github.com/Rick007110/NeuroMotion/issues/8)), builds on stepping
+- 🟡 **Stepping** when Balance can't hold ([#9](https://github.com/Rick007110/NeuroMotion/issues/9)):
+  forwards and backwards it now stands after pushes up to about twice as hard
+  (50 of 84 test pushes, from 29); sideways it barely helps yet, because the foot on
+  the falling side carries the weight and can't lift
+  ([details](docs/behaviours.md#not-yet))
+- 🟡 **Stagger** ([#8](https://github.com/Rick007110/NeuroMotion/issues/8)): Balance
+  that keeps stepping with a loose trunk; its event settings aren't read and it
+  hasn't been compared with endorphin
 - ⬜ **Writhe** and **Body foetal** ([#10](https://github.com/Rick007110/NeuroMotion/issues/10))
 - ⬜ The rest of the library: protective reactions (protect head, brace for impact),
   reaching and grabbing, looking at a target, hit and shot reactions, and others the

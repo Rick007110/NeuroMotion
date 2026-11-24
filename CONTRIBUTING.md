@@ -109,6 +109,7 @@ Some tests are `#[ignore]`d because they need something not in the repository:
 | `imports_every_bundled_file`, `sample_scenes_simulate_stably` | a local endorphin 2.5.2 install (`ENDORPHIN_DIR` if not in the default location) | `cargo test --release -- --ignored` |
 | `export_samples` | Blender, to check the written files | see [docs/export.md](docs/export.md#checking-exports-in-blender) |
 | `trace_stand_in` | nothing; prints a frame-by-frame trace of a physics test scene or an `.ens` file | `NM_TRACE=<name or path> cargo test --release trace_stand_in -- --ignored --nocapture` |
+| `push_sweep` | nothing; prints which chest pushes (1-3 m/s, four ways) a behaviour survives | `NM_SWEEP=<behaviour> cargo test --release push_sweep -- --ignored --nocapture` |
 
 If you change the physics and have endorphin, please run the ignored tests and say in
 your pull request what changed.

@@ -968,10 +968,19 @@ fn behave(project: &mut Project, character: CharacterId, start: i32, end: i32, n
 /// The placeholder stands; at 1 s its chest is pushed at `speed` m/s along `dir`.
 /// With `behaviour`, Balance runs throughout.
 pub fn balance_push(speed: f32, dir: Vec3, behaviour: bool) -> Project {
-    let mut p = new_scene("Balance", 4.0);
+    pushed(behaviour.then_some("Balance"), speed, dir)
+}
+
+/// A forward push (m/s) Stagger keeps stepping after (and that Balance survives).
+pub const STAGGER_PUSH: f32 = 2.5;
+
+/// The placeholder stands, running `behaviour` throughout (if any); at 1 s its chest
+/// is pushed at `speed` m/s along `dir`.
+pub fn pushed(behaviour: Option<&str>, speed: f32, dir: Vec3) -> Project {
+    let mut p = new_scene(behaviour.unwrap_or("Push"), 4.0);
     let id = placeholder(&mut p, "stander", Vec3::ZERO, 0.0);
-    if behaviour {
-        behave(&mut p, id, 0, 240, "Balance");
+    if let Some(name) = behaviour {
+        behave(&mut p, id, 0, 240, name);
     }
     push(
         &mut p,
@@ -1823,6 +1832,9 @@ mod tests {
             "backflip" => backflip(true),
             "backflip_passive" => backflip(false),
             "balance" => balance_push(1.5, Vec3::Z, true),
+            "balance_step" => balance_push(1.5, -Vec3::Z, true),
+            "balance_steps" => balance_push(STAGGER_PUSH, Vec3::Z, true),
+            "stagger" => pushed(Some("Stagger"), STAGGER_PUSH, Vec3::Z),
             "catch_fall" => catch_fall_shove(Vec3::new(0.0, 0.0, 3.5), true),
             path if path.ends_with(".ens") => {
                 let mut project = crate::io::endorphin::import_scene(std::path::Path::new(path))
@@ -2200,8 +2212,9 @@ mod behaviour_tests {
 
     #[test]
     fn balance_keeps_the_placeholder_upright_after_a_push() {
-        // Backwards, the capture point leaves the placeholder's short heel (6 cm behind
-        // the ankle): that takes a step, which Balance doesn't do yet.
+        // The ankle strategy alone holds these. Backwards, the capture point leaves the
+        // placeholder's short heel (6 cm behind the ankle): that takes a step
+        // (`balance_steps_when_the_ankles_cannot_hold`).
         for (behaviour, dir) in [
             (true, Vec3::Z),
             (true, Vec3::X),
@@ -2224,6 +2237,169 @@ mod behaviour_tests {
                 );
             } else {
                 assert!(head < 1.0, "limp character should fall: head {head}");
+            }
+        }
+    }
+
+    /// How far the feet moved over the ground (the furthest either went) and how many
+    /// steps they took (a foot lifted 3 cm and put back down), from frame `from` on.
+    fn footwork(project: &Project, sim: &Simulation, from: i32) -> (f32, usize) {
+        let rig = project.characters[0].physics.as_ref().unwrap();
+        let feet = ["l_ankle", "r_ankle"].map(|name| rig.body_index(name).unwrap());
+        let at =
+            |frame: i32, foot: usize| sim.frame(frame).unwrap()[0].as_ref().unwrap().bodies[foot].1;
+        let (mut moved, mut steps) = (0.0f32, 0);
+        for foot in feet {
+            let start = at(from, foot);
+            let mut up = false;
+            for frame in from..=project.settings.range.end {
+                let p = at(frame, foot);
+                moved = moved.max((p - start).with_y(0.0).length());
+                if p.y > start.y + 0.03 {
+                    up = true;
+                } else if up && p.y < start.y + 0.01 {
+                    up = false;
+                    steps += 1;
+                }
+            }
+        }
+        (moved, steps)
+    }
+
+    /// One push for `balance_steps_when_the_ankles_cannot_hold`: whether the character
+    /// stayed up (head above 1.45 m and hips above 0.8 m for the 3 s after it), and
+    /// whether its feet clearly moved (10 cm, at least one step). Checks the motion
+    /// stayed physical.
+    fn stepped_and_stood(behaviour: &str, speed: f32, dir: Vec3) -> (bool, bool) {
+        let project = pushed(Some(behaviour), speed, dir);
+        let (sim, elapsed) = simulate(&project);
+        let head = lowest(&project, &sim, &["head"], 60..=240);
+        let hips = lowest(&project, &sim, &["hips"], 60..=240);
+        let (moved, steps) = footwork(&project, &sim, 59);
+        let report = measure(&project, &sim, elapsed);
+        println!(
+            "{behaviour}, push {speed} m/s along {dir}: head down to {head:.2} m, hips {hips:.2} m, feet moved {moved:.2} m in {steps} steps; {report}"
+        );
+        assert!(report.ok(), "{report}");
+        (head > 1.45 && hips > 0.8, moved > 0.1 && steps >= 1)
+    }
+
+    /// Pushes the ankle strategy alone can't hold: on its own it falls from 1.4 m/s
+    /// backwards, 1.7 forwards, 1.9 to the left and 1.7 to the right
+    /// (docs/behaviours.md).
+    #[test]
+    fn balance_steps_when_the_ankles_cannot_hold() {
+        // Backwards it steps back and stands up to 2.2 m/s (1.8 aside).
+        for speed in [1.5, 1.7, 2.0] {
+            let (up, stepped) = stepped_and_stood("Balance", speed, -Vec3::Z);
+            assert!(
+                up && stepped,
+                "backwards {speed}: up {up}, stepped {stepped}"
+            );
+        }
+        // Sideways only just past what the ankles hold: the foot on the side it falls
+        // to carries the weight, and often can't lift to step out (docs/behaviours.md).
+        for (dir, speed) in [(Vec3::X, 1.9), (-Vec3::X, 1.7), (-Vec3::X, 1.8)] {
+            let (up, stepped) = stepped_and_stood("Balance", speed, dir);
+            assert!(up && stepped, "{dir} {speed}: up {up}, stepped {stepped}");
+        }
+        // Forwards it stays up after most pushes from 1.7 to 2.8 m/s; which ones
+        // depends on small differences in how the steps go.
+        let saved = (17..=28)
+            .filter(|&tenths| {
+                let (up, stepped) = stepped_and_stood("Balance", tenths as f32 / 10.0, Vec3::Z);
+                up && stepped
+            })
+            .count();
+        assert!(
+            saved >= 6,
+            "stayed up after only {saved} of 12 forward pushes"
+        );
+    }
+
+    /// Stepping on the stand-in character with toes (its soles run onto them), turned
+    /// to face other ways than the rig's rest pose: pushed backwards at 1.5 m/s, it
+    /// steps back and stays up.
+    #[test]
+    fn balance_steps_with_toes_facing_any_way() {
+        for yaw in [0.0f32, 90.0] {
+            let mut p = new_scene("Balance", 4.0);
+            let id = person(&mut p, "stander", Vec3::ZERO, yaw, &[]);
+            behave(&mut p, id, 0, 240, "Balance");
+            let back = Quat::from_rotation_y(yaw.to_radians()) * -Vec3::Z;
+            push(&mut p, id, 60, "stander.MetaBodies.chest", back * 1.5);
+            let (sim, elapsed) = simulate(&p);
+            let head = lowest(&p, &sim, &["head"], 60..=240);
+            let (moved, steps) = footwork(&p, &sim, 59);
+            let report = measure(&p, &sim, elapsed);
+            println!(
+                "balance with toes, facing {yaw}°, pushed back 1.5 m/s: head down to {head:.2} m, feet moved {moved:.2} m in {steps} steps; {report}"
+            );
+            assert!(head > 1.45, "fell facing {yaw}°: head {head}");
+            assert!(moved > 0.1 && steps >= 1, "didn't step: {moved} m, {steps}");
+            assert!(report.ok(), "{report}");
+        }
+    }
+
+    /// Stagger keeps stepping after a push Balance would stop in a step or two.
+    #[test]
+    fn stagger_keeps_stepping_after_a_hard_push() {
+        let project = pushed(Some("Stagger"), STAGGER_PUSH, Vec3::Z);
+        let (sim, elapsed) = simulate(&project);
+        let (moved, steps) = footwork(&project, &sim, 59);
+        let head = lowest(&project, &sim, &["head"], 60..=240);
+        let report = measure(&project, &sim, elapsed);
+        println!(
+            "stagger, push {STAGGER_PUSH} m/s forwards: {steps} steps, feet moved {moved:.2} m, head down to {head:.2} m; {report}"
+        );
+        assert!(steps >= 3, "only {steps} steps");
+        assert!(report.ok(), "{report}");
+    }
+
+    /// Which chest pushes a behaviour survives (head above 1.45 m for 3 s): one row
+    /// per direction, one column per speed from 1.0 to 3.0 m/s in 0.1 steps, `#` for
+    /// stayed up. `NM_SWEEP=<behaviour> cargo test --release push_sweep -- --ignored
+    /// --nocapture` (Balance when unset). docs/behaviours.md has the results.
+    #[test]
+    #[ignore = "survey"]
+    fn push_sweep() {
+        let name = std::env::var("NM_SWEEP").unwrap_or_else(|_| "Balance".to_owned());
+        let dirs = [
+            ("forwards ", Vec3::Z),
+            ("backwards", -Vec3::Z),
+            ("left     ", Vec3::X),
+            ("right    ", -Vec3::X),
+        ];
+        let mut total = 0;
+        for (label, dir) in dirs {
+            let row: String = (10..=30)
+                .map(|tenths| {
+                    let project = pushed(Some(&name), tenths as f32 / 10.0, dir);
+                    let (sim, _) = simulate(&project);
+                    let up = lowest(&project, &sim, &["head"], 60..=240) > 1.45;
+                    total += usize::from(up);
+                    if up { '#' } else { '.' }
+                })
+                .collect();
+            println!("{name} {label} {row}");
+        }
+        println!("{name}: {total} of 84 pushes survived");
+    }
+
+    /// Stepping keeps no state: the same push gives the same motion, to the bit.
+    #[test]
+    fn stepping_is_deterministic() {
+        for behaviour in ["Balance", "Stagger"] {
+            let project = pushed(Some(behaviour), 2.0, Vec3::new(1.0, 0.0, -1.0));
+            let (a, _) = simulate(&project);
+            let (b, _) = simulate(&project);
+            for frame in 0..=project.settings.range.end {
+                let (fa, fb) = (a.frame(frame).unwrap(), b.frame(frame).unwrap());
+                let (fa, fb) = (fa[0].as_ref().unwrap(), fb[0].as_ref().unwrap());
+                assert!(
+                    fa.bodies.iter().zip(&fb.bodies).all(|(x, y)| x == y),
+                    "{behaviour}: runs differ at frame {frame}"
+                );
             }
         }
     }

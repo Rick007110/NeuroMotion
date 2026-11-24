@@ -16,7 +16,7 @@ A behaviour runs for the span of an event clip of kind `Behaviour`, matched by i
 when it's missing). Matching ignores case, spaces and punctuation, so `CatchFall`
 and `catch fall` both work. `BodyFoetal` also answers to `foetal`, `fetal` and
 `bodyfetal`. Where several overlap, the one that starts last wins.
-Names with no controller yet (`Stagger`, …) are ignored: the
+Names with no controller yet are ignored: the
 character keeps doing what the timeline otherwise asks.
 
 The behaviour starts from the targets and strengths the timeline gives (active pose,
@@ -34,6 +34,13 @@ between rigs, so `Layout` works from the rig's shape in its rest pose instead:
 - the **pelvis** is the root body;
 - the **legs** are the two branches from the pelvis that reach lowest; going down each
   one: thigh, shin, foot;
+- each foot's **sole** is the lowest points of the collision shapes of the foot and the
+  bodies beyond it (toes), those within 2 cm of the lowest, kept in the foot's frame:
+  a box's four bottom corners, the bottom of a sphere, the two lower ends of a capsule.
+  The ankle's height above the sole is kept too;
+- the way the character **faces** is the way its toes point, from the ankles to the
+  middle of the soles, so a rig turned any way at rest works (feet centred under the
+  ankles don't say, and then it is taken to face +Z with its left at +X);
 - the **trunk** is the branch that reaches highest;
 - the **arms** are the two branches off the trunk that reach furthest sideways. Upper
   arm and forearm are the longest consecutive pair along each branch, which skips
@@ -61,10 +68,18 @@ directions.
 
 ## Balance
 
-Goal: keep the centre of mass over the feet, upright, after a push.
+Goal: keep the centre of mass over the feet, upright, after a push; step when the feet
+can't hold it.
 
 The controller works on the **capture point**: where the centre of mass would come to
-rest given its speed, that is position + velocity × √(height / g). Each tick:
+rest given its speed, that is position + velocity × √(height / g). Each tick it first
+looks at the feet: a foot whose sole is within 2 cm of the lowest sole is **planted**,
+and the planted soles make the **support** (their convex hull, seen from above).
+
+### Standing: the ankle strategy
+
+While the capture point is inside the support, or less than 2 cm outside it, Balance
+does exactly what it did before it could step:
 
 1. Every muscle is tensed to the rig's `Normal` preset.
 2. The wanted shift of the hips is (middle of the feet − centre of mass) − 2 × (velocity
@@ -80,15 +95,124 @@ rest given its speed, that is position + velocity × √(height / g). Each tick:
    resisting it except the narrow feet, so there the hips aim at the swung thigh.
 5. Knees, trunk and arms keep the timeline's pose.
 
-Results on the placeholder (test `balance_keeps_the_placeholder_upright_after_a_push`):
-after a 1.5 m/s push on the chest, forwards or to either side, the head stays at
-1.70 m for the following 3 s. Without Balance the character falls.
+### Stepping
 
-**Not yet.** Pushes that move the capture point off the feet need a step. Backwards,
-that's already the case for a 1.5 m/s chest push on the placeholder, whose heel is
-only 6 cm behind the ankle. A hip strategy (bending at the hips to move the centre of
-mass) was tried and made things worse as implemented. Stepping is the next thing to
-add.
+When the capture point is further out, one leg steps while the other stands:
+
+1. **Which leg.** If one foot is already in the air, that one. Otherwise, for each leg,
+   where its step would go (below) and how far outside the feet the capture point
+   would then be. A leg whose step leaves it more than 3 cm out loses; between legs
+   that both cover it, the one further from the centre of mass (carrying less
+   weight) steps.
+2. **Where to.** On one foot, the body tips about the edge of that foot nearest the
+   capture point, and the capture point runs away from that edge exponentially, with
+   time constant √(height / g). So the step aims where it will be when the foot gets
+   there: the edge + (capture point − edge) × e^(t / √(height / g)), where t is 0.1 s
+   plus the distance to go at 2 m/s, at most 0.25 s, and 5 cm past that. Looking
+   further ahead made long steps the body then swayed back from. The foot never
+   crosses the other: it lands at least 0.6 hips' width outside it, and within 0.6
+   legs' length of the hip.
+3. **The stance leg** keeps the ankle strategy, towards the middle of its own foot, and
+   its hip holds the pelvis upright and turned the way that foot points. On one leg
+   nothing else holds the pelvis's heading: left as it was, the pelvis spun about the
+   stance leg as the other swung, and the swing foot aimed off to the side.
+4. **The swing leg** works out hip and knee from the triangle of thigh, shin and
+   hip-to-ankle, the knee bending forwards, and keeps the foot level. While the foot
+   is still on the ground it is lifted straight up (15% of the leg's length), at the
+   rig's `Strong` preset, rather than dragged: the body often still leans on it, and
+   a gentle lift only sinks the hips onto it. In the air it is carried at 10% of the
+   leg's length towards the target and lowered as it gets there. Its muscles are
+   damped critically for the leg they swing (2√(stiffness × inertia)): the `Normal`
+   preset, tuned to hold poses against the ground, is about 3 times overdamped at the
+   hip and 12 times at the knee for a leg in the air, which then swung too slowly to
+   step.
+5. **Landing.** The swinging foot is put down where it is (and pulled in under the hip
+   if the leg can't reach the ground from there) as soon as, down there, it would hold
+   the capture point, or when its step can't (more than 5 cm out): then the other leg
+   gets to step. Chasing a target that keeps moving left feet hovering for half a
+   second while the body fell.
+6. **Safe on one foot**, the other is put down beside it, hips' width apart.
+
+Nothing is remembered between ticks: the foot in the air is the one stepping, and
+where it goes is worked out afresh from the bodies, so simulations stay deterministic
+and can restart anywhere (test `stepping_is_deterministic`). It works on any biped
+`Layout` finds: the soles, ankle heights, facing and hip widths all come from the rig
+(test `balance_steps_with_toes_facing_any_way`, the stand-in with toes, turned).
+
+### Results
+
+Pushes on the placeholder's chest from 1.0 to 3.0 m/s, every 0.1 m/s, each way; `#`
+means the head stayed above 1.45 m for the next 3 s (`push_sweep`, an ignored test):
+
+| | forwards | backwards | to its left | to its right |
+|---|---|---|---|---|
+| Before stepping | `#######..............` | `####.................` | `##########...........` | `########.............` |
+| Ankle strategy alone, after the friction fix below | `#######..............` | `####.................` | `#########............` | `#######..............` |
+| Balance (stepping) | `########.#.##########` | `########.###.........` | `##########........#..` | `#########............` |
+
+In all: 29 of 84 pushes before, 50 now, and every push survived before is still
+survived. In speeds: forwards up to 1.6 m/s before, now up to 3.0 (1.8 and 2.0 aside);
+backwards up to 1.3, now up to 2.1 (1.8 aside); to the left 1.9 both before and now;
+to the right 1.7 before, 1.8 now. The steps leave the feet 0.25 to 0.6 m from where
+they stood, in 2 to 7 steps, with joints stretching under 3 mm. Tests:
+`balance_steps_when_the_ankles_cannot_hold` (backwards 1.5, 1.7 and 2.0 m/s; sideways
+1.9 and 1.7–1.8; at least 6 of the 12 forward pushes from 1.7 to 2.8, of which 10
+pass), and `balance_keeps_the_placeholder_upright_after_a_push` unchanged.
+
+### Not yet
+
+- **Sideways.** Pushed sideways, the body falls towards the foot on that side, which
+  carries the weight: lifting it drops the hips onto it, and the other foot can't
+  cross over to catch the body (the legs collide; a crossover target was tried, and
+  the foot jammed against the other leg). So sideways Balance is barely better than
+  before. It needs a weight shift onto the far foot before the near one lifts (tried
+  with the ankle strategy alone: far too slow against a fall already under way), or a
+  crossover step that goes around the other leg.
+- **Which pushes it survives is erratic** past what the ankles hold: 1.8 m/s
+  backwards falls where 1.7 and 1.9 don't. A recovery near the limit depends on small
+  differences in where a foot lands; the settings were chosen on the whole sweep, not
+  on any one push. The tests check a band of forward pushes rather than single speeds
+  for that reason.
+- After a long step the feet stay staggered, a narrow stance across the line between
+  them; the body sometimes drifts out sideways from it later. Bringing the back foot
+  up beside the front one once settled was tried and made no difference.
+- The stance knee stays straight, so a swinging foot reaches the ground only near the
+  hip until the body has tipped. Bending it (by a fixed angle, or with the same
+  triangle as the swing leg) made more pushes fail, not fewer.
+- Steps up or down: the ground is taken to be the lower foot's sole.
+- The trunk and arms don't help (no arm swing, no hip strategy).
+
+## Stagger
+
+Goal: endorphin's stagger, a character driven off its feet by a push and stumbling to
+keep up with it, rather than a clean recovery.
+
+Stagger is Balance whose support is allowed to move: the same controller with a
+different gait.
+
+- It steps as soon as the capture point leaves the planted feet (no 2 cm margin), so
+  it gives way instead of standing its ground with the ankles.
+- Its steps go just where the capture point will be, not past it, so one step rarely
+  stops the body and it keeps stepping.
+- The trunk, head and arms are at 35% of the rig's `Normal` preset, so the upper body
+  sways and lags behind the legs.
+
+Results (`push_sweep` with `NM_SWEEP=Stagger`, same pushes as above):
+
+| | forwards | backwards | to its left | to its right |
+|---|---|---|---|---|
+| Stagger | `#######.#....#..#....` | `#####.####.#.........` | `##########...........` | `#########............` |
+
+39 of 84 stay up, fewer than with Balance, as meant: pushed forwards at 2.5 m/s it
+takes 6 steps over 1.1 m before going down to its knees (test
+`stagger_keeps_stepping_after_a_hard_push`), where Balance stops in 5 steps over 0.4 m
+and stands.
+
+**Not yet.** Settings on the behaviour event aren't read, and nothing has been
+compared with endorphin. It inherits Balance's limits (above), sideways most of all.
+Stagger Walk,
+the sample scene that uses it, now runs this controller instead of going limp, but it
+couldn't be checked here (no endorphin install).
 
 ## Catch fall
 
@@ -148,7 +272,7 @@ Results (test `writhe_keeps_moving_and_is_deterministic`): after 3 s, 14 of the
 placeholder's 17 bodies still move at over 0.1 m/s (mean 0.25 m/s), no NaN, joints
 stretched at most 1.4 mm, fastest body 5.8 m/s. Two runs give bit-identical bodies.
 
-## Solver change behind them
+## Solver changes behind them
 
 Balance exposed a limit in the spring cap (lesson 4 in `physics-design.md`): an
 ankle's muscle was capped as if it moved the 1.1 kg foot, giving about 270 N·m/rad,
@@ -156,7 +280,14 @@ less than the ~370 N·m/rad each ankle needs just to hold a standing body up.
 Bodies resting on the ground or scenery now count as immovable when the cap
 estimates the mass a muscle moves (lesson 9).
 
-## Ideas for the others
+Stepping exposed another (lesson 16): friction gripped contacts that were only inside
+the 2 cm speculative margin, not touching, at its full fixed force cap. A swinging
+foot within 2 cm of the floor was held in place, and its hip and knee muscles couldn't
+move it. Friction now only acts on contacts that touch or push.
 
-- **Stagger**: balance whose support is allowed to move: when the capture point leaves
-  the feet, step the swing foot to it.
+## Next
+
+The rest of endorphin's library still needs designs: protective reactions (protect the
+head, brace for impact), reaching and grabbing, looking at a target, hit and shot
+reactions, and others found in imported scenes. See [ROADMAP.md](../ROADMAP.md),
+milestone 2.

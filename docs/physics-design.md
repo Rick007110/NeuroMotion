@@ -274,7 +274,7 @@ Car Hit, the last sample scene failing the sweep, added one more.
     slowed single characters about twice and made Balance lose its footing, so the
     direct solve stays where a heavy body needs it.
 
-Teaching Balance to step showed one more.
+Teaching Balance to step (docs/behaviours.md) showed one more.
 
 16. **Friction only grips surfaces that touch.** Contacts are found 2 cm before
     surfaces meet (step 2 of the solver), so a fast body can't pass through in one
@@ -356,14 +356,16 @@ What each stand-in reproduces:
 | Car carry | Car Hit: a 747 kg car joined (1e5) to a keyed carrier drives into a standing character with clavicles at 8 m/s, catches its arm against its ribs, carries it on the bonnet and stops dead at 1.65 s (lesson 15). The join gives way by 23 cm as the carrier stops, by design | 5.8 cm (shoulder) | 1.0 cm |
 | Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -73° at 297, leaves the box at 324, lands behind it at 387, -278° in all. Left alone: tips forwards and falls off the front at 335 (both changed by lesson 16) |
 
-Of endorphin's behaviours, Balance and CatchFall now have controllers of their own
-(docs/behaviours.md). Scenes that depend on others (e.g. Stagger Walk's stagger)
-simulate as if the character went limp.
+Of endorphin's behaviours, Balance (which now steps), CatchFall and Stagger have
+controllers of their own (docs/behaviours.md). Scenes that depend on others simulate
+as if the character went limp. Stagger Walk now runs the Stagger controller; it
+hasn't been re-run against endorphin's scene since.
 
 ## Not yet
 
-- Behaviours beyond Balance, CatchFall, BodyFoetal and Writhe (stagger, …), and stepping.
-  endorphin's are vendor-protected, so these need original designs.
+- Behaviours beyond Balance, Stagger, CatchFall, BodyFoetal and Writhe, and stepping
+  that holds sideways pushes. endorphin's are vendor-protected, so these need original
+  designs.
 - Sever events are in (cut a joint, or switch its muscle off; `events.md`), but
   endorphin's own option names for them are unverified (`endorphin-formats.md`), and
   a severed joint can't be re-attached later.
