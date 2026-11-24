@@ -764,6 +764,7 @@ fn plan(project: &Project, character_index: usize) -> Plan {
                 "Behaviour" => {
                     let name = clip.source.get("behaviourName").unwrap_or(&clip.props.name);
                     if let Some(behaviour) = Behaviour::from_name(name) {
+                        let behaviour = behaviour.with_settings(&clip.source);
                         plan.behaviours.push((start, end, behaviour));
                     }
                 }

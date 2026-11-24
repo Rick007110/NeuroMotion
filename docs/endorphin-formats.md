@@ -115,9 +115,9 @@ transfers, Severs. Their settings are kept on the clip and listed in the inspect
 *Imported settings*. That covers strength, physics level, momentum scale, behaviour
 name, impulse matrix, target bodies and constraint strengths. The physics engine
 acts on simulation levels, forces, transitions, active poses (whose target pose is
-stored as channels on the clip) and constraints. Behaviours named Balance and
-CatchFall run NeuroMotion's own controllers (see `behaviours.md`); others are kept
-but not simulated.
+stored as channels on the clip) and constraints. Behaviours NeuroMotion has a
+controller for (Balance, Stagger, CatchFall, BodyFoetal, Writhe, Explosion) run it
+(see `behaviours.md`); others are kept but not simulated.
 
 Overlapping events of the same kind go onto extra tracks ("Animation 2").
 
@@ -146,6 +146,14 @@ These are what the importer relies on:
 - Event elements live in `Events`, `ForceEvents`, `SecondaryBehaviours`,
   `TertiaryBehaviours` and `SeverBehaviourEvents`. Each has `startFrameNumber`,
   `endFrameNumber`, `priority`, `enabled` and `character`.
+- A behaviour event (`SecondaryBehaviour`) names its behaviour in `behaviourName`
+  (`Bob2: Explosion 2.0`) and shows `displayName` (`Writhe in mid-air 2.0`). Its
+  settings are in `Parameters`, one `<Variable fk="Speed" kg="0" ja="0.6"
+  de="Frequency"/>` each: `fk` is the name, `ja` the value (missing when the
+  behaviour's default is used), `kg` its kind (as seen: 0 a number, 1 a whole number,
+  2 true or false) and `de`, when present, the name endorphin shows. The importer keeps each
+  `fk` with its `ja` on the clip, as written (`Speed` = `0.6`); a name the event's own
+  attributes already use keeps the attribute.
 - <a id="sever-events"></a>**Sever events** (`SeverEvent`, in `SeverBehaviourEvents`) are
   **a best guess**: we have no scene containing one. The importer keeps every
   attribute and its `Objects` (as `targets`), and the simulation reads `severType`

@@ -45,7 +45,7 @@ our controller (see [the name problem](#the-name-problem)).
 | Look and Reach | 11 | 19 | no | Per hand (`LeftHand_`, `RightHand_`): Strength 0.6-1, Speed 0.3-1, Orientation 0-1, Blend, Delay, DistanceScale 0.1-0.5, MaxExtension 0.9-1, CatchOffset X/Y/Z (to -10 m), UsePrediction, PredictionRate, applyHandOrientation, FingerAngle; look-at: LookAtSpeed 0.5-1, Blend, Delay, HeadUpVector, UseUpVector; LegTorsoStiffness 0.8. The target is chosen in the scene (a body or collision surface), not a number |
 | BodyWrithe | 10 | 14 | no (ours is `Writhe`) | Amplitude 0.1-0.6, Frequency -0.8-0.6, Strength 0.2-1, PhaseOffset 0-0.2, NoiseLevel, Seed (98, 111), ApplyHipOpening false |
 | Stagger | 7 | 11 | yes | MaxSteps 5 or 50, ArmsWindmill, StaggerSquarely, PredictGroundHeight, GroundHeight (default, 0, 3), ArmsSpeed 0.6-0.9, ArmsStrength 0.6-1 |
-| Explosion | 7 | 10 | no | Speed 0.3-0.8, Strength 0.5-1, BackArch 0-1, HeadTurn 0.6, ShoulderAmplitude 0.3-0.8, ElbowAmplitude 0.3-0.6, LegAmplitude 0.3-1, PhaseOffset 0 |
+| Explosion | 7 | 10 | yes | Speed 0.3-0.8, Strength 0.5-1, BackArch 0-1, HeadTurn 0.6, ShoulderAmplitude 0.3-0.8, ElbowAmplitude 0.3-0.6, LegAmplitude 0.3-1, PhaseOffset 0 |
 | BodyFoetal | 6 | 8 | yes | ArmSpeed 0.08-0.7, ArmStrength 0.5-1, LegSpeed 0.3-0.8, LegStrength 0.5-1, TorsoStrength 0.5-1 |
 | CatchFall | 6 | 7 | yes | ArmsApart 0.5-0.7, ArmsSpeed 0.7-1, ArmsStrength 0.7-1, PredictGroundHeight, GroundHeight (default, 0) |
 | JumpDive | 5 | 6 | no | JumpTiming 0.3-0.9, Strength 0.3-1 |
@@ -68,7 +68,7 @@ our controller (see [the name problem](#the-name-problem)).
 | FootReach | 1 | 2 | no | Like Look and Reach, per foot; ArmTorsoStiffness 0.8 |
 | Jump | 1 | 2 | no | JumpTiming 0.3-0.8, Strength 0.3-0.8 |
 | LandCrouch | 1 | 2 | no | ArmsUrgency 0.8, LegStrength 0.5, GroundHeight (default) |
-| WritheInMidAir | 1 | 2 | no | Like BodyWrithe, plus Speed 0.6, BackArch 1, HeadTurn 0.6 |
+| WritheInMidAir | 1 | 2 | yes (Explosion) | Like BodyWrithe, plus Speed 0.6, BackArch 1, HeadTurn 0.6. endorphin 2.5's Explosion: both show as "Writhe in mid-air" |
 
 Reading the settings:
 
@@ -97,10 +97,10 @@ another name. This inventory found it, and it is fixed: `from_name` now drops th
 up to the last `:` and a trailing version, and accepts `BodyWrithe`. The "Have" column
 is what imported scenes now run.
 
-Also not carried yet: the parameters (the settings above) are read straight from the
-scene's XML by the inventory test; the importer keeps only `index`, `priority` and
-`targets` in the event's settings. The ROADMAP notes this for Stagger: its event settings
-are not read.
+The importer now keeps each behaviour's parameters (the settings above) on its clip
+under their own names, as the inventory test reads them from the XML. Only Explosion
+reads them so far; the ROADMAP notes this for Stagger, whose event settings are not
+read.
 
 ## Which missing behaviours matter most
 
@@ -110,11 +110,14 @@ By number of scenes that use them, counting families we do not have yet:
    the most settings. It needs a target model (a body or prop to follow), hand
    (and look-at) control and prediction of a moving target. Foot Reach (1 scene) is the
    same idea for a foot.
-2. **Writhe, under its scene name** (BodyWrithe, 10 scenes; Writhe in mid-air, 1):
+2. **Writhe, under its scene name** (BodyWrithe, 10 scenes; WritheInMidAir is
+   Explosion's 2.5 name, below):
    we have the controller, only the name matching and the extra settings (Seed,
    Frequency, ApplyHipOpening) are missing.
-3. **Explosion**, 7 scenes: a bracing flail like writhe, with per-limb amplitudes
-   and BackArch/HeadTurn.
+3. ~~**Explosion**~~, 7 scenes (8 with WritheInMidAir, its 2.5 name): done, an
+   arms-flapping flail in mid-air with per-limb amplitudes, BackArch and HeadTurn,
+   matched to a recording of endorphin's behaviour scene
+   ([behaviours.md](behaviours.md#explosion-writhe-in-mid-air)).
 4. **JumpDive** (5 scenes) and **Jump** (1) with **LandCrouch** (1): takeoff timing
    and landing. Need ground prediction, as Stagger's PredictGroundHeight does.
 5. **LegsKick** (4) and **Arms Windmill** (4): rhythmic limb motion with

@@ -11,8 +11,8 @@ toward a modern physics engine that behaves like endorphin's and then goes furth
 > work. The physics engine runs imported endorphin characters with their own bodies,
 > joint limits and muscles; all 16 bundled sample scenes checked simulate
 > cleanly over their whole length. Of endorphin's *behaviours*, balance (which steps
-> when pushed too hard to stand still), stagger, catch fall, body foetal and writhe
-> have original controllers; scenes that rely on the others behave like a limp
+> when pushed too hard to stand still), stagger, catch fall, body foetal, writhe and
+> explosion (writhe in mid-air) have original controllers; scenes that rely on the others behave like a limp
 > character instead.
 
 > **Want to help build it?** NeuroMotion is open to everyone: animators, programmers,
@@ -78,8 +78,9 @@ behave the same way, then improved:
   active animations, lock/join constraints, and transitions back to animation.
 - Behaviours: balance (capture-point ankle strategy, stepping when the ankles can't
   hold), stagger (balance that keeps stepping), catch fall (arms reach for the
-  ground), body foetal (curl up) and writhe (weak, wandering struggle), run by
-  endorphin's behaviour events of the same name
+  ground), body foetal (curl up), writhe (weak, wandering struggle) and explosion
+  (flailing in mid-air, matched to endorphin's), run by endorphin's behaviour events
+  of the same name
   ([docs/behaviours.md](docs/behaviours.md)).
 - **Improvements over endorphin:** no simulate/clear step (the timeline re-simulates
   automatically, in the background, whenever you edit); deterministic results;

@@ -977,6 +977,15 @@ fn event_settings(event: Node) -> BTreeMap<String, String> {
     if !targets.is_empty() {
         out.insert("targets".to_owned(), targets.join(", "));
     }
+    // A behaviour's parameters: one `Variable` each, named by `fk`, its value in `ja`
+    // (none when it takes the behaviour's default). Kept under their own names; the
+    // event's attributes win if a name is taken.
+    for var in elements(child(event, "Parameters")).filter(|v| v.has_tag_name("Variable")) {
+        if let (Some(key), Some(value)) = (var.attribute("fk"), var.attribute("ja")) {
+            out.entry(key.to_owned())
+                .or_insert_with(|| value.to_owned());
+        }
+    }
     out
 }
 
@@ -1608,6 +1617,46 @@ mod tests {
         );
         let track = project.track(force.props.track).unwrap();
         assert_eq!(track.name, "Forces");
+    }
+
+    #[test]
+    fn behaviour_events_keep_their_parameters() {
+        // As endorphin writes them: one Variable per parameter, its value in `ja`, none
+        // when the behaviour's default is used.
+        let xml = scene_xml().replace(
+            "</ForceEvents>",
+            r#"</ForceEvents>
+  <SecondaryBehaviours>
+    <SecondaryBehaviour behaviourName="Bob2: Explosion 2.0" index="27" name="5" displayName="Writhe in mid-air 2.0" startFrameNumber="48" endFrameNumber="60" priority="2" character="hero">
+      <Parameters>
+        <Variable fk="ShoulderAmplitude" kg="0" ja="0.7" de="ShoulderAmplitude"/>
+        <Variable fk="Speed" kg="0" ja="0.6" de="Frequency"/>
+        <Variable fk="NoiseLevel" kg="0"/>
+        <Variable fk="priority" kg="0" ja="9"/>
+      </Parameters>
+      <TargetSelection numRequiredObjects="0"/>
+      <Objects/>
+    </SecondaryBehaviour>
+  </SecondaryBehaviours>"#,
+        );
+        let Import { project, .. } = import(&xml);
+        let behaviour = project
+            .clips
+            .iter()
+            .find(|c| {
+                c.kind
+                    == ClipKind::Event {
+                        event: "Behaviour".into(),
+                    }
+            })
+            .unwrap();
+        let get = |key: &str| behaviour.source.get(key).map(String::as_str);
+        assert_eq!(get("behaviourName"), Some("Bob2: Explosion 2.0"));
+        assert_eq!(get("ShoulderAmplitude"), Some("0.7"));
+        assert_eq!(get("Speed"), Some("0.6"));
+        assert_eq!(get("NoiseLevel"), None);
+        // The event's own attributes win over a parameter of the same name.
+        assert_eq!(get("priority"), Some("2"));
     }
 
     /// A crate placed at (3, 2, 0) and turned 90° about Y, with a start pose, a mass

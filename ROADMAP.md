@@ -20,7 +20,7 @@ each other, and [what's next](#next-up). Each open item is, or will become, a Gi
 | Open endorphin files | – | ✅ `.ens`, `.nmc`, `.nma` (160 of 163 bundled files) |
 | Physics engine | Karma, 120 Hz, stiff muscles | ✅ own engine, 120 Hz, deterministic on one machine; all 16 sample scenes checked clean over their whole range |
 | Event types | 9 | 🟡 7 of 9 (no motion transfer; behaviours partly) |
-| Behaviours | a library of them | 🟡 5 (Balance with stepping, Stagger, CatchFall, BodyFoetal, Writhe) |
+| Behaviours | a library of them | 🟡 6 (Balance with stepping, Stagger, CatchFall, BodyFoetal, Writhe, Explosion) |
 | Your own characters | yes (rigs, motion transfer) | ⬜ only endorphin's own `.nmc` characters |
 | Import motion capture | yes | ⬜ |
 | Export | FBX, BVH | 🟡 FBX and BVH |
@@ -111,8 +111,19 @@ scenes then run something sensible.
   hasn't been compared with endorphin
 - ✅ **Writhe** and **Body foetal** ([#10](https://github.com/Rick007110/NeuroMotion/issues/10)):
   tested on the placeholder; not yet compared with endorphin
+- ✅ **Explosion** ("Writhe in mid-air", 8 scenes with its 2.5 name WritheInMidAir):
+  arms flapping, legs pedalling, back arched while in the air, limp once landed;
+  matched to a recording of endorphin's behaviour scene and reads its event settings.
+  In Car Hit the pedestrian now flies as high as endorphin's (1.75 m at frame 68,
+  endorphin 1.81) and lands where it does
+  ([details](docs/behaviours.md#explosion-writhe-in-mid-air))
+- ✅ **Behaviour settings imported**: each behaviour event keeps its parameters
+  (`Speed`, `Strength`, ...) on its clip; Explosion reads them, the others don't yet
+- ✅ **Arms found on endorphin's characters**: the limb finder took the collarbone for
+  the upper arm on every imported character (their forearms are split in two), so
+  CatchFall, BodyFoetal and Writhe moved the collarbones; fixed
 - ⬜ The rest of the library, in the inventory's order by scenes using them: Look and
-  Reach (11), Explosion (7), JumpDive, Jump and LandCrouch (5), Legs Kick and Arms
+  Reach (11), JumpDive, Jump and LandCrouch (5), Legs Kick and Arms
   Windmill (4 each), Tackle and Fall Back and Twist (3 each), the arm poses (8 scenes
   between them), then stiffness, leg straightening and velocity damping
 - ⬜ **Behaviour settings in the inspector**, so animators can tune them, as with other
@@ -193,8 +204,9 @@ What moves NeuroMotion closest to endorphin quality now, in order:
 2. **Active poses as endorphin applies them** ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)): how a pose eases in, what
    holds a joint after its pose ends and how strength scales the muscles. This is
    what keeps Back-Flip-To-Combo from standing until its flip.
-3. **Explosion and the other missing behaviours** in the inventory's order (Look and
-   Reach, Explosion, JumpDive); Car Hit's flight over the car needs Explosion.
+3. **The other missing behaviours** in the inventory's order (Look and Reach,
+   JumpDive). Explosion is done; Car Hit's flight now matches endorphin's height and
+   landing place, turning over a few frames early.
 4. **Balance and Stagger on Coulomb friction**, and sideways stepping
    ([#9](https://github.com/Rick007110/NeuroMotion/issues/9)).
 5. **Import BVH and FBX** ([#25](https://github.com/Rick007110/NeuroMotion/issues/25)) and the **3D viewport**

@@ -15,13 +15,19 @@ A behaviour runs for the span of an event clip of kind `Behaviour`, matched by i
 `behaviourName` setting, which imported endorphin events carry (the clip's own name
 when it's missing). Matching ignores case, spaces and punctuation, so `CatchFall`
 and `catch fall` both work. `BodyFoetal` also answers to `foetal`, `fetal` and
-`bodyfetal`, and `BodyWrithe` to Writhe. endorphin's scenes name behaviours after the
+`bodyfetal`, `BodyWrithe` to Writhe, and `Explosion` to `WritheInMidAir` and
+`Writhe in mid-air` (its 2.5 name and the name endorphin shows; plain Writhe stays
+Writhe). endorphin's scenes name behaviours after the
 set they come from and add a version, as in `Bob2: Balance 2.5`: the part up to the
 last `:` and a trailing version number are dropped first. (Until this was added, no
 imported scene's behaviour ran at all.) Where several overlap, the one that starts
 last wins.
 Names with no controller yet are ignored: the
 character keeps doing what the timeline otherwise asks.
+
+Explosion reads the settings on its event (below); the others don't read any yet.
+The importer keeps a behaviour's parameters on its clip under endorphin's own names
+(`Speed`, `Strength`, ...; see [endorphin-formats.md](endorphin-formats.md)).
 
 The behaviour starts from the targets and strengths the timeline gives (active pose,
 active animation, or the pose held since simulation began) and changes what it needs
@@ -303,6 +309,129 @@ Results (test `writhe_keeps_moving_and_is_deterministic`): after 3 s, 14 of the
 placeholder's 17 bodies still move at over 0.1 m/s (mean 0.25 m/s), no NaN, joints
 stretched at most 1.4 mm, fastest body 5.8 m/s. Two runs give bit-identical bodies.
 
+## Explosion (Writhe in mid-air)
+
+Goal: endorphin's "Writhe in mid-air", a character thrown through the air (blown up,
+hit by a car, kicked) flailing until it lands. endorphin 2.0 calls the behaviour
+`Explosion`, 2.5 `WritheInMidAir`; both show as "Writhe in mid-air". Seven scenes use
+it: Car Hit and its two tutorial copies (frames 48-60, as the pedestrian goes over the
+car), Car Crash, Multi Martial (three times), Bridge Escape and the behaviour scene
+itself.
+
+### What endorphin does
+
+Measured from a recording of endorphin's behaviour scene, "Writhe in mid-air 2.5"
+(two characters let go 4 m up, its feet at 4.0 m; Amplitude and Speed 0.6, Strength
+0.5, BackArch 1, HeadTurn 0.6), frame by frame with its frame counter. The left
+character starts in a T-pose:
+
+- **Arms.** Both arms swing up and down together, from out to the sides: up to about
+  +35° (+38° for one arm) between frames 20 and 30, down to -40° to -58° at 42-46,
+  coming back up (-25°) at 52. One cycle is about 45-50 frames (0.8 s). The two arms
+  move nearly together, one a few frames behind the other. Elbows bend as the arms
+  come up, a forearm folding in over the head around frames 30-38.
+- **Legs.** Small: the knees bend about 30° and the legs part a little between
+  frames 14 and 28, then straighten.
+- **Trunk.** No visible curl. Seen from the front, an arch backwards can't be measured;
+  in Car Hit the pedestrian stretches out face down over the bonnet, back arched and
+  legs trailing (frames 54-58).
+- **Rotation.** None: it falls upright, as it started, until it lands.
+- **Landing.** Feet first at frame 56-58, then it goes over backwards onto its back,
+  flat by about frame 70, and lies still: frames 118-142 are identical.
+
+The settings scenes use (from their events): Speed 0.3-0.8, Strength 0.5-1,
+ShoulderAmplitude 0.3-0.8, ElbowAmplitude 0.3-0.6, LegAmplitude 0.3-1, BackArch 0 or
+1, HeadTurn 0.6, PhaseOffset 0; WritheInMidAir has one Amplitude instead of the three.
+
+### Design
+
+An original design: every target a sine of the time since the event began
+(`Drive::elapsed`), at a rate of 12 rad/s × Speed (7.2 rad/s, 52 frames a cycle, at
+Speed 0.6), plus PhaseOffset cycles. Nothing is remembered between ticks.
+
+1. **Arms** are aimed in the chest's frame (as Catch fall's are, so a T-pose rig and
+   one resting with its arms down work alike): out to the sides, swung up and down
+   together by ±1.1 × ShoulderAmplitude rad. Both arms move together, so their swing
+   doesn't turn the body. The forearms bend by up to 1.5 × ElbowAmplitude rad, most
+   just after the arms are highest, bringing the hands in over the head.
+2. **Legs** pedal in turn: hips ±0.6 × LegAmplitude rad, knees bending up to
+   1.0 × LegAmplitude rad as their hip comes forward, each spread 0.15 rad to its side.
+3. **Trunk** arches backwards by 0.4 × BackArch rad, shared by its joints (neck and head
+   included); the head turns from side to side by ±0.5 × HeadTurn rad at half the rate.
+4. **Muscles** are the rig's `Normal` preset × Strength. The arms are damped critically
+   for the limb they swing (like Balance's swinging leg): with the preset's damping,
+   tuned to hold poses against the ground, they barely moved (±20°). The legs keep the
+   preset's damping: damped critically, they kicked Car Hit's pedestrian off the
+   bonnet, its centre of mass rising to 2.2 m instead of endorphin's 1.8.
+5. **Only in the air.** While any of its bodies pushes on something else (the ground,
+   scenery, another character, from the contacts of the last substep: `World::pressing`)
+   the flailing stops and the pose holds. On the bonnet, flailing pushed Car Hit's
+   pedestrian along the car, landing it 0.5 m ahead of endorphin's and 10 frames early.
+6. **Landing.** The lower its lowest body is over the last 0.35 m above the ground
+   plane (from 0.5 to 0.15 m), the weaker its legs; lying down near the ground (the
+   trunk tilted 46° to 74° from upright), all its muscles fade out, so it lies still.
+   Holding the pose, even at a third of the strength, it sat up again or rolled over
+   for a second or more; with only the trunk's tilt deciding, it stood on its feet in
+   some runs. The legs keep their strength for the first 0.25 s, so a character the
+   behaviour starts on while it stands (Multi Martial kicks two) keeps its feet: going
+   limp there, one had its hand crushed by its attacker's keyed arm (21 cm of
+   stretch).
+
+### Results
+
+The stand-in `mid_air` drops a character from 4 m running Explosion with the 2.5
+scene's settings, imported the way endorphin writes them (`Bob2: WritheInMidAir 2.5`).
+On a rig like endorphin's (clavicles, forearm twists, resting in a T-pose; test
+`explosion_flails_in_mid_air_like_endorphins`):
+
+| | endorphin (video) | NeuroMotion |
+|---|---|---|
+| Arms highest | +35-38° at frames 20-30 | +44° at frame 24 |
+| Arms lowest | -40° to -58° at 42-46 | -56° at frame 50 |
+| Turned in the air | none visible | pelvis 9° (the arch) |
+| Lands | feet first, frame 56-58 | feet first (toes), frame 54 |
+| Then | on its back by ~70, still | trunk 89° from upright, bodies moving 0.01 m/s at frames 190-210 |
+
+Limp, the same character drops with its arms still out (within 0.1°) and lands
+sprawled. On the placeholder, whose arms hang at rest, the arms come up to +24° and
+swing down to -34° (`explosion_works_on_the_placeholder_and_is_deterministic`), and two
+runs are bit-identical. The numbers in the air don't move when the drop height is
+nudged by up to ±5 cm; the landing settles the same way in all 11 nudged runs (trunk
+89-90°, at most 0.02 m/s).
+
+In endorphin's own scene, with its characters, NeuroMotion's left character's arms
+reach +44° at frame 16 and -40° at 40; it lands feet first at 55, is on its back
+(trunk about 90° from upright) by frame 80-90 and still from about 92. Before, both
+characters fell with their arms out and landed limp.
+
+**Car Hit** (key numbers from the frame-by-frame comparison with endorphin's run):
+
+| | endorphin | before | Explosion |
+|---|---|---|---|
+| Centre of mass highest | 1.81 m at frame 68 | 1.49 m at 64 | 1.75 m at 68 |
+| Centre of mass x at frames 68 / 78 / 88 | 0.02 / -0.11 / -0.11 m | -0.14 / -0.15 / -0.17 m | 0.03 / 0.05 / 0.06 m |
+| Upside down | frames 76-88 | about 74 | about 75 |
+| First touches the ground | feet first, about frame 96, at -0.3 to -0.44 m | frame 90 (toes), at -0.17 m | feet coming down at 96 (toes' centres 7 cm up), then the hands, at frame 100, at -0.31 m |
+
+So the flight is higher and longer, as endorphin's is, and lands in the same place.
+NeuroMotion already turned the pedestrian over head first before (the trunk turned
+360°, with the car and "Guide character to roll"); it still turns over a few frames
+early, and drifts slightly forward (+0.06 m) where endorphin's drifts back (-0.11 m).
+What remains may lie elsewhere: BodyFoetal (frames 60-105) and the landing animation's
+priorities, which NeuroMotion doesn't use yet.
+
+### Not yet
+
+- **HeadTurn** and **BackArch** couldn't be checked: the recording shows the characters
+  from the front. The side-to-side head turn and the 0.4 rad arch are guesses at what
+  the names mean.
+- endorphin's arms rise a little later (highest at 20-30, ours at 16-24) and fall
+  faster than a sine; matching the shape would need more than one recording.
+- `Strength` scales the `Normal` preset, as everywhere else; how endorphin scales it
+  isn't known.
+- Landing goes limp; whether endorphin's characters keep any muscle on the ground
+  isn't known (they lie still either way).
+
 ## Solver changes behind them
 
 Balance exposed a limit in the spring cap (lesson 4 in `physics-design.md`): an
@@ -322,5 +451,6 @@ The rest of endorphin's library still needs designs: protective reactions (prote
 head, brace for impact), reaching and grabbing, looking at a target, hit and shot
 reactions, and others found in imported scenes. [behaviour-inventory.md](behaviour-inventory.md)
 lists what the sample scenes use and ranks the missing ones (Look and Reach, 11 scenes,
-comes first). Behaviour event settings (strengths, speeds, targets) aren't read yet;
-that comes before tuning any of them against endorphin. See [ROADMAP.md](../ROADMAP.md), milestone 2.
+comes first). Behaviour event settings are imported now; only Explosion reads them
+so far, and the other behaviours' settings (strengths, speeds, targets) come before
+tuning them against endorphin. See [ROADMAP.md](../ROADMAP.md), milestone 2.

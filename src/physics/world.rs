@@ -565,6 +565,21 @@ impl World {
             })
     }
 
+    /// Whether any of `bodies` pushed on something outside them (another body, scenery
+    /// or the ground) in the last substep. Only answers yes or no, so the cache's order
+    /// doesn't matter.
+    pub fn pressing(&self, bodies: std::ops::Range<usize>) -> bool {
+        let inside = |s: u32| {
+            self.shapes
+                .get(s as usize)
+                .and_then(|s| s.body)
+                .is_some_and(|b| bodies.contains(&b))
+        };
+        self.contact_cache
+            .iter()
+            .any(|(&(a, b, _), impulse)| impulse[0] > 0.0 && inside(a) != inside(b))
+    }
+
     /// Advances the world by `dt` seconds.
     pub fn step(&mut self, dt: f32) {
         let h = dt / SUBSTEPS as f32;
