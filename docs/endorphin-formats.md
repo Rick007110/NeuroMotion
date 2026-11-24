@@ -28,8 +28,42 @@ installed in the default location.
 ## What gets converted, and how
 
 **Scene settings.** The frame rate is the scene's output rate (usually 60 fps, sometimes
-30). The frame range is the scene's playback range; if that is empty, the range is
-taken from the events.
+30). The frame range starts at the scene's playback range start and ends at the later
+of its playback range end and the end of the run endorphin simulates: the engine's
+`numTicksToRun` physics ticks at its simulation rate, converted to frames
+(`ticks / simulation rate * fps`). A scene that sets no run length carries
+`numTicksToRun="10000"`, which is the default and not a length (83 s at 120 Hz), so
+those scenes keep their playback range. If the playback range is empty, the range is
+taken from the events. The engine block also holds a viewable range (always 0-0 in the
+samples) and a save range (always equal to the playback range, except Bridge Escape,
+which saves from frame 0); they aren't used.
+
+The playback range is only what the timeline's loop shows; endorphin simulates and plays
+on to the end of the run. Car Hit's character finishes standing up between frames 162
+and 200, so a range cut at the playback end loses the last 0.63 s of it. Range by sample
+scene (old: playback range; new: with the run length; fps and ticks as stored):
+
+| Sample scene | `numTicksToRun` | Old range | New range |
+|---|---|---|---|
+| Arrows | 10000 (default) | 0-178 | 0-178 |
+| Balcony | 10000 (default) | 0-302 (from the events: playback range empty) | 0-302 |
+| Bendy Stick | 10000 (default) | 0-24 | 0-24 |
+| Bridge Escape (Large File) | 1256 | 1-618 | 1-628 |
+| Car Crash | 640 | 0-119 | 0-160 |
+| Car Hit | 400 | 0-162 | 0-200 |
+| Catch Rope | 10000 (default) | 0-322 | 0-322 |
+| Catch Run | 10000 (default) | 0-148 | 0-148 |
+| Gymnast Rings | 1200 | 0-500 | 0-600 |
+| Heli Leap | 10000 (default) | 0-88 | 0-88 |
+| Multi Martial | 850 | 2-228 | 2-425 |
+| Rotating Floor | 10000 (default) | 0-370 | 0-370 |
+| Stagger Walk | 600 | 0-208 | 0-300 |
+| Sword Play | 440 | 0-160 | 0-220 |
+| Tackle | 250 | 0-104 | 0-125 |
+| Trapeze | 1200 | 0-488 | 0-600 |
+| Walk With Gun | 600 | 0-218 | 0-300 |
+
+Seen on endorphin 2.5.2's sample scenes (Bendy Stick, Car Crash and Heli Leap run at 30 fps, the rest at 60; all simulate at 120 Hz). Car Crash's 640 ticks are 160 frames at 30 fps. The two password-protected tutorials aren't readable.
 
 **Characters.** Each character, prop and the environment becomes a NeuroMotion
 character, with its endorphin name kept (`character01`, `prop01`, `background`) because
