@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use glam::{Mat3, Quat, Vec3};
 
 use super::collide::{self, Placed};
-use crate::document::physics::{ContactModel, Gains, Geometry, Interaction, Limits};
+use crate::document::physics::{ContactModel, Gains, Geometry, Interaction, Limits, SpringCap};
 
 pub const SUBSTEPS: usize = 4;
 const ITERATIONS: usize = 4;
@@ -38,11 +38,25 @@ const RESTITUTION_THRESHOLD: f32 = 0.5;
 /// foot's ankle muscle moves the whole body above it, not the foot.
 const MAX_SPRING_HERTZ: f32 = 30.0;
 
-/// Scales stiffness and damping down together so the spring's natural frequency on an
-/// effective inverse mass `inv_mass` stays under `MAX_SPRING_HERTZ`.
-fn cap_spring(stiffness: f32, damping: f32, inv_mass: f32) -> (f32, f32) {
-    let omega = 2.0 * std::f32::consts::PI * MAX_SPRING_HERTZ;
-    let max_stiffness = omega * omega / inv_mass.max(1e-12);
+/// With `SpringCap::Limbs`, a muscle may also be as stiff as this natural frequency on the
+/// whole limb it moves against the rest of the body, if that allows more: a clavicle
+/// holding an arm out, a knee in a crouch holding the body above it. Sequential impulses
+/// solve a muscle with only its joint's two bodies, so this stays well under
+/// `MAX_SPRING_HERTZ`: at 30 Hz Car Hit's pedestrian, curled up on the bonnet, opened a
+/// knee by 6.2 cm; at 10 Hz 2.7 cm, at 5 Hz 2.2 cm (2.9 cm with the two-body cap alone).
+/// Back-Flip-To-Combo crouches as endorphin's does at anything from 3 Hz up.
+const MAX_LIMB_HERTZ: f32 = 5.0;
+
+/// Stiffest spring (N·m/rad) with a natural frequency of `hertz` on an effective inverse
+/// mass `inv_mass`.
+fn spring_ceiling(hertz: f32, inv_mass: f32) -> f32 {
+    let omega = 2.0 * std::f32::consts::PI * hertz;
+    omega * omega / inv_mass.max(1e-12)
+}
+
+/// Scales stiffness and damping down together so the spring stays under
+/// `max_stiffness`.
+fn cap_spring(stiffness: f32, damping: f32, max_stiffness: f32) -> (f32, f32) {
     if stiffness <= max_stiffness {
         return (stiffness, damping);
     }
@@ -260,6 +274,7 @@ pub struct World {
     /// Ground plane height and material.
     pub ground: Option<(f32, usize)>,
     pub contact_model: ContactModel,
+    pub spring_cap: SpringCap,
     material_count: usize,
     /// `interactions[a * material_count + b]`.
     interactions: Vec<Interaction>,
@@ -334,6 +349,8 @@ struct JointRows {
     angular_schur: Mat3,
     /// The same with grounded bodies held still, for capping muscle springs.
     cap_schur: Mat3,
+    /// With `SpringCap::Limbs`: the same for the whole limb against the rest of the body.
+    limb_schur: Option<Mat3>,
     limits: Vec<AngularRow>,
     muscle: Option<MuscleBlock>,
 }
@@ -535,6 +552,7 @@ impl World {
             gravity,
             ground: None,
             contact_model,
+            spring_cap: SpringCap::default(),
             material_count: 0,
             interactions: Vec::new(),
             contact_cache: HashMap::new(),
@@ -803,6 +821,8 @@ impl World {
                 sa.inv_i + sbb.inv_i - k_ap * point_mass * k_pa,
             )
         };
+        // Only for `SpringCap::Limbs`; the default caps by the joint's own two bodies.
+        let limbs = (self.spring_cap == SpringCap::Limbs).then(|| Limbs::new(self, grounded));
         let mut out = Vec::new();
         for (index, joint) in self.joints.iter().enumerate() {
             let (a, b) = (joint.parent, joint.child);
@@ -814,8 +834,9 @@ impl World {
             let rb = bb.rotation * joint.anchor_child;
             let (sa, sbb) = (sb[a], sb[b]);
             let (point_mass, k_pa, k_ap, angular_schur) = blocks(sa, sbb, ra, rb);
-            // Only when one side is grounded: a foot and toe both on the ground are still
-            // just a foot and a toe.
+            // The two bodies the joint connects, a grounded one held still unless both
+            // are: a foot and toe both on the ground are still just a foot and a toe
+            // (lesson 9).
             let still = |s: SolverBody| SolverBody {
                 inv_mass: 0.0,
                 inv_i: Mat3::ZERO,
@@ -826,6 +847,19 @@ impl World {
                 (false, true) => blocks(sa, still(sbb), ra, rb).3,
                 _ => angular_schur,
             };
+            // What the muscle moves as a whole: the limb hanging from the joint against
+            // the rest of the body, a side resting on the ground or scenery held still.
+            let limb_schur = limbs.as_ref().map(|limbs| {
+                let (limb, rest) = limbs.sides(b);
+                let anchor = ba.position + ra;
+                blocks(
+                    rest.as_body(),
+                    limb.as_body(),
+                    rest.lever(anchor),
+                    limb.lever(anchor),
+                )
+                .3
+            });
             let mut rows = JointRows {
                 joint: index,
                 a,
@@ -839,6 +873,7 @@ impl World {
                 k_ap,
                 angular_schur,
                 cap_schur,
+                limb_schur,
                 limits: Vec::new(),
                 muscle: None,
             };
@@ -872,7 +907,7 @@ impl World {
             let (k, c) = cap_spring(
                 joint.soft_stiffness,
                 joint.soft_damping,
-                coupled_inv_mass(axis),
+                spring_ceiling(MAX_SPRING_HERTZ, coupled_inv_mass(axis)),
             );
             (k + c > 0.0).then(|| {
                 let denom = c + h * k;
@@ -956,11 +991,13 @@ impl World {
                 continue;
             }
             let axis = frame.col(k);
-            let (stiffness, damping) = cap_spring(
-                gains.stiffness,
-                gains.damping,
-                axis.dot(rows.cap_schur * axis),
-            );
+            let mut max_stiffness =
+                spring_ceiling(MAX_SPRING_HERTZ, axis.dot(rows.cap_schur * axis));
+            if let Some(limb) = rows.limb_schur {
+                max_stiffness =
+                    max_stiffness.max(spring_ceiling(MAX_LIMB_HERTZ, axis.dot(limb * axis)));
+            }
+            let (stiffness, damping) = cap_spring(gains.stiffness, gains.damping, max_stiffness);
             let denom = damping + h * stiffness;
             gamma[k] = 1.0 / (h * denom);
             bias[k] = -(stiffness / denom) * error_world.dot(axis);
@@ -2005,6 +2042,189 @@ fn solve_angular(
 
 fn inverse(k: f32) -> f32 {
     if k > 1e-12 { 1.0 / k } else { 0.0 }
+}
+
+/// Mass properties of a set of bodies, summed about the world origin in f64 (positions
+/// are metres from the origin, inertias can be grams times square centimetres).
+#[derive(Clone, Copy, Default)]
+struct Moments {
+    mass: f64,
+    first: glam::DVec3,
+    second: glam::DMat3,
+    /// Bodies the solver doesn't move (keyed or massless) in the set.
+    fixed: usize,
+    /// Bodies resting on the ground or scenery in the set.
+    grounded: usize,
+}
+
+impl Moments {
+    fn of(body: &Body, grounded: bool) -> Self {
+        let mut m = Self {
+            grounded: grounded as usize,
+            ..Self::default()
+        };
+        if !body.is_dynamic() {
+            m.fixed = 1;
+            return m;
+        }
+        let mass = 1.0 / body.inv_mass as f64;
+        let x = body.position.as_dvec3();
+        let r = glam::DMat3::from_quat(body.rotation.as_dquat());
+        let i = body.inv_inertia.as_dvec3().map(|v| 1.0 / v.max(1e-12));
+        let own = r * glam::DMat3::from_diagonal(i) * r.transpose();
+        m.mass = mass;
+        m.first = x * mass;
+        m.second =
+            own + (glam::DMat3::from_diagonal(glam::DVec3::splat(x.dot(x))) - outer(x, x)) * mass;
+        m
+    }
+
+    fn add(self, o: Self) -> Self {
+        Self {
+            mass: self.mass + o.mass,
+            first: self.first + o.first,
+            second: self.second + o.second,
+            fixed: self.fixed + o.fixed,
+            grounded: self.grounded + o.grounded,
+        }
+    }
+
+    fn sub(self, o: Self) -> Self {
+        Self {
+            mass: self.mass - o.mass,
+            first: self.first - o.first,
+            second: self.second - o.second,
+            fixed: self.fixed - o.fixed,
+            grounded: self.grounded - o.grounded,
+        }
+    }
+
+    fn centre(&self) -> glam::DVec3 {
+        if self.mass > 0.0 {
+            self.first / self.mass
+        } else {
+            glam::DVec3::ZERO
+        }
+    }
+
+    /// Offset from the set's centre of mass to `point`.
+    fn lever(&self, point: Vec3) -> Vec3 {
+        (point.as_dvec3() - self.centre()).as_vec3()
+    }
+}
+
+fn outer(a: glam::DVec3, b: glam::DVec3) -> glam::DMat3 {
+    glam::DMat3::from_cols(a * b.x, a * b.y, a * b.z)
+}
+
+/// A set of bodies as one rigid body, for the spring cap: immovable if it holds a fixed
+/// body or `still` says so.
+fn limb_body(set: Side) -> SolverBody {
+    let m = set.moments;
+    if set.still || m.fixed > 0 || m.mass <= 0.0 {
+        return SolverBody {
+            v: Vec3::ZERO,
+            w: Vec3::ZERO,
+            inv_mass: 0.0,
+            inv_i: Mat3::ZERO,
+            carry: 0.0,
+        };
+    }
+    let c = m.centre();
+    let about_centre = m.second
+        - (glam::DMat3::from_diagonal(glam::DVec3::splat(c.dot(c))) - outer(c, c)) * m.mass;
+    SolverBody {
+        v: Vec3::ZERO,
+        w: Vec3::ZERO,
+        inv_mass: (1.0 / m.mass) as f32,
+        inv_i: about_centre.inverse().as_mat3(),
+        carry: 1.0,
+    }
+}
+
+/// One side of a joint, for the spring cap.
+#[derive(Clone, Copy)]
+struct Side {
+    moments: Moments,
+    still: bool,
+}
+
+impl Side {
+    fn lever(&self, point: Vec3) -> Vec3 {
+        self.moments.lever(point)
+    }
+
+    fn as_body(&self) -> SolverBody {
+        limb_body(*self)
+    }
+}
+
+/// For every joint, the bodies hanging from it (its child and everything jointed below
+/// that) and the rest of the jointed group it belongs to.
+struct Limbs {
+    /// Per body: the moments of the body and everything below it.
+    below: Vec<Moments>,
+    /// Per body: the moments of its whole jointed group.
+    group: Vec<Moments>,
+}
+
+impl Limbs {
+    fn new(world: &World, grounded: &[bool]) -> Self {
+        let n = world.bodies.len();
+        let own: Vec<Moments> = world
+            .bodies
+            .iter()
+            .zip(grounded)
+            .map(|(b, &g)| Moments::of(b, g))
+            .collect();
+        // Parent body of each body through an enabled joint (a tree per character).
+        let mut up = vec![usize::MAX; n];
+        for j in world.joints.iter().filter(|j| j.enabled) {
+            if up[j.child] == usize::MAX && j.parent != j.child {
+                up[j.child] = j.parent;
+            }
+        }
+        // Depth, to sum leaves first; a cycle (not expected) stops at n steps.
+        let depth = |mut b: usize| {
+            let mut d = 0;
+            while up[b] != usize::MAX && d < n {
+                b = up[b];
+                d += 1;
+            }
+            (d, b)
+        };
+        let info: Vec<(usize, usize)> = (0..n).map(depth).collect();
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by_key(|&b| std::cmp::Reverse(info[b].0));
+        let mut below = own.clone();
+        for &b in &order {
+            if up[b] != usize::MAX && info[b].0 > 0 {
+                let m = below[b];
+                below[up[b]] = below[up[b]].add(m);
+            }
+        }
+        let group = (0..n).map(|b| below[info[b].1]).collect();
+        Self { below, group }
+    }
+
+    /// The limb hanging from a joint whose child body is `child`, and the rest of its group.
+    /// A side resting on the ground or scenery is held there (lesson 9), whichever it is:
+    /// a toe and the foot above it both on the ground are held by it, as is a lying
+    /// character's limb, so neither needs a soft muscle to stay put.
+    fn sides(&self, child: usize) -> (Side, Side) {
+        let limb = self.below[child];
+        let rest = self.group[child].sub(limb);
+        (
+            Side {
+                moments: limb,
+                still: limb.grounded > 0,
+            },
+            Side {
+                moments: rest,
+                still: rest.grounded > 0,
+            },
+        )
+    }
 }
 
 #[cfg(test)]

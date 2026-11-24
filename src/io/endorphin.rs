@@ -24,7 +24,7 @@ use roxmltree::Node;
 use super::IoError;
 use crate::document::physics::{
     BodyDef, ContactModel, Frame, Gains, Geometry, Ground, Interaction, JointDef, Limits,
-    MuscleGains, MuscleSet, PhysicsRig, ShapeDef,
+    MuscleGains, MuscleSet, PhysicsRig, ShapeDef, SpringCap,
 };
 use crate::document::{
     Channel, CharacterId, CharacterKind, ClipKind, ClipProps, FrameRange, Interp, Joint, Keyframe,
@@ -994,6 +994,8 @@ fn read_physics_settings(project: &mut Project, scene: Node, engine: Node) {
     }
     // endorphin's friction values are Coulomb coefficients × 100 (lesson 21).
     settings.contact = ContactModel::Coulomb;
+    // endorphin's muscles move whole limbs (the lesson on active poses).
+    settings.spring_cap = SpringCap::Limbs;
     settings.ground = (scene.attribute("useDefaultGround") != Some("false")).then(|| Ground {
         height: 0.0,
         material: "tarmac".into(),
@@ -1159,12 +1161,17 @@ fn read_rig(
         let (hard, soft, stiffness, damping) = if tag == "Hinge" {
             hinge_limits(*jn)
         } else {
+            // endorphin's swing1 bounds the turn about the limit frame's Z axis (the
+            // child's axis swinging towards Y) and swing2 the turn about Y: read the other
+            // way round, the active poses endorphin's own scenes store sit up to five
+            // times outside their joints' cones (toes, hands, clavicles, feet, hips),
+            // and this way within them (physics-design.md, lesson on active poses).
             let limits = |tag: &str| {
                 child(*jn, tag).map(|l| {
                     Limits::from_sizes(
                         number(l, "twistSize").unwrap_or(0.0),
-                        number(l, "swing1Size").unwrap_or(0.0),
                         number(l, "swing2Size").unwrap_or(0.0),
+                        number(l, "swing1Size").unwrap_or(0.0),
                     )
                 })
             };
@@ -1728,6 +1735,64 @@ mod tests {
     /// Back-Flip-To-Combo's helper body: a character MetaBody whose inertial body is a
     /// zero-sized Sphyl of density 0. Fixed in place it would hold the character up, so it
     /// gets a token mass; the environment's massless piece stays fixed scenery.
+    /// endorphin's swing1 is the turn about the limit frame's Z axis and swing2 the turn
+    /// about Y: read the other way, the poses its scenes store sit far outside their
+    /// joints' cones. Imported scenes also count whole limbs for the muscle cap.
+    #[test]
+    fn swing_sizes_and_spring_cap() {
+        let rest = matrix(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            [0.0, 0.0, 0.0],
+        );
+        let below = matrix(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            [0.0, -0.4, 0.0],
+        );
+        let limits = |tag: &str, swing1: f32, swing2: f32| {
+            format!(
+                r#"<{tag} btwistSize="{}" bswing1Size="{}" bswing2Size="{}"/>"#,
+                hex(1.0),
+                hex(swing1),
+                hex(swing2)
+            )
+        };
+        let xml = format!(
+            r#"<?xml version="1.0"?>
+<Scene>
+  <Engine bpositionBufferFrameRate="{fps}"><PlaybackRange start="0" end="30"/></Engine>
+  <Characters>
+    <Character name="hero" typeName="skeletalCharacter2.5">
+      <MetaBodies>
+        <MetaBody name="PelvisMass">{rest}
+          <InertialBody><Geometry type="Sphere" bparam0="{r}"/><Inertia density="{one}"/></InertialBody>
+        </MetaBody>
+        <MetaBody name="ThighMass">{below}
+          <InertialBody><Geometry type="Sphere" bparam0="{r}"/><Inertia density="{one}"/></InertialBody>
+        </MetaBody>
+      </MetaBodies>
+      <Skeleton name="Pelvis" metaBody="PelvisMass">{rest}<ChildJoints>
+        <SkeletalJoint name="Thigh" metaBody="ThighMass">{below}{soft}{hard}</SkeletalJoint>
+      </ChildJoints></Skeleton>
+    </Character>
+  </Characters>
+</Scene>"#,
+            fps = hex(30.0),
+            r = hex(0.1),
+            one = hex(1000.0),
+            soft = limits("SoftLimits", 1.5, 0.9),
+            hard = limits("HardLimits", 1.7, 1.1),
+        );
+        let Import { project, .. } = import(&xml);
+        let rig = project.characters[0].physics.as_ref().unwrap();
+        let joint = &rig.joints[0];
+        // Half of each size; swing1 bounds the turn about Z.
+        assert!((joint.soft.swing2 - 0.75).abs() < 1e-5, "{:?}", joint.soft);
+        assert!((joint.soft.swing1 - 0.45).abs() < 1e-5, "{:?}", joint.soft);
+        assert!((joint.hard.swing2 - 0.85).abs() < 1e-5, "{:?}", joint.hard);
+        assert!((joint.hard.swing1 - 0.55).abs() < 1e-5, "{:?}", joint.hard);
+        assert_eq!(project.physics.spring_cap, SpringCap::Limbs);
+    }
+
     #[test]
     fn massless_character_body_gets_a_token_mass_but_scenery_stays_fixed() {
         let rest = matrix(

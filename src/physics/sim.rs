@@ -125,8 +125,10 @@ struct PoseTarget {
     end: i32,
     blend: i32,
     strength: f32,
-    /// Local rotation target per skeleton joint (`None` = not part of the pose).
-    targets: Vec<Option<Quat>>,
+    /// The stored pose: a local rotation per skeleton joint.
+    pose: Vec<Quat>,
+    /// The joints the event drives (all of them if it names none).
+    named: Vec<bool>,
 }
 
 impl Simulation {
@@ -230,6 +232,7 @@ pub fn rig_bodies(rig: &PhysicsRig, joints: &[(Quat, Vec3)]) -> Vec<(Quat, Vec3)
 fn build(project: &Project) -> Running {
     let settings = &project.physics;
     let mut world = World::new(Vec3::from(settings.gravity), settings.contact);
+    world.spring_cap = settings.spring_cap;
 
     // Materials: every name used by the ground or any shape.
     let mut materials: Vec<String> = Vec::new();
@@ -811,18 +814,14 @@ fn plan(project: &Project, character_index: usize) -> Plan {
                     let present: Vec<bool> = (0..skeleton.joints.len())
                         .map(|j| named.is_empty() || named.contains(&j))
                         .collect();
-                    let locals = local_rotations(skeleton, &pose);
                     plan.poses.push(PoseTarget {
                         start,
                         end,
                         blend: number(clip, "entryBlendPeriod")
                             .map_or(0, |s| (s * fps).round() as i32),
                         strength: number(clip, "strength").unwrap_or(1.0),
-                        targets: locals
-                            .into_iter()
-                            .zip(present)
-                            .map(|(q, p)| p.then_some(q))
-                            .collect(),
+                        pose: local_rotations(skeleton, &pose),
+                        named: present,
                     });
                 }
                 _ => {}
@@ -1078,6 +1077,24 @@ fn set_muscles(
             })
             .collect()
     };
+    // A joint no running pose names (a foot, when one event drives the thighs and calves
+    // and another the spine and arms) is held by the pose driving the limb it belongs
+    // to: the one naming its nearest ancestor, at that pose's stored value. Every event
+    // stores the whole body, so the foot gets the angle the author posed with the legs.
+    let driver = |joint: usize| -> Option<usize> {
+        let names = |j: usize| poses.iter().any(|(p, _)| p.named[j]);
+        if names(joint) {
+            return Some(joint);
+        }
+        let mut up = skeleton.joints[joint].parent;
+        while let Some(j) = up {
+            if names(j) {
+                return Some(j);
+            }
+            up = skeleton.joints[j].parent;
+        }
+        None
+    };
     let joints = &binding.rig.joints;
     let (mut targets, mut gains): (Vec<Quat>, Vec<MuscleGains>) = joints
         .iter()
@@ -1086,10 +1103,11 @@ fn set_muscles(
                 .as_ref()
                 .map_or(binding.frozen[jd.joint], |l| l[jd.joint]);
             let mut gains = gains_of(base_set, &jd.muscle, base_strength);
-            for &(p, ramp) in &poses {
-                let Some(pose) = p.targets.get(jd.joint).copied().flatten() else {
-                    continue;
-                };
+            let Some(by) = driver(jd.joint) else {
+                return (target, gains);
+            };
+            for &(p, ramp) in poses.iter().filter(|(p, _)| p.named[by]) {
+                let pose = p.pose[jd.joint];
                 let held = gains_of(pose_set, &jd.muscle, p.strength);
                 target = target.slerp(pose, ramp);
                 gains = MuscleGains {

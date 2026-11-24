@@ -247,6 +247,9 @@ pub struct PhysicsSettings {
     /// Infinite ground plane at this height, if any.
     pub ground: Option<Ground>,
     pub contact: ContactModel,
+    /// What the solver's muscle spring cap counts as the mass a muscle moves.
+    #[serde(default)]
+    pub spring_cap: SpringCap,
     pub interactions: BTreeMap<String, Interaction>,
     /// `(material, material) -> interaction name`, order-insensitive.
     pub pairs: Vec<(String, String, String)>,
@@ -272,6 +275,21 @@ pub enum ContactModel {
     /// endorphin's Default (100) is μ = 1 and its Grippy (300) μ = 3. That is what
     /// endorphin's friction values mean (lesson 21), so imported scenes use it.
     Coulomb,
+}
+
+/// What a muscle spring's 30 Hz cap (docs/physics-design.md, lesson 4) measures the
+/// moved mass by.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpringCap {
+    /// The two bodies the joint connects. NeuroMotion's own default for now: Balance
+    /// and Stagger were tuned on it, and lose their stepping with stronger leg muscles.
+    #[default]
+    Bodies,
+    /// The whole limb hanging from the joint against the rest of the body, as endorphin's
+    /// muscles behave: a clavicle holds the arm up, a knee in a crouch the body above
+    /// it. Imported scenes use it (the lesson on active poses).
+    Limbs,
 }
 
 /// How two materials behave when they touch.
@@ -304,6 +322,7 @@ impl Default for PhysicsSettings {
                 material: "tarmac".to_owned(),
             }),
             contact: ContactModel::ForceCapped,
+            spring_cap: SpringCap::Bodies,
             interactions,
             pairs: vec![
                 ("rubber".into(), "tarmac".into(), "Grippy".into()),
