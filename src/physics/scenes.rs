@@ -1460,6 +1460,89 @@ pub fn bendy_stick() -> Project {
     p
 }
 
+/// Gun drop: Walk With Gun's pattern. A character holds a 550 kg prop in both hands,
+/// joined to them (1e5 N, 1e4 N·m) the way the scene's `JoinBodies` does, and drops
+/// with it onto the ground. The fingers hang a few centimetres below the prop's
+/// underside, so once it lands they are between the hand it holds and the ground:
+/// either the hand turns out of the way or the prop rests on them. Coulomb friction,
+/// as an imported scene has it (lesson 21).
+pub fn gun_drop() -> Project {
+    gun_drop_nudged(0.0)
+}
+
+/// Gun drop with the prop's mass changed by the relative amount `nudge`, to see how
+/// much a test's numbers move when the scene does (`nudges`).
+pub fn gun_drop_nudged(nudge: f32) -> Project {
+    let mut p = new_scene("Gun drop", 3.0);
+    p.physics.contact = ContactModel::Coulomb;
+    let pose = [
+        ("l_shoulder", Property::RotX, -75.0),
+        ("r_shoulder", Property::RotX, -75.0),
+        ("l_elbow", Property::RotX, -30.0),
+        ("r_elbow", Property::RotX, -30.0),
+    ];
+    // endorphin's fingers weigh 0.39 kg each; the stand-in's default is lighter.
+    let (skeleton, mut rig) = person_rig();
+    for side in ["l", "r"] {
+        let i = rig.body_index(&format!("{side}_fingers")).unwrap();
+        let body = &mut rig.bodies[i];
+        body.mass = 0.39;
+        body.inertia = body.shapes[0].geometry.inertia(body.mass);
+    }
+    let holder = add_person(&mut p, "holder", (skeleton, rig), Vec3::ZERO, 0.0, &pose);
+    // The prop sits between the hands, its underside 3 cm above the fingers' centres:
+    // the fingers reach below it, as in the scene.
+    let (_, left) = body_pose(&p, holder, "l_wrist", 0.0);
+    let (_, right) = body_pose(&p, holder, "r_wrist", 0.0);
+    let fingers = [
+        body_pose(&p, holder, "l_fingers", 0.0).1.y,
+        body_pose(&p, holder, "r_fingers", 0.0).1.y,
+    ];
+    let size = Vec3::new((left - right).length() + 0.1, 0.12, 0.12);
+    let mut centre = (left + right) / 2.0;
+    centre.y = fingers[0].max(fingers[1]) + 0.03 + size.y / 2.0;
+    let rigid = Limits {
+        twist_min: 0.0,
+        twist_max: 0.0,
+        swing1: 0.0,
+        swing2: 0.0,
+    };
+    let none = Gains {
+        stiffness: 0.0,
+        damping: 0.0,
+        force_limit: 0.0,
+    };
+    let gun = Piece::at(
+        Geometry::Box {
+            size: size.to_array(),
+        },
+        550.0 * (1.0 + nudge),
+        Quat::IDENTITY,
+        Vec3::ZERO,
+    );
+    add_prop(
+        &mut p,
+        "gun",
+        CharacterKind::Prop,
+        prop_rig(vec![("body", None, centre, gun)], rigid, none),
+        SimLevel::Simulated,
+    );
+    constrain(
+        &mut p,
+        holder,
+        0,
+        180,
+        "JoinBodies",
+        &[
+            "gun.MetaBodies.body",
+            "holder.MetaBodies.r_wrist",
+            "holder.MetaBodies.l_wrist",
+        ],
+        (STRONG, Vec3::splat(1e4)),
+    );
+    p
+}
+
 /// Heli Leap: a heavy helicopter (fuselage, tail boom, skids) held in the air by a
 /// Lock; a character jumps off its roof and falls to the ground.
 pub fn heli_leap() -> Project {
@@ -2427,6 +2510,7 @@ mod tests {
             "catch_rope" => catch_rope(),
             "gymnast_rings" => gymnast_rings(),
             "bendy_stick" => bendy_stick(),
+            "gun_drop" => gun_drop(),
             "heli_leap" => heli_leap(),
             "rotating_floor" => rotating_floor(),
             "turntable" => turntable(),
@@ -3099,6 +3183,73 @@ mod tests {
             "still {} m/s 6 frames after landing",
             after[0]
         );
+    }
+
+    /// What the gun drop measures: the lowest finger centre above the ground, m, how far
+    /// either hand got from where its join holds it on the prop, m, and how far it turned
+    /// away from the prop, degrees.
+    fn gun_drop_numbers(project: &Project, sim: &Simulation) -> (f32, f32, f32) {
+        let holder = project
+            .characters
+            .iter()
+            .position(|c| c.name == "holder")
+            .unwrap();
+        let gun = project
+            .characters
+            .iter()
+            .position(|c| c.name == "gun")
+            .unwrap();
+        let rig = project.characters[holder].physics.as_ref().unwrap();
+        let body = |name: &str| rig.body_index(name).unwrap();
+        let at = |frame: i32, ci: usize, bi: usize| {
+            sim.frame(frame).unwrap()[ci].as_ref().unwrap().bodies[bi]
+        };
+        let (mut low, mut gap, mut turn) = (f32::MAX, 0.0f32, 0.0f32);
+        for side in ["l", "r"] {
+            let hand = body(&format!("{side}_wrist"));
+            let finger = body(&format!("{side}_fingers"));
+            let held = |frame: i32| {
+                let (gr, gp) = at(frame, gun, 0);
+                let (hr, hp) = at(frame, holder, hand);
+                (gr.inverse() * (hp - gp), gr.inverse() * hr)
+            };
+            let (start, start_turn) = held(0);
+            for frame in 1..=project.settings.range.end {
+                low = low.min(at(frame, holder, finger).1.y);
+                let (offset, rotation) = held(frame);
+                gap = gap.max(offset.distance(start));
+                turn = turn.max((start_turn.inverse() * rotation).to_scaled_axis().length());
+            }
+        }
+        (low, gap, turn.to_degrees())
+    }
+
+    /// Walk With Gun's pattern: a character holding a 550 kg prop drops with it. The
+    /// fingers hang below the prop's underside, so on landing they are between the
+    /// hand that holds the prop and the ground. Contacts are soft at a fixed frequency,
+    /// which makes their stiffness go with the finger's own 0.39 kg rather than with
+    /// what presses on it: the finger sank 1.4 cm into the ground (2.5 cm in the scene
+    /// with Coulomb friction). Contacts against the ground now join the direct solve
+    /// of a group with a lock in it (Walk With Gun lesson).
+    /// Over the nudged runs (the prop's mass ±4e-4) the finger stays above the ground.
+    #[test]
+    fn gun_drop_keeps_the_fingers_out_of_the_ground() {
+        for nudge in nudges() {
+            let project = gun_drop_nudged(nudge);
+            let (sim, elapsed) = simulate(&project);
+            let report = measure(&project, &sim, elapsed);
+            let (low, gap, turn) = gun_drop_numbers(&project, &sim);
+            println!(
+                "Gun drop ({nudge:+.0e}): {report}\n{}  lowest finger {low:.4} m, hand off the prop by {gap:.4} m and turned {turn:.1}°",
+                report.places()
+            );
+            assert!(report.ok(), "{report}\n{}", report.places());
+            assert!(low > -0.005, "a finger sank to {low} m (nudge {nudge})");
+            assert!(
+                gap < 0.02,
+                "a hand came {gap} m off the prop (nudge {nudge})"
+            );
+        }
     }
 
     /// endorphin's Car Hit: a heavy car joined to a keyed carrier catches the
@@ -3795,6 +3946,12 @@ mod endorphin_scenes {
         for path in paths {
             let name = path.file_stem().unwrap().to_string_lossy().into_owned();
             if name.contains("Large File") {
+                continue;
+            }
+            // `NM_SCENES=Car,Rope` sweeps only scenes whose names contain one of these.
+            if let Ok(only) = std::env::var("NM_SCENES")
+                && !only.split(',').any(|part| name.contains(part.trim()))
+            {
                 continue;
             }
             // The whole range: a scene can go wrong long after its first seconds.

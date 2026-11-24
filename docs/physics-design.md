@@ -40,8 +40,11 @@ Each tick (1/rate s) runs 4 substeps. Each substep:
    - bodies that locks tie together, with the joints between them, solved directly as
      one system (lesson 12), and the same for characters something much heavier
      presses on (lesson 15) or with a joint open more than 1.5 cm (lesson 17);
-   - contact normals, as *soft* constraints (frequency and damping ratio);
-   - friction.
+   - contact normals, as *soft* constraints (frequency and damping ratio), and
+     friction;
+   - groups with a lock that nothing pins (not held to the world or a keyed body),
+     solved directly again, now with the ground and scenery contacts that carry their
+     load as one-sided rows (the Walk With Gun lesson).
 5. Integrate positions.
 6. Relax: one pass without position bias, so error correction doesn't add energy.
    Lock axes still at their strength after step 4 are left as they are (lesson 20).
@@ -642,6 +645,93 @@ from 0.90 m to 0.52 m over frames 54-62 and the jumper steps off the roof's edge
     of the animation. `transition_keeps_bones_whole` still holds (0.04 cm in the
     transition).
 
+N. (number to be assigned at integration) **A group a lock closes a loop in is solved
+    directly after the contacts, and the ground contacts that carry its load join the
+    solve.** After the Coulomb change (lesson 21) the full-range sweep showed Walk With
+    Gun's hands' join drifting up to 14.6 cm (frame 65) and a finger 2.5 cm in the ground
+    (frame 36), as the character falls with its 549 kg gun. Both passed the sweep's
+    checks, and they are two different problems:
+    - **Friction only showed the finger.** Bisecting the full range: before lesson 21 the
+      drift was 2.6 cm and no finger more than 0.1 cm under the ground; with Coulomb friction (`e71cb6c`) the
+      finger sank to -2.4 cm and the drift was 6.6 cm at frame 37; with lesson 19's
+      active poses merged, 14.5 cm at frame 65. Run with force-capped friction on
+      today's tree, the drift is 11.3 cm at frame 106: the same wobble at another time.
+      So the drift is a weakness the scene was always near, and lesson 21 only moved it.
+    - **The drift is the left hand turning, not the join stretching.** The sweep measures
+      the right hand in the left hand's frame (the join chains `[gun, right hand, left
+      hand]` to the last), and each hand stayed within 1 cm of the gun. What moved is the
+      left hand's angle to the gun: 8, 16, 8, 20 and 10° over frames 62-66, then 0, over
+      and over, while the lock's angular rows used 2-8% of their 1e4 N·m (so not
+      lesson 20's case: the lock could hold it easily). A 0.5 kg hand has a moment of
+      inertia of the order of 3e-4 kg·m². Its forearm pressed on it (5 mm overlap, about 1 N·s a
+      substep; the right forearm took 5 N·s from the gun), and each iteration the
+      group's direct solve cancelled the hand's motion against the gun exactly, then
+      the contact pass, last, pushed the hand about as if only its half kilo mattered.
+      That left the lock rows violated at the end of every iteration, and of the relax
+      pass; the hand turned at 5 rad/s on average until the next substep's direct solve
+      snapped it back. Dropping that one contact (the left forearm and hand) in an
+      experiment leaves a drift of 1.1 cm. It is lesson 15's remark, "the contacts, solved last,
+      win", for a loop of locks.
+    - **The finger sank because a contact's softness goes with the body's own mass.**
+      Contacts are soft constraints at 60 Hz: a spring of ω² times the row's effective
+      mass, which for a 0.39 kg finger is 55 kN/m. The gun lands on the hands, whose
+      fingers hang 3 cm below its underside, so the finger is between the hand the lock
+      holds and the ground and carries the gun's weight through the lock: 4.4 N·s per
+      substep (2 kN) on each of its two contacts (the ground and the scenery slab under
+      it), 3 to 4 cm of sag. With force-capped friction the finger slid out from under
+      the gun, the hand turning 12.7° away; Coulomb friction grips it where it is.
+      Doubling the contacts' frequency lifted the finger to 0.1 cm above the ground but
+      made the drift worse (25 cm), which is how the two were told apart.
+    Two changes:
+    - Each iteration the order is now joints, locks, the direct solves of groups that a
+      lock holds to the world or a keyed body ("pinned", and groups solved for a
+      crushing body or an open joint: lessons 12, 15 and 17), contacts, and last the
+      direct solves of the groups with a lock that nothing pins, the same in the relax
+      pass. Moving the pinned ones too made Car Hit's pedestrian ride the bonnet (centre
+      of mass x +1.84 m at frame 88, endorphin's -0.11 m), the car keeping its speed
+      through them; Bendy Stick and Gymnast Rings are pinned, and unchanged.
+    - A contact of such a group against the ground or massless scenery that pushed last
+      substep and still touches becomes a one-sided row of its direct solve (rigid,
+      impulse at least minus the adhesion; a row that would pull is dropped, and the
+      contact pass takes the contact back). Its friction stays in the contact pass. Rows
+      between two bodies of the group are left out: a gun pressing on the forearms
+      it is held beside made opposing impulses of 29 to 34 N·s per contact (stress) and
+      threw a leg at 10 m/s; rows against keyed bodies too: Bendy Stick's stick, held to
+      the world, drifted 5.4 cm instead of 0.8.
+
+    | Walk With Gun, full range | Before | After |
+    |---|---|---|
+    | Hands' join, largest drift | 14.6 cm (frame 65) | 0.7 cm |
+    | Lowest body | -2.5 cm (a finger, frame 36) | +1.4 cm |
+    | Max joint stretch | 0.76 cm | 0.18 cm |
+    | Either hand's angle to the gun, largest | 19.8° | 0.5° |
+
+    The sweep stays 16 of 16 clean. Of the 16, eleven print the same numbers; the others
+    (every one a scene with a lock that nothing pins, over its whole range): Arrows'
+    stretch 1.27 to 0.47 cm; Balcony's 0.78 to 1.65 cm, its drift 3.1 to 0 cm and its
+    fastest body 20.2 to 11.0 m/s; Catch Rope's 1.12 to 0.80 cm, its drift 1.2 cm to 0;
+    Sword Play's drift 1.4 to 0.2 cm; Walk With Gun as above. These are chaotic scenes
+    (a crowd, a rope cut at frame 160), so the stretch moving either way by a few
+    millimetres is what any change does to them; the largest is 1.65 cm against the
+    sweep's 5. `nudge_survey` prints exactly what it did before, Balance's, Stagger's
+    and Car carry's runs alike (Balance and Stagger have no locks, and Car carry's car is
+    pinned). Timings: Walk With Gun
+    1.0-1.4 s before and 1.2-1.4 s after for its 5 s, Sword Play 0.7-1.0 and 0.7-0.8 s,
+    Arrows 0.4-0.5 and 0.5 s (the run-to-run noise of this machine is as large).
+
+    Stand-ins: Gun drop (a placeholder holds a 550 kg box in both hands, fingers 3 cm
+    below its underside, and drops with it; Coulomb friction): the lowest finger centre
+    -1.4 cm below the ground before, 2.7 to 2.8 cm above after, in all nine runs of the
+    nudged prop mass (`gun_drop_keeps_the_fingers_out_of_the_ground`). The world test
+    `contacts_do_not_pull_a_hand_off_the_prop_it_is_held_to` holds a hand's half kilo to
+    a 550 kg ball while 2.5 kN pulls its forearm in against it: 0.6 and 1.8 cm off the
+    prop for pulls of 0.8 and 1 times that before, 0.08, 0.11 and 0.16 cm for 0.8, 1 and
+    1.25 times after.
+    Still open: contacts between two bodies of such a group (a forearm pressed under
+    the gun) stay in the contact pass, and there the order that gives locks the last
+    word still lets a heavy load through a light body show as stress; and what
+    endorphin's own run of Walk With Gun looks like hasn't been compared.
+
 Tracing Back-Flip-To-Combo itself (#6), with the user's scene file, showed two more.
 
 19. **Each active pose drives only the joints it names, and a shape already inside
@@ -738,7 +828,7 @@ set-up (ground, rigs, events, constraint targets and settings).
 Each failure also gets a stand-in built in code (`src/physics/scenes.rs`) with the
 same pattern, so it can be worked on without endorphin's files.
 
-Last run, over each scene's whole range, with lessons 1-24 and
+Last run, over each scene's whole range, with lessons 1-24, the Walk With Gun lesson and
 imported behaviours actually running (until the behaviour names were matched,
 `docs/behaviours.md`, none of them ran in these scenes); 16 scenes, Bridge Escape is
 skipped for size:
@@ -748,11 +838,15 @@ skipped for size:
 | Clean | All 16: Arrows, Balcony, Bendy Stick, Car Crash, Car Hit, Catch Rope, Catch Run, Gymnast Rings, Heli Leap, Multi Martial, Rotating Floor, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
 | Failing | None |
 
-Max joint stretch per scene over its whole range: Arrows 1.27 cm, Balcony 1.16,
-Bendy Stick 0.61, Car Crash 1.26, Car Hit 2.94, Catch Rope 1.12, Catch Run 1.41,
-Gymnast Rings 0.40, Heli Leap 0.29, Multi Martial 1.74, Rotating Floor 0.41, Stagger
-Walk 0.46, Sword Play 0.46, Tackle 0.66, Trapeze 0.82, Walk With Gun 0.78 (the whole
-sweep takes about 12 s). Heli Leap's lowest body is 2.16 m and Rotating Floor's 4.69 m
+Max joint stretch per scene over its whole range: Arrows 0.47 cm, Balcony 1.65,
+Bendy Stick 0.61, Car Crash 1.26, Car Hit 2.94, Catch Rope 0.80, Catch Run 1.41,
+Gymnast Rings 0.20, Heli Leap 0.29, Multi Martial 1.74, Rotating Floor 0.56, Stagger
+Walk 0.46, Sword Play 0.46, Tackle 0.66, Trapeze 1.09, Walk With Gun 0.18 (the whole
+sweep takes about 20 s). The largest lock drifts are Car Hit's 38 cm (the car falling
+behind its carrier at frame 5, lesson 20) and Car Crash's 29 cm; Walk With Gun's hands'
+join drifts 0.7 cm (14.6 before the Walk With Gun lesson) and its lowest body is 1.4 cm
+above the ground (2.5 cm in it before). `NM_SCENES=Rope,Gun` limits the sweep to scenes
+whose names contain one of them. Heli Leap's lowest body is 2.16 m and Rotating Floor's 4.69 m
 below y = 0, in scenes without a ground (lesson 23). Over the first two seconds only,
 as the sweep used to run, Car Hit was the last to fail: a clavicle 7.9 cm out, which
 lessons 15 and 17 (fixed in the Car carry stand-in) didn't cure because the real
@@ -793,6 +887,7 @@ What each stand-in reproduces:
 | Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps, Coulomb friction (lesson 21) | floats above the box | standing (Balance until the drive): flips backwards, 1° at frame 246, -76° at 297, leaves the box at 319, lands behind it at 385, -281° in all. Left alone: tips forwards and falls off the front at 338, landing at 412 (changed by lessons 16 and 21) |
 | Bonnet slide | Car Hit's pedestrian landing on the bonnet: a 75 kg box thrown at 4 m/s against Heavy join's car drops onto it (lesson 21) | slides on at 3.7-3.9 m/s | stopped dead: -0.33 m/s three frames after landing |
 | Heavy join | Car Hit's join alone: a 747 kg car joined (1e5) to a light keyed carrier that drives off at 8 m/s and stops dead 1 s later (lesson 20) | 15-18 cm behind its carrier for the whole drive and after the stop | 23 cm behind at frame 4, on the carrier from frame 11; 23 cm past it at the stop, back 8 frames later |
+| Gun drop | Walk With Gun: a placeholder holds a 550 kg box in both hands (`JoinBodies`, 1e5 N and 1e4 N·m), its 0.39 kg fingers 3 cm below the box's underside, and drops with it; Coulomb friction (the Walk With Gun lesson) | lowest finger 1.4 cm in the ground | 2.7 to 2.8 cm above it, over 9 nudged runs |
 | Split poses | Two overlapping active poses on different joints (knees from frame 10, elbows from 20), each storing the other joints at rest (lesson 19) | knees 0°, elbows 59° at frame 150 | knees 59°, elbows 60° |
 | Head on neck | A head shape that may collide with its parent, inside the neck at rest (lesson 19) | turned 44° against the neck in 1 s | 2.6° |
 | Curl hand-back | Car Hit's hand-back: a character with clavicles curls up on the ground (BodyFoetal), then a 0.75 s transition, overlapping the curl's end, blends it back onto its standing animation (lesson 18) | 16.6 cm (knee) mid-transition | 0.09 cm |
@@ -831,9 +926,12 @@ hasn't been re-run against endorphin's scene since.
   goal, the physics could use pure-Rust maths that rounds the same everywhere (the
   `libm` crate, say) instead of the platform's.
 - Interpolated output between frames.
-- Contacts in the direct solve. A foot crushed under a car, with Coulomb friction
-  holding it to the road, tears its ankle open (lesson 21): the direct solve holds
-  the joints, but contacts are solved after it.
+- Contacts in the direct solve, for the groups where they aren't yet. Those of free
+  lock groups against the ground and massless scenery are in (the Walk With Gun
+  lesson); contacts between two bodies of a group, against keyed bodies, and of groups
+  solved for a crushing body or an open joint aren't. A foot crushed under a car, with
+  Coulomb friction holding it to the road, tears its ankle open (lesson 21): the direct
+  solve holds the joints, but contacts are solved after it.
 - Saved projects keep the friction model they were saved with: one imported before
   lesson 21 keeps force-capped friction until it is imported again.
 

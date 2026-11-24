@@ -387,8 +387,11 @@ struct GroupRow {
     jacobian: [Vec3; 4],
     /// Velocity bias while correcting positions.
     bias: f32,
-    /// Impulse cap (locks); infinite for anchors.
+    /// Upper cap on the accumulated impulse (locks); infinite for anchors and contacts.
     bound: f32,
+    /// Lower cap: minus the strength for locks, minus the adhesion for contacts (they
+    /// can only push), infinite for anchors.
+    floor: f32,
     source: RowSource,
 }
 
@@ -398,6 +401,8 @@ enum RowSource {
     Anchor(usize, usize),
     /// Lock block index and lock axis.
     Lock(usize, usize),
+    /// A contact's normal.
+    Contact(usize),
 }
 
 /// Bodies held together by locks, with every joint between them, solved as one linear
@@ -425,6 +430,8 @@ struct LockGroup {
     /// Lock axes left out of the direct solve because they reached their strength:
     /// they stay at it this substep, and the per-lock pass still sees them.
     out: Vec<bool>,
+    /// Solved after the contacts, not before them (Walk With Gun lesson).
+    late: bool,
 }
 
 struct ContactRow {
@@ -649,12 +656,45 @@ impl World {
             mass_scale: 1.0,
             impulse_scale: 0.0,
         };
-        let mut groups = self.prepare_groups(&sb, &joints, &locks, &contacts, joint_soft.bias_rate);
+        let mut groups = self.prepare_groups(
+            &sb,
+            &joints,
+            &locks,
+            &contacts,
+            joint_soft.bias_rate,
+            contact_soft.bias_rate,
+            h,
+        );
+        // Contacts a group holds in its direct solve (Walk With Gun lesson): only their
+        // friction is left to the contact pass. One that stops pushing goes back to it.
+        let mut held = vec![false; contacts.len()];
+        for group in &groups {
+            for row in &group.rows {
+                if let RowSource::Contact(c) = row.source {
+                    held[c] = true;
+                }
+            }
+        }
+        // Direct solves of the groups, then the contacts, then the direct solves of the
+        // groups whose locks close a loop: those have the last word (Walk With Gun lesson).
         for _ in 0..ITERATIONS {
             self.solve_joints(&mut sb, &mut joints, joint_soft, h, true);
             solve_locks(&mut sb, &mut locks, joint_soft.bias_rate);
-            solve_groups(&mut sb, &mut groups, &mut joints, &mut locks, true);
-            self.solve_contacts(&mut sb, &mut contacts, contact_soft, h, true);
+            for late in [false, true] {
+                if late {
+                    self.solve_contacts(&mut sb, &mut contacts, &held, contact_soft, h, true);
+                }
+                solve_groups(
+                    &mut sb,
+                    &mut groups,
+                    &mut joints,
+                    &mut locks,
+                    &mut contacts,
+                    &mut held,
+                    late,
+                    true,
+                );
+            }
         }
         // A lock axis still at its strength after position correction can't keep up: it
         // pulls with all of it, and relaxing leaves it there (lesson 20).
@@ -688,8 +728,21 @@ impl World {
         for _ in 0..RELAX_ITERATIONS {
             self.solve_joints(&mut sb, &mut joints, joint_soft, h, false);
             solve_locks(&mut sb, &mut locks, 0.0);
-            solve_groups(&mut sb, &mut groups, &mut joints, &mut locks, false);
-            self.solve_contacts(&mut sb, &mut contacts, contact_soft, h, false);
+            for late in [false, true] {
+                if late {
+                    self.solve_contacts(&mut sb, &mut contacts, &held, contact_soft, h, false);
+                }
+                solve_groups(
+                    &mut sb,
+                    &mut groups,
+                    &mut joints,
+                    &mut locks,
+                    &mut contacts,
+                    &mut held,
+                    late,
+                    false,
+                );
+            }
         }
         apply_restitution(&mut sb, &mut contacts);
         self.write_velocities(&sb);
@@ -1139,6 +1192,8 @@ impl World {
         locks: &[LockBlock],
         contacts: &[ContactRow],
         bias_rate: f32,
+        contact_bias_rate: f32,
+        h: f32,
     ) -> Vec<LockGroup> {
         let stretched = |j: &&JointRows| j.point_error.length() > STRETCH_LIMIT;
         if locks.is_empty() && contacts.is_empty() && !joints.iter().any(|j| stretched(&j)) {
@@ -1167,6 +1222,17 @@ impl World {
             moves(body).then(|| find(&mut root, body))
         };
         let mut locked: Vec<usize> = locks.iter().filter_map(|l| group_of(l.a, l.b)).collect();
+        // Groups a lock holds to the world or a keyed body can't be pushed anywhere the
+        // lock doesn't allow.
+        let pinned: Vec<usize> = locks
+            .iter()
+            .filter(|l| !moves(l.a) && l.bound.iter().any(|&b| b > 0.0))
+            .filter_map(|l| group_of(l.b, l.b))
+            .collect();
+        // Free groups a lock closes a loop in (a prop held in both hands) are solved
+        // after the contacts (Walk With Gun lesson); the others, before them as always.
+        let mut late_groups = locked.clone();
+        late_groups.retain(|g| !pinned.contains(g));
         // Groups something presses on that won't give way (lesson 15).
         locked.extend(self.crushed_groups(contacts, locks, &mut |i| group_of(i, i)));
         // Groups with a joint come apart (lesson 17). A light limb whipping round
@@ -1195,6 +1261,7 @@ impl World {
                     jacobian: [-e, -j.ra.cross(e), e, j.rb.cross(e)],
                     bias: bias[axis],
                     bound: f32::INFINITY,
+                    floor: f32::NEG_INFINITY,
                     source: RowSource::Anchor(ji, axis),
                 });
             }
@@ -1218,9 +1285,55 @@ impl World {
                     jacobian,
                     bias,
                     bound: l.bound[axis],
+                    floor: -l.bound[axis],
                     source: RowSource::Lock(li, axis),
                 });
             }
+        }
+        // Contacts that carry a load (Walk With Gun lesson): a touching contact of a
+        // group against the ground or massless scenery joins its direct solve as a
+        // one-sided row. A load
+        // that reaches a light body through a lock (a gun's weight, through a hand, onto
+        // a finger) is then carried by the contact, not by the softness the contact pass
+        // gives a body that weighs 0.39 kg. Not against another body: two bodies of one
+        // group are held by joints and locks, and a contact between them settles with
+        // those in huge opposing impulses. Not against a keyed body either, which can
+        // move on. Only in the groups that are solved late: for pinned ones a contact row
+        // against the lock that holds them only adds stress, and groups solved directly
+        // for a crushing body or an open joint (lessons 15 and 17) stay as they were.
+        for (ci, c) in contacts.iter().enumerate() {
+            // Carrying a load: it pushed last substep, and touches now.
+            let carrying = c.impulse[0] > 0.0 && c.separation < CRUSH_SEPARATION;
+            if !carrying || (c.a == STATIC && c.b == STATIC) {
+                continue;
+            }
+            let (ga, gb) = (group_of(c.a, c.a), group_of(c.b, c.b));
+            let fixed = |i: usize| i == STATIC || self.bodies[i].motion == Motion::Dynamic;
+            let g = match (ga, gb) {
+                (Some(a), None) if fixed(c.b) => a,
+                (None, Some(b)) if fixed(c.a) => b,
+                _ => continue,
+            };
+            if !late_groups.contains(&g) {
+                continue;
+            }
+            let Some(g) = locked.binary_search(&g).ok() else {
+                continue;
+            };
+            let n = c.normal;
+            rows[g].push(GroupRow {
+                a: c.a,
+                b: c.b,
+                jacobian: [-n, -c.ra.cross(n), n, c.rb.cross(n)],
+                bias: if c.separation < 0.0 {
+                    (contact_bias_rate * c.separation).max(-MAX_PUSH_SPEED)
+                } else {
+                    0.0
+                },
+                bound: f32::INFINITY,
+                floor: -c.interaction.adhesion * h,
+                source: RowSource::Contact(ci),
+            });
         }
         // Joints leaf first (deepest child body first), then locks.
         let depth = |mut body: usize| {
@@ -1235,10 +1348,16 @@ impl World {
             rows.sort_by_key(|r| match r.source {
                 RowSource::Anchor(..) => (0, std::cmp::Reverse(depth(r.b))),
                 RowSource::Lock(..) => (1, std::cmp::Reverse(0)),
+                RowSource::Contact(..) => (2, std::cmp::Reverse(0)),
             });
         }
         rows.into_iter()
-            .filter_map(|rows| LockGroup::new(sb, rows, locks))
+            .zip(&locked)
+            .filter_map(|(rows, g)| {
+                let mut group = LockGroup::new(sb, rows, locks)?;
+                group.late = late_groups.contains(g);
+                Some(group)
+            })
             .collect()
     }
 
@@ -1505,6 +1624,7 @@ impl World {
         &self,
         sb: &mut [SolverBody],
         contacts: &mut [ContactRow],
+        held: &[bool],
         soft_params: Softness,
         h: f32,
         use_bias: bool,
@@ -1516,7 +1636,7 @@ impl World {
         } else {
             handed_velocity
         };
-        for c in contacts.iter_mut() {
+        for (c, &held) in contacts.iter_mut().zip(held) {
             // Friction first, limited by the current normal impulse or a fixed force cap.
             // The cap only holds surfaces that touch: a contact found inside the
             // speculative margin, still apart and not pushing, has nothing to grip with.
@@ -1532,6 +1652,10 @@ impl World {
                 let new = (old - c.tangent_mass[k] * vt).clamp(-limit, limit);
                 c.impulse[k + 1] = new;
                 apply_impulse(sb, c.a, c.b, c.ra, c.rb, c.tangents[k] * (new - old));
+            }
+            // The normal is the group's, while it holds.
+            if held {
+                continue;
             }
 
             let vn = velocity(sb, c.a, c.b, c.ra, c.rb).dot(c.normal);
@@ -1681,7 +1805,7 @@ impl LockGroup {
             .iter()
             .map(|r| match r.source {
                 RowSource::Lock(l, axis) => locks[l].impulse[axis].abs() >= r.bound,
-                RowSource::Anchor(..) => false,
+                RowSource::Anchor(..) | RowSource::Contact(..) => false,
             })
             .collect();
         let mut group = LockGroup {
@@ -1692,6 +1816,7 @@ impl LockGroup {
             velocity_factor: Vec::new(),
             push_factor: Vec::new(),
             out,
+            late: false,
         };
         group.factorize();
         Some(group)
@@ -1861,9 +1986,12 @@ fn solve_groups(
     groups: &mut [LockGroup],
     joints: &mut [JointRows],
     locks: &mut [LockBlock],
+    contacts: &mut [ContactRow],
+    held: &mut [bool],
+    late: bool,
     use_bias: bool,
 ) {
-    for group in groups.iter_mut() {
+    for group in groups.iter_mut().filter(|g| g.late == late) {
         // Relaxing leaves axes that are pulling with their full strength alone.
         if !use_bias {
             let mut changed = false;
@@ -1882,24 +2010,30 @@ fn solve_groups(
         }
         loop {
             let x = group.impulses(sb, use_bias);
-            let over = group
-                .rows
-                .iter()
-                .zip(&x)
-                .position(|(r, &dx)| match r.source {
-                    RowSource::Lock(l, axis) => {
-                        (locks[l].impulse[axis] + dx as f32).abs() > r.bound
-                    }
-                    RowSource::Anchor(..) => false,
-                });
+            // The row's accumulated impulse so far.
+            let so_far = |r: &GroupRow| match r.source {
+                RowSource::Anchor(j, axis) => joints[j].point_impulse[axis],
+                RowSource::Lock(l, axis) => locks[l].impulse[axis],
+                RowSource::Contact(c) => contacts[c].impulse[0],
+            };
+            let over = group.rows.iter().zip(&x).position(|(r, &dx)| {
+                let total = so_far(r) + dx as f32;
+                !matches!(r.source, RowSource::Anchor(..)) && (total > r.bound || total < r.floor)
+            });
             if let Some(i) = over {
                 let r = &group.rows[i];
-                let RowSource::Lock(l, axis) = r.source else {
-                    unreachable!()
-                };
-                let held = (locks[l].impulse[axis] + x[i] as f32).clamp(-r.bound, r.bound);
-                LockGroup::apply(r, sb, held - locks[l].impulse[axis]);
-                locks[l].impulse[axis] = held;
+                let before = so_far(r);
+                let kept = (before + x[i] as f32).clamp(r.floor, r.bound);
+                LockGroup::apply(r, sb, kept - before);
+                match r.source {
+                    RowSource::Lock(l, axis) => locks[l].impulse[axis] = kept,
+                    RowSource::Contact(c) => {
+                        contacts[c].impulse[0] = kept;
+                        // Not pushing any more: the contact pass has it again.
+                        held[c] = false;
+                    }
+                    RowSource::Anchor(..) => unreachable!(),
+                }
                 group.out[i] = true;
                 group.factorize();
                 continue;
@@ -1909,6 +2043,7 @@ fn solve_groups(
                 match r.source {
                     RowSource::Anchor(j, axis) => joints[j].point_impulse[axis] += d,
                     RowSource::Lock(l, axis) => locks[l].impulse[axis] += d,
+                    RowSource::Contact(c) => contacts[c].impulse[0] += d,
                 }
                 LockGroup::apply(r, sb, d);
             }
@@ -2759,6 +2894,92 @@ mod tests {
             held.is_finite() && held.length() < 1.0,
             "gun came loose: {held}"
         );
+    }
+
+    /// A hand a lock holds to a 550 kg prop, with its forearm pulled hard against it.
+    /// The forearm's contact pushes the hand about as the half kilo it sees, and with
+    /// the contacts solved last the lock, which holds it easily, was left short by
+    /// whatever they did: in Walk With Gun the hand turned 20° away from the prop. The
+    /// lock's direct solve now has the last word (Walk With Gun lesson).
+    #[test]
+    fn contacts_do_not_pull_a_hand_off_the_prop_it_is_held_to() {
+        for pull in [0.8f32, 1.0, 1.25] {
+            let mut w = world();
+            let free = Limits {
+                twist_min: -3.0,
+                twist_max: 3.0,
+                swing1: 3.0,
+                swing2: 3.0,
+            };
+            let gun = ball(&mut w, Vec3::new(0.0, 0.15, 0.0), 0.15, 550.0);
+            let hand = ball(&mut w, Vec3::new(0.3, 0.15, 0.0), 0.05, 0.5);
+            let fore = ball(&mut w, Vec3::new(0.36, 0.2, 0.0), 0.05, 0.7);
+            for (group, body) in [gun, hand, fore].into_iter().enumerate() {
+                w.bodies[body].group = group;
+            }
+            // The wrist: a ball joint between them, nearer than their shapes allow.
+            let wrist = Vec3::new(0.33, 0.175, 0.0);
+            w.joints.push(Joint::new(
+                hand,
+                fore,
+                wrist - w.bodies[hand].position,
+                wrist - w.bodies[fore].position,
+                Quat::IDENTITY,
+                Quat::IDENTITY,
+                Quat::IDENTITY,
+                Quat::IDENTITY,
+                free,
+                free,
+                0.0,
+                0.0,
+            ));
+            w.bodies[fore].parent = Some(hand);
+            for shape in w.shapes.iter_mut().filter(|s| s.body != Some(gun)) {
+                shape.flags.parent = true;
+            }
+            // JoinBodies: the hand held to the prop, position and angle.
+            w.locks.push(Lock {
+                anchor: Some(gun),
+                body: hand,
+                target: (Quat::IDENTITY, Vec3::new(0.3, 0.0, 0.0)),
+                linear: Vec3::splat(1e5),
+                angular: Vec3::splat(1e4),
+            });
+            // The rest of the arm pulls the forearm in: 2.5 kN along the line between
+            // them (a negative strength drives).
+            w.locks.push(Lock {
+                anchor: None,
+                body: fore,
+                target: (Quat::IDENTITY, Vec3::ZERO),
+                linear: Vec3::new(-1500.0, -2000.0, 0.0) * pull,
+                angular: Vec3::ZERO,
+            });
+            let (mut off, mut turn) = (0.0f32, 0.0f32);
+            for _ in 0..240 {
+                w.step(1.0 / 120.0);
+                // As the prop sees it: it may roll about.
+                let (g, h) = (&w.bodies[gun], &w.bodies[hand]);
+                turn = turn.max(
+                    (g.rotation.inverse() * h.rotation)
+                        .to_scaled_axis()
+                        .length(),
+                );
+                off = off.max(
+                    (g.rotation.inverse() * (h.position - g.position) - Vec3::new(0.3, 0.0, 0.0))
+                        .length(),
+                );
+            }
+            println!(
+                "pull x{pull}: hand {:.2} cm off the prop, turned {:.1}°",
+                off * 100.0,
+                turn.to_degrees()
+            );
+            assert!(
+                off < 0.005,
+                "the hand came {off} m off the prop (pull x{pull})"
+            );
+            assert!(turn < 0.05, "the hand turned {turn} rad (pull x{pull})");
+        }
     }
 
     /// Collision-only scenery moving into a body pushes it along without launching it,
