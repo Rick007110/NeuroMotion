@@ -1101,12 +1101,15 @@ fn record(project: &Project, running: &Running, t: f32) -> Frame {
             let binding = binding.as_ref()?;
             let skeleton = &project.characters[ci].skeleton;
             let mut joints = joints_from_bodies(&running.world, binding, skeleton, &poses[ci]);
-            // Transitions blend the simulated pose back onto the animation.
+            // Transitions blend the simulated pose back onto the animation. The blend
+            // includes the last frame (weight 1): the level only changes to animated
+            // after that frame is recorded, so without it the last frame would show the
+            // raw simulated pose between a blended and an animated one.
             let plan = &running.plans[ci];
             if let Some(&(start, end)) = plan
                 .transitions
                 .iter()
-                .find(|(s, e)| *s <= frame && frame < *e)
+                .find(|(s, e)| *s <= frame && frame <= *e)
             {
                 let w = ((frame - start) as f32 / (end - start).max(1) as f32).clamp(0.0, 1.0);
                 // Blend orientations, then rebuild positions down the hierarchy so bones

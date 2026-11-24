@@ -2881,6 +2881,54 @@ mod behaviour_tests {
         assert!(blend < 0.02, "{blend:.4} m at {place}");
     }
 
+    /// Car Hit's drawn pose jumped for exactly one frame at its transition's last
+    /// frame: 111 blended (-0.97 m), 112 the raw simulated pose (-1.85 m), 113 the
+    /// animation (-0.93 m). The blend ran over `start <= frame < end` while the level
+    /// only changes to animated after frame `end` is recorded (lesson "transition end").
+    /// The curled character lies far from its standing animation, so a pop shows.
+    #[test]
+    fn transition_ends_on_the_animation_without_a_pop() {
+        let project = curl_hand_back();
+        let (sim, _) = simulate(&project);
+        let (start, end) = (135, 180);
+        let joints = |f: i32| &sim.frame(f).unwrap()[0].as_ref().unwrap().joints;
+        // Largest move of any joint between two frames, in metres.
+        let step = |a: i32, b: i32| {
+            joints(a)
+                .iter()
+                .zip(joints(b))
+                .map(|(x, y)| x.1.distance(y.1))
+                .fold(0.0_f32, f32::max)
+        };
+        // How fast the blend moves the pose before the end, the pace to compare with.
+        let pace = (end - 6..end - 1)
+            .map(|f| step(f, f + 1))
+            .fold(0.0, f32::max);
+        let (into, out) = (step(end - 1, end), step(end, end + 1));
+        println!(
+            "transition {start}-{end}: pace {pace:.3} m/frame, into end {into:.3} m, out of end {out:.3} m"
+        );
+        assert!(
+            into < pace * 2.0,
+            "pops into the last frame: {into:.3} m vs pace {pace:.3} m"
+        );
+        assert!(
+            out < pace * 2.0,
+            "pops out of the last frame: {out:.3} m vs pace {pace:.3} m"
+        );
+        // The last frame already is the animation.
+        let anim = world_transforms(
+            &project.characters[0].skeleton,
+            &project.evaluate(end as f32)[0],
+        );
+        let off = joints(end)
+            .iter()
+            .zip(&anim)
+            .map(|(j, a)| j.1.distance(a.1))
+            .fold(0.0_f32, f32::max);
+        assert!(off < 1e-3, "frame {end} is {off:.3} m from the animation");
+    }
+
     #[test]
     fn writhe_keeps_moving_and_is_deterministic() {
         let project = limp_then(Some("Writhe"));
