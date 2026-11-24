@@ -27,6 +27,7 @@ each other, and [what's next](#next-up). Each open item is, or will become, a Gi
 | Viewport | shaded 3D, several views | 🟡 bodies and bones drawn flat, one view |
 | Editing in the viewport | posing, picking bodies | ⬜ |
 | Re-simulating | press Simulate | ✅ automatic, in the background |
+| Same results as endorphin | – | 🟡 Car Hit compared frame by frame with endorphin's own run and close; other scenes not compared yet |
 
 ## Milestone 1: Physics that matches endorphin
 
@@ -51,16 +52,26 @@ NeuroMotion, and we need numbers to prove it.
   now pulls with its full strength, and imported friction is Coulomb, μ = friction
   / 100 (lessons 20 and 21). NeuroMotion's own projects keep force-capped friction
   until Balance and Stagger are tuned for Coulomb
+- ✅ A force pushes the bodies it names, a massless body never moves, and a
+  transition ends exactly on the animation (lessons 22-24); scenes run as long as
+  endorphin runs them, and the sweep checks each scene's whole range
 - 🟡 Back-Flip-To-Combo ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)):
   overlapping active poses now each drive their own joints, and the head no longer
-  starts inside its neck (lesson 19), but the character still tips backwards off the
-  box head first (frame 199) before the flip's drive starts at 246. endorphin's
-  character stands, crouches and flips feet first. Open: how endorphin eases a pose
-  in and what holds a joint after its pose ends
-- ⬜ **Reference measurements**: a set of scenes measured in endorphin (frames, angles,
-  heights) turned into tests, so "behaves like endorphin" is checked, not eyeballed.
-  Anyone with endorphin can help, using the *Reference measurement* issue template.
-  Nothing NeuroMotion does has been compared with endorphin by numbers yet.
+  starts inside its neck (lesson 19), but the character still leaves the box around
+  frame 170, long before the flip's drive at 246, and with Coulomb friction its feet
+  catch on the box's edge. endorphin's character stands, crouches and flips feet
+  first. Open: how endorphin eases a pose in and what holds a joint after its pose
+  ends
+- 🟡 **Reference measurements**: scenes measured in endorphin (frames, positions,
+  angles) and compared with NeuroMotion, so "behaves like endorphin" is checked, not
+  eyeballed. Car Hit is the first: measured from a recording of endorphin's own run
+  with its frame counter, against `dump_scene_motion`'s CSV of ours, which found
+  lessons 20-24. Next: more scenes, and exports of endorphin's results (BVH/FBX)
+  instead of recordings, turned into tests. Anyone with endorphin can help, using the
+  *Reference measurement* issue template
+- ⬜ **Walk With Gun**: since Coulomb friction its hands' join drifts up to 0.15 m and
+  a finger sits 2.5 cm in the ground as the character falls with its 549 kg gun
+  (within the sweep's checks)
 - ✅ **Sever events**: cut a joint or switch its muscle off
   ([#13](https://github.com/Rick007110/NeuroMotion/issues/13)); endorphin's own setting
   names for them still need checking against a real scene
@@ -82,6 +93,8 @@ protected, so every one is an original design that shares only the name. Importe
 scenes then run something sensible.
 
 - ✅ Balance (ankle strategy), CatchFall
+- ⬜ **Balance and Stagger tuned for Coulomb friction**, so NeuroMotion's own projects
+  can use endorphin's friction too (lesson 21)
 - ✅ **Inventory**: the behaviour names and settings that endorphin scenes use,
   gathered from scenes (not from the protected `.nmb` files), to plan the rest:
   [docs/behaviour-inventory.md](docs/behaviour-inventory.md)
@@ -136,8 +149,8 @@ endorphin scenes.
   simulation rate in the settings
 - ⬜ **Preferences and keyboard profiles**, editable in the app
 - ⬜ **Playblast**: export the viewport as a video
-- ⬜ Window and app icon ([#17](https://github.com/Rick007110/NeuroMotion/issues/17)),
-  recent files ([#16](https://github.com/Rick007110/NeuroMotion/issues/16))
+- ✅ Window and app icon ([#17](https://github.com/Rick007110/NeuroMotion/issues/17))
+- ⬜ Recent files ([#16](https://github.com/Rick007110/NeuroMotion/issues/16))
 
 ## Milestone 5: Ready for everyone (1.0)
 
@@ -172,26 +185,27 @@ Planned once 1.0 is in sight:
 
 What moves NeuroMotion closest to endorphin quality now, in order:
 
-1. **Measure endorphin** (needs someone with endorphin installed): run
-   `cargo test --release -- --ignored` (every sample scene over its whole range; all 16 are clean since
-   [#7](https://github.com/Rick007110/NeuroMotion/issues/7)), the behaviour inventory ([#24](https://github.com/Rick007110/NeuroMotion/issues/24)), and record
-   reference measurements of a few scenes. Every later physics and behaviour change
-   can then be checked against real numbers.
-2. **Back-Flip-To-Combo** ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)): traced with the scene
-   file (lesson 19); the character still falls off the back of the box before the
-   flip. Measuring how endorphin eases an active pose in would settle the rest.
-3. **Physics robustness**: the arm whip in Car carry ([#23](https://github.com/Rick007110/NeuroMotion/issues/23)) and sideways
-   stepping ([#9](https://github.com/Rick007110/NeuroMotion/issues/9)).
-4. **Import BVH and FBX** ([#25](https://github.com/Rick007110/NeuroMotion/issues/25)): the first step to people's own motion,
-   so NeuroMotion is useful without endorphin scenes.
-5. **3D viewport** ([#26](https://github.com/Rick007110/NeuroMotion/issues/26)): the biggest step in how it feels to use.
+1. **Compare more scenes with endorphin, by numbers.** The Car Hit comparison found
+   five general differences in one go. Next: recordings with the frame counter, or
+   better exports (BVH/FBX) of endorphin's own results, for a spread of scenes
+   (Tackle, Stagger Walk, a few Behaviour Scenes, Back-Flip-To-Combo), turned into
+   tests that score how close NeuroMotion is.
+2. **Active poses as endorphin applies them** ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)): how a pose eases in, what
+   holds a joint after its pose ends and how strength scales the muscles. This is
+   what keeps Back-Flip-To-Combo from standing until its flip.
+3. **Explosion and the other missing behaviours** in the inventory's order (Look and
+   Reach, Explosion, JumpDive); Car Hit's flight over the car needs Explosion.
+4. **Balance and Stagger on Coulomb friction**, and sideways stepping
+   ([#9](https://github.com/Rick007110/NeuroMotion/issues/9)).
+5. **Import BVH and FBX** ([#25](https://github.com/Rick007110/NeuroMotion/issues/25)) and the **3D viewport**
+   ([#26](https://github.com/Rick007110/NeuroMotion/issues/26)).
 
 ## Releases along the way
 
 There will be releases before 1.0. Each is a beta (pre-release) with whatever is done
 by then:
 
-- **0.1: first public beta.** Downloads for Windows, macOS and Linux. Opens and
+- ✅ **0.1: first public beta** (released). Downloads for Windows, macOS and Linux. Opens and
   simulates endorphin scenes with five behaviours, sever events, and exports FBX and
   BVH.
 - **0.2: physics parity.** Milestone 1 done: every sample scene clean, the first
