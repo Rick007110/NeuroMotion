@@ -7,7 +7,7 @@ work in. After that comes the part where NeuroMotion goes further
 ([Beyond endorphin](#beyond-endorphin)).
 
 This page lists what's done and what's missing, grouped into milestones that build on
-each other. Each open item is, or will become, a GitHub
+each other, and [what's next](#next-up). Each open item is, or will become, a GitHub
 [issue](https://github.com/Rick007110/NeuroMotion/issues). Pick one up; see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -18,7 +18,7 @@ each other. Each open item is, or will become, a GitHub
 | Area | endorphin 2.5 | NeuroMotion today |
 |---|---|---|
 | Open endorphin files | – | ✅ `.ens`, `.nmc`, `.nma` (160 of 163 bundled files) |
-| Physics engine | Karma, 120 Hz, stiff muscles | ✅ own engine, 120 Hz, deterministic; 15 of 16 sample scenes clean |
+| Physics engine | Karma, 120 Hz, stiff muscles | ✅ own engine, 120 Hz, deterministic on one machine; 15 of 16 sample scenes clean, Car Hit fixed in its stand-in |
 | Event types | 9 | 🟡 7 of 9 (no motion transfer; behaviours partly) |
 | Behaviours | a library of them | 🟡 5 (Balance with stepping, Stagger, CatchFall, BodyFoetal, Writhe) |
 | Your own characters | yes (rigs, motion transfer) | ⬜ only endorphin's own `.nmc` characters |
@@ -41,15 +41,18 @@ NeuroMotion, and we need numbers to prove it.
 - 🟡 All 16 sample scenes clean: Car Hit's cause is fixed in a stand-in (a heavy body
   pressing on a character now gets an exact joint solve, lesson 15; after the car
   stops, the arm whipping round still opens the shoulder past 5 cm in about one run
-  in twenty when the scene is nudged), and the real scene still needs confirming on
-  a machine with endorphin
+  in twenty when the scene is nudged, [#23](https://github.com/Rick007110/NeuroMotion/issues/23)), and the real scene still
+  needs confirming on a machine with endorphin
   ([#7](https://github.com/Rick007110/NeuroMotion/issues/7)); Bridge Escape is skipped
   for size
+- ✅ Heavy bodies pressing on a character, and friction only where surfaces touch
+  (lessons 15 and 16)
 - 🟡 Back-Flip-To-Combo: the character tips forward before the flip
   ([#6](https://github.com/Rick007110/NeuroMotion/issues/6))
 - ⬜ **Reference measurements**: a set of scenes measured in endorphin (frames, angles,
   heights) turned into tests, so "behaves like endorphin" is checked, not eyeballed.
   Anyone with endorphin can help, using the *Reference measurement* issue template.
+  Nothing NeuroMotion does has been compared with endorphin by numbers yet.
 - ✅ **Sever events**: cut a joint or switch its muscle off
   ([#13](https://github.com/Rick007110/NeuroMotion/issues/13)); endorphin's own setting
   names for them still need checking against a real scene
@@ -59,6 +62,10 @@ NeuroMotion, and we need numbers to prove it.
 - ⬜ **Interpolated output** between physics ticks, for smooth 60 fps playback
 - ⬜ **Large scenes**: Bridge Escape and other big scenes simulate at a usable speed
 - ⬜ Legacy poses that store muscle targets (`dp.nma`)
+- ⬜ Bit-identical results across platforms (optional): today the same build on the
+  same machine always gives the same result, but other platforms' maths libraries
+  round in the last bit, which chaotic moments can turn into a different outcome.
+  Pure-Rust maths (e.g. the `libm` crate) would make every platform identical.
 
 ## Milestone 2: Behaviours
 
@@ -69,6 +76,7 @@ scenes then run something sensible.
 - ✅ Balance (ankle strategy), CatchFall
 - ⬜ **Inventory**: the list of behaviour names and settings that endorphin scenes use,
   gathered from scenes (not from the protected `.nmb` files), to plan the rest
+  ([#24](https://github.com/Rick007110/NeuroMotion/issues/24))
 - 🟡 **Stepping** when Balance can't hold ([#9](https://github.com/Rick007110/NeuroMotion/issues/9)):
   forwards and backwards it now stands after pushes up to about twice as hard
   (50 of 84 test pushes, from 29); sideways it barely helps yet, because the foot on
@@ -93,6 +101,7 @@ and motion capture. Without this, NeuroMotion only works for people who already 
 endorphin scenes.
 
 - ⬜ **Import motion**: BVH and FBX animation as motion clips, to simulate on top of
+  ([#25](https://github.com/Rick007110/NeuroMotion/issues/25))
 - ⬜ **Your own skeleton**: import a character from FBX or BVH and map it to a physics
   rig (endorphin's motion transfer), so results come back onto your own skeleton
 - ⬜ **Motion transfer events**
@@ -106,7 +115,7 @@ endorphin scenes.
 ## Milestone 4: An editor animators want to work in
 
 - ⬜ **3D viewport**: shaded bodies on the GPU, lighting and shadows, and front, side, top
-  and perspective views
+  and perspective views ([#26](https://github.com/Rick007110/NeuroMotion/issues/26))
 - ⬜ **Work in the viewport**: click bodies to select them; drag to aim a force; place
   constraints; pose with rotate gizmos and IK
 - ⬜ **Pose tools**: mirror left↔right, a pose library, key the current pose
@@ -133,7 +142,7 @@ endorphin scenes.
 
 Already done:
 - automatic re-simulation in the background;
-- deterministic results;
+- deterministic results (on the same machine);
 - stiff muscles that can't explode;
 - locked bodies solved exactly.
 
@@ -147,15 +156,34 @@ Planned once 1.0 is in sight:
 - Muscle effort shown on the timeline and in the viewport
 - Export to game engines (Unity, Unreal) and USD
 
+## Next up
+
+What moves NeuroMotion closest to endorphin quality now, in order:
+
+1. **Measure endorphin** (needs someone with endorphin installed): run
+   `cargo test --release -- --ignored` (every sample scene, including the real Car
+   Hit, [#7](https://github.com/Rick007110/NeuroMotion/issues/7)), the behaviour inventory ([#24](https://github.com/Rick007110/NeuroMotion/issues/24)), and record
+   reference measurements of a few scenes. Every later physics and behaviour change
+   can then be checked against real numbers.
+2. **Back-Flip-To-Combo** ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)): needs the scene file to trace.
+3. **Physics robustness**: the arm whip in Car carry ([#23](https://github.com/Rick007110/NeuroMotion/issues/23)) and sideways
+   stepping ([#9](https://github.com/Rick007110/NeuroMotion/issues/9)).
+4. **Import BVH and FBX** ([#25](https://github.com/Rick007110/NeuroMotion/issues/25)): the first step to people's own motion,
+   so NeuroMotion is useful without endorphin scenes.
+5. **3D viewport** ([#26](https://github.com/Rick007110/NeuroMotion/issues/26)): the biggest step in how it feels to use.
+
 ## Releases along the way
 
-There will be releases before 1.0. Each is a pre-release with whatever is done by then:
+There will be releases before 1.0. Each is a beta (pre-release) with whatever is done
+by then:
 
-- **0.2: first public build.** Downloads for Windows, macOS and Linux. Opens and
-  simulates endorphin scenes, exports FBX and BVH.
-- **0.3: physics parity.** Milestone 1 done: every sample scene clean, the first
+- **0.1: first public beta.** Downloads for Windows, macOS and Linux. Opens and
+  simulates endorphin scenes with five behaviours, sever events, and exports FBX and
+  BVH.
+- **0.2: physics parity.** Milestone 1 done: every sample scene clean, the first
   reference measurements passing.
-- **0.4: behaviours.** Stepping, stagger, writhe and body foetal.
-- **0.5: your own motion.** Import of BVH and FBX animation, your own characters, props.
-- **0.6–0.9: the editor.** The 3D viewport, editing in the viewport, pose tools.
+- **0.3: behaviours.** The inventory's most used behaviours, sideways stepping,
+  behaviour settings in the inspector.
+- **0.4: your own motion.** Import of BVH and FBX animation, your own characters, props.
+- **0.5–0.9: the editor.** The 3D viewport, editing in the viewport, pose tools.
 - **1.0: endorphin level.** Milestones 1–5 done.
