@@ -41,7 +41,7 @@ pub(super) fn show(
         _ => {}
     }
     other_settings(ui, &before, events::edited_keys(event));
-    let edit = (s != before).then(|| Edit::ClipSource {
+    let edit = (s != before).then_some(Edit::ClipSource {
         clip: id,
         before,
         after: s,

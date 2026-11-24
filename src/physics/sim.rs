@@ -35,6 +35,7 @@ pub struct CharacterFrame {
 /// All characters at one frame (`None` for characters without physics).
 pub type Frame = Vec<Option<CharacterFrame>>;
 
+#[derive(Default)]
 pub struct Simulation {
     revision: Option<u64>,
     start: i32,
@@ -113,18 +114,6 @@ struct PoseTarget {
     strength: f32,
     /// Local rotation target per skeleton joint (`None` = not part of the pose).
     targets: Vec<Option<Quat>>,
-}
-
-impl Default for Simulation {
-    fn default() -> Self {
-        Self {
-            revision: None,
-            start: 0,
-            end: 0,
-            frames: Vec::new(),
-            running: None,
-        }
-    }
 }
 
 impl Simulation {

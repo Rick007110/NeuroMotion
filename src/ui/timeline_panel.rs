@@ -196,12 +196,12 @@ pub fn show(
                 }
                 // Right-click: add a clip where the pointer is. The playhead moves there
                 // too, so an active pose captures the pose at its own start.
-                if lane_response.secondary_clicked() {
-                    if let Some(pos) = lane_response.interact_pointer_pos() {
-                        state.menu_frame = view.x_to_frame(pos.x, lanes_left).round() as i32;
-                        playback.pause();
-                        playback.seek(state.menu_frame as f64, range);
-                    }
+                if lane_response.secondary_clicked()
+                    && let Some(pos) = lane_response.interact_pointer_pos()
+                {
+                    state.menu_frame = view.x_to_frame(pos.x, lanes_left).round() as i32;
+                    playback.pause();
+                    playback.seek(state.menu_frame as f64, range);
                 }
                 let frame = state.menu_frame;
                 lane_response
@@ -482,11 +482,11 @@ fn scrub(
     playback: &mut Playback,
     range: crate::document::FrameRange,
 ) {
-    if response.is_pointer_button_down_on() {
-        if let Some(pos) = response.interact_pointer_pos() {
-            playback.pause();
-            playback.seek(view.x_to_frame(pos.x, lanes_left).round() as f64, range);
-        }
+    if response.is_pointer_button_down_on()
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        playback.pause();
+        playback.seek(view.x_to_frame(pos.x, lanes_left).round() as f64, range);
     }
 }
 
@@ -785,10 +785,10 @@ fn track_lane(
         if response.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::Grab);
         }
-        if response.clicked() || response.drag_started() {
-            if !matches!(*selection, Selection::Clip(c) if c == id) {
-                *selection = Selection::Clip(id);
-            }
+        if (response.clicked() || response.drag_started())
+            && !matches!(*selection, Selection::Clip(c) if c == id)
+        {
+            *selection = Selection::Clip(id);
         }
         if response.drag_started() {
             state.drag = Some(Drag::Clip {
@@ -804,25 +804,24 @@ fn track_lane(
                 origin,
                 travel,
             }) = &mut state.drag
+                && *dragged == id
             {
-                if *dragged == id {
-                    *travel += response.drag_delta().x;
-                    let start = *origin + (*travel / view.px_per_frame).round() as i32;
-                    if start != props.start {
-                        let after = ClipProps {
-                            start,
-                            ..props.clone()
-                        };
-                        doc.apply(
-                            "Move clip",
-                            Edit::ClipProps {
-                                clip: id,
-                                before: props.clone(),
-                                after,
-                            },
-                            true,
-                        );
-                    }
+                *travel += response.drag_delta().x;
+                let start = *origin + (*travel / view.px_per_frame).round() as i32;
+                if start != props.start {
+                    let after = ClipProps {
+                        start,
+                        ..props.clone()
+                    };
+                    doc.apply(
+                        "Move clip",
+                        Edit::ClipProps {
+                            clip: id,
+                            before: props.clone(),
+                            after,
+                        },
+                        true,
+                    );
                 }
             }
         }
@@ -1039,33 +1038,33 @@ fn channel_lane(
                 travel: 0.0,
             });
         }
-        if response.dragged() {
-            if let Some(Drag::Key {
+        if response.dragged()
+            && let Some(Drag::Key {
                 clip,
                 channel: ch_index,
                 origin,
                 current,
                 travel,
             }) = &mut state.drag
+            && *clip == clip_id
+            && *ch_index == channel
+            && *current == key.frame
+        {
+            *travel += response.drag_delta().x;
+            let target = *origin + (*travel / view.px_per_frame).round() as i32;
+            let moved = Keyframe {
+                frame: target,
+                ..key.clone()
+            };
+            if target != *current
+                && doc.replace_key(clip_id, channel, *current, moved, "Move key", true)
             {
-                if *clip == clip_id && *ch_index == channel && *current == key.frame {
-                    *travel += response.drag_delta().x;
-                    let target = *origin + (*travel / view.px_per_frame).round() as i32;
-                    let moved = Keyframe {
-                        frame: target,
-                        ..key.clone()
-                    };
-                    if target != *current
-                        && doc.replace_key(clip_id, channel, *current, moved, "Move key", true)
-                    {
-                        *current = target;
-                        *selection = Selection::Key {
-                            clip: clip_id,
-                            channel,
-                            frame: target,
-                        };
-                    }
-                }
+                *current = target;
+                *selection = Selection::Key {
+                    clip: clip_id,
+                    channel,
+                    frame: target,
+                };
             }
         }
         if response.drag_stopped() {

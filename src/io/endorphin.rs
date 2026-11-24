@@ -78,16 +78,16 @@ pub fn import_scene(path: &Path) -> Result<Import, IoError> {
         };
         add_character(&mut project, node, kind, isotropic, &mut skipped_joints);
     }
-    if let Some(env) = child(root, "Environment") {
-        if child(env, "Skeleton").is_some() {
-            add_character(
-                &mut project,
-                env,
-                CharacterKind::Environment,
-                isotropic,
-                &mut skipped_joints,
-            );
-        }
+    if let Some(env) = child(root, "Environment")
+        && child(env, "Skeleton").is_some()
+    {
+        add_character(
+            &mut project,
+            env,
+            CharacterKind::Environment,
+            isotropic,
+            &mut skipped_joints,
+        );
     }
     // endorphin simulates everything from the first frame unless an event says otherwise,
     // scenery included: its massless pieces stay fixed, while props with mass are real
@@ -1155,6 +1155,8 @@ fn read_rig(
                     )
                 })
             };
+            // 6.28 is the fallback twist size as written, not meant to be exactly TAU.
+            #[allow(clippy::approx_constant)]
             let hard = limits("HardLimits").unwrap_or(Limits::from_sizes(6.28, 6.0, 6.0));
             let soft_node = child(*jn, "SoftLimits");
             let avg = |a: &str, b: &str| {

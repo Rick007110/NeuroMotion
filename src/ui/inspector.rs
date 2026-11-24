@@ -115,7 +115,7 @@ fn project_page(ui: &mut Ui, doc: &mut Document, selection: &mut Selection) {
             ui.end_row();
         });
     });
-    let edit = (s != before).then(|| Edit::Settings { before, after: s });
+    let edit = (s != before).then_some(Edit::Settings { before, after: s });
     g.commit(doc, "Edit project settings", edit);
 
     let project = &doc.project;
@@ -279,7 +279,7 @@ fn track_page(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, id: Tr
             ui.end_row();
         });
     });
-    let edit = (t != before).then(|| Edit::Track {
+    let edit = (t != before).then_some(Edit::Track {
         id,
         before,
         after: t,
@@ -445,7 +445,7 @@ fn clip_page(
     });
     p.blend_in = p.blend_in.min(p.duration);
     p.blend_out = p.blend_out.min(p.duration);
-    let edit = (p != before).then(|| Edit::ClipProps {
+    let edit = (p != before).then_some(Edit::ClipProps {
         clip: id,
         before,
         after: p,
@@ -627,14 +627,13 @@ fn key_page(
             ui.end_row();
         });
     });
-    if k != before {
-        if doc.replace_key(clip_id, channel, frame, k.clone(), "Edit key", g.continuous) {
-            *selection = Selection::Key {
-                clip: clip_id,
-                channel,
-                frame: k.frame,
-            };
-        }
+    if k != before && doc.replace_key(clip_id, channel, frame, k.clone(), "Edit key", g.continuous)
+    {
+        *selection = Selection::Key {
+            clip: clip_id,
+            channel,
+            frame: k.frame,
+        };
     }
     if g.finished {
         doc.end_gesture();
