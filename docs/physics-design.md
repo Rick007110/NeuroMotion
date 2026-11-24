@@ -348,7 +348,9 @@ simulate as if the character went limp.
 
 - Behaviours beyond Balance and CatchFall (stagger, writhe, …), and stepping.
   endorphin's are vendor-protected, so these need original designs.
-- Sever events.
+- Sever events are in (cut a joint, or switch its muscle off; `events.md`), but
+  endorphin's own option names for them are unverified (`endorphin-formats.md`), and
+  a severed joint can't be re-attached later.
 - Virtual-muscle reach springs.
 - Exact cylinders: long ones have rounded ends; flat ones a rounded rim, touching
   flat things at six rim points, the lowest rim point and the point nearest them.

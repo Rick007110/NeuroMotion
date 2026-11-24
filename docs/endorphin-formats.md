@@ -112,6 +112,16 @@ These are what the importer relies on:
 - Event elements live in `Events`, `ForceEvents`, `SecondaryBehaviours`,
   `TertiaryBehaviours` and `SeverBehaviourEvents`. Each has `startFrameNumber`,
   `endFrameNumber`, `priority`, `enabled` and `character`.
+- <a id="sever-events"></a>**Sever events** (`SeverEvent`, in `SeverBehaviourEvents`) are
+  **a best guess**: we have no scene containing one. The importer keeps every
+  attribute and its `Objects` (as `targets`), and the simulation reads `severType`
+  (`Cut` or `MuscleOff`; anything else cuts) and `targets` (`character.MetaBodies.Body`,
+  the body whose joint to its parent is cut), the convention of the other events. endorphin's
+  own names for the type and the target may differ. Then an imported sever
+  event is kept and shown, but it cuts every joint it names that resolves (a missing type
+  means cut) or, if no target resolves, does nothing. To verify
+  against a real scene: look at the clip's *Other imported settings* in the inspector
+  and rename the keys in `physics/sim.rs` and `document/events.rs`.
 - Constraint events give a strength per axis for position and for orientation
   (newtons and newton-metres; 1e5 is effectively unbreakable, 0 leaves the axis free).
   endorphin's help doesn't document negative strengths; scenes use them as drives.
