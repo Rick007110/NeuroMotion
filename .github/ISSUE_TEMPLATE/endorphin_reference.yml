@@ -1,0 +1,48 @@
+name: Reference measurement from endorphin
+description: Record how endorphin behaves in a scene, so NeuroMotion can be tested against it
+labels: ["endorphin reference", "physics"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for measuring! These numbers become tests that keep NeuroMotion's physics close to endorphin's.
+        Describe what endorphin *does*; please don't attach endorphin's own scenes, characters or other files.
+        Screen recordings or screenshots of the viewport that you made yourself are fine.
+  - type: input
+    id: scene
+    attributes:
+      label: Scene
+      description: The scene's name, and whether it's one of endorphin's samples or your own.
+      placeholder: "Back-Flip-To-Combo (my own scene)"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: endorphin version and settings
+      placeholder: "2.5.2, 120 fps physics, default character"
+    validations:
+      required: true
+  - type: textarea
+    id: measurements
+    attributes:
+      label: Measurements
+      description: Frame numbers with what happens there. Angles, heights and contact times are most useful.
+      placeholder: |
+        frame 246: pelvis upright (0°), feet on the box
+        frame 297: pelvis rotated -74° about X
+        frame 329: feet leave the box
+        frame 393: lands on the floor behind the box
+    validations:
+      required: true
+  - type: textarea
+    id: neuromotion
+    attributes:
+      label: What NeuroMotion does differently (optional)
+  - type: checkboxes
+    id: clean
+    attributes:
+      label: Clean-room
+      options:
+        - label: These are my own observations of endorphin's behaviour, not taken from its code or files.
+          required: true
