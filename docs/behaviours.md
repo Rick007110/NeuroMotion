@@ -14,14 +14,17 @@ Code: `src/physics/behaviour.rs`. Tests: `physics::scenes::behaviour_tests` and
 A behaviour runs for the span of an event clip of kind `Behaviour`, matched by its
 `behaviourName` setting, which imported endorphin events carry (the clip's own name
 when it's missing). Matching ignores case, spaces and punctuation, so `CatchFall`
-and `catch fall` both work. Where several overlap, the one that starts last wins.
-Names with no controller yet (`Stagger`, `Writhe`, `BodyFoetal`, …) are ignored: the
+and `catch fall` both work. `BodyFoetal` also answers to `foetal`, `fetal` and
+`bodyfetal`. Where several overlap, the one that starts last wins.
+Names with no controller yet (`Stagger`, …) are ignored: the
 character keeps doing what the timeline otherwise asks.
 
 The behaviour starts from the targets and strengths the timeline gives (active pose,
 active animation, or the pose held since simulation began) and changes what it needs
 to. Controllers keep no state between ticks; everything is read from the bodies, so
-simulations stay deterministic.
+simulations stay deterministic. The one thing they are told besides the bodies is how
+many seconds the behaviour has been running (`Drive::elapsed`), which Writhe uses for
+its slow wandering; that comes from the frame number, so it is deterministic too.
 
 ## Finding the limbs
 
@@ -37,6 +40,24 @@ between rigs, so `Layout` works from the rig's shape in its rest pose instead:
   collarbones, hands and fingers.
 
 A rig without two legs doesn't balance, and one without arms doesn't catch its fall.
+
+Curling and writhing also need each joint's *bend axis*, so `Layout` records, for the
+rest pose (whatever it is: a standing placeholder or a T-pose):
+
+- the **spine**: the trunk branch's chain upwards, so chest, neck and head included;
+- the character's **forward** direction, the horizontal direction from each ankle to
+  its foot's centre, averaged (+Z if the feet give none);
+- per body, its rest rotation relative to its parent, and the directions of the bend
+  axis (up × forward), up and forward in its own frame.
+
+Turning a body about its bend axis by +θ moves up towards forward: it bends a trunk
+forwards and bends a hanging shin's knee, while −θ about it flexes a hanging thigh.
+A chain is aimed by walking down it: each body's wanted rotation is its rest rotation
+relative to its parent, turned about the (wanted) parent's axes. The engine clamps
+muscle targets to the joint limits, so asking for more than a rig can bend is safe.
+Arms don't use the bend axis (a T-pose arm lies along it): they are aimed by segment
+direction, like catch fall, using the chest's current up, forward and outward
+directions.
 
 ## Balance
 
@@ -89,6 +110,44 @@ forwards at 3.5 or 5 m/s, diagonally, sideways or backwards, the hands touch fir
 The head and chest follow half a second or more later, or the arms hold them off the
 ground altogether. Shoved forwards limp, it lands on its face.
 
+## Body foetal
+
+Goal: curl up and protect the head.
+
+1. The trunk bends forwards 0.9 rad in total, shared evenly by its joints (spine,
+   chest, neck, head), so the head bows too.
+2. The hips flex −1.6 rad and the knees bend 2.0 rad.
+3. The arms go over the head: upper arms point forwards, up and out from the chest,
+   forearms fold back towards the head.
+4. The trunk and hips use the rig's `Strong` preset (`Normal` if it has none), everything
+   else `Normal`.
+
+Results on the placeholder (test `body_foetal_curls_up`): it drops limp, then at 1 s
+BodyFoetal runs. Two seconds later, compared with the same scene limp: the shins' centres
+are 0.77 m from the chest (limp 1.10 m), the head 1.00 m from them (limp 1.38 m) and the
+hands 0.14 m from the head (limp 0.83 m). No NaN, joints stretched at most 1 mm,
+fastest body 5.5 m/s (the fall). That is as curled as the placeholder gets: its hips
+stop at 1.4 rad of flexion and its spine joints at 0.5, so the 1.6 rad hip target settles
+at the limit. Rigs with a wider range curl further. The placeholder falls on its back,
+where curling lifts the legs and head against gravity; the tests don't cover the
+character on its side or front.
+
+## Writhe
+
+Goal: a weak, endless struggle, as of a character in pain or trying to get up.
+
+The pose is the foetal one at half strength (hips −0.8, knees 1.0, trunk 0.45 rad, arms
+halfway between hanging and over the head) with slow sines added to every target: bend,
+side bend and twist of each trunk joint (±0.25, 0.3 and 0.2 rad), flexion and sway of the
+hips (±0.5, 0.35), the knees (±0.5) and the arms' directions. Each has its own rate,
+0.5 to 1.5 rad/s, and phase, driven by the time since the event began. There is no
+randomness. The trunk's muscles are 0.6 × `Normal`, all the limbs' 0.3 ×, so the trunk
+leads and the limbs flail along.
+
+Results (test `writhe_keeps_moving_and_is_deterministic`): after 3 s, 14 of the
+placeholder's 17 bodies still move at over 0.1 m/s (mean 0.25 m/s), no NaN, joints
+stretched at most 1.4 mm, fastest body 5.8 m/s. Two runs give bit-identical bodies.
+
 ## Solver change behind them
 
 Balance exposed a limit in the spring cap (lesson 4 in `physics-design.md`): an
@@ -101,7 +160,3 @@ estimates the mass a muscle moves (lesson 9).
 
 - **Stagger**: balance whose support is allowed to move: when the capture point leaves
   the feet, step the swing foot to it.
-- **Writhe**: low-strength, slowly wandering targets around a curled pose, stronger
-  on the trunk than the limbs.
-- **Body foetal**: blend the targets towards a curled pose with high trunk and hip
-  strength, arms over the head.
