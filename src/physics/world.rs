@@ -2068,6 +2068,35 @@ mod tests {
         assert!(body.linear_velocity.length() < 0.05);
     }
 
+    /// Coulomb friction stops a sliding box in v² / (2 μ g) whatever it weighs: 0.82 m
+    /// from 4 m/s at μ = 1 (endorphin's Default, 100). Force-capped friction, 100 N per
+    /// contact, stops a light box in a fraction of that and lets a heavy one slide on
+    /// (lesson 21).
+    #[test]
+    fn coulomb_friction_scales_with_the_load() {
+        let slide = |model: ContactModel, mass: f32| {
+            let mut w = world();
+            w.contact_model = model;
+            let b = ball(&mut w, Vec3::new(0.0, 0.2, 0.0), 0.2, mass);
+            let size = 0.4;
+            w.shapes[b].geometry = Geometry::Box { size: [size; 3] };
+            w.bodies[b].inv_inertia = Vec3::splat(6.0 / (mass * size * size));
+            w.bodies[b].linear_velocity = Vec3::new(4.0, 0.0, 0.0);
+            run(&mut w, 1.5);
+            w.bodies[b].position.x
+        };
+        let [light, heavy] = [10.0, 100.0].map(|m| slide(ContactModel::Coulomb, m));
+        let [capped_light, capped_heavy] =
+            [10.0, 100.0].map(|m| slide(ContactModel::ForceCapped, m));
+        println!(
+            "slid from 4 m/s: Coulomb {light:.2} m (10 kg), {heavy:.2} m (100 kg); \
+             force-capped {capped_light:.2} m, {capped_heavy:.2} m"
+        );
+        for d in [light, heavy] {
+            assert!((d - 0.82).abs() < 0.08, "slid {d} m");
+        }
+    }
+
     /// A ball gliding 1 cm above the ground (inside the contact margin, weightless)
     /// isn't touching it, so friction mustn't hold it; one rolling on it still slows.
     #[test]

@@ -23,8 +23,8 @@ use roxmltree::Node;
 
 use super::IoError;
 use crate::document::physics::{
-    BodyDef, Frame, Gains, Geometry, Ground, Interaction, JointDef, Limits, MuscleGains, MuscleSet,
-    PhysicsRig, ShapeDef,
+    BodyDef, ContactModel, Frame, Gains, Geometry, Ground, Interaction, JointDef, Limits,
+    MuscleGains, MuscleSet, PhysicsRig, ShapeDef,
 };
 use crate::document::{
     Channel, CharacterId, CharacterKind, ClipKind, ClipProps, FrameRange, Interp, Joint, Keyframe,
@@ -981,6 +981,8 @@ fn read_physics_settings(project: &mut Project, scene: Node, engine: Node) {
     if let Some(g) = vec3(child(engine, "Gravity")) {
         settings.gravity = g.to_array();
     }
+    // endorphin's friction values are Coulomb coefficients × 100 (lesson 21).
+    settings.contact = ContactModel::Coulomb;
     settings.ground = (scene.attribute("useDefaultGround") != Some("false")).then(|| Ground {
         height: 0.0,
         material: "tarmac".into(),

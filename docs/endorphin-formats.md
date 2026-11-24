@@ -137,6 +137,13 @@ These are what the importer relies on:
   of (-100, 0, 0) on pelvis and spine. NeuroMotion reads a negative axis as a steady
   force or torque of that value along the axis (world axes for locks, the anchor's
   for joins), on the locked body and the opposite on its anchor, instead of a hold.
+- `MaterialInteraction`s give `friction`, `restitution`, `maxAdhesiveForce` (N) and
+  `softness`; `MaterialPair`s name the interaction for two materials. The friction
+  value is a Coulomb coefficient × 100: the sample scenes use 1 (Icy), 100
+  (Default), 300 (Grippy, rubber on tarmac) and 700 (Sticky, with 700 N of
+  adhesion), and Car Hit only behaves as endorphin's does read that way
+  (`physics-design.md`, lesson 21). NeuroMotion used to read it as a force cap per
+  contact in newtons.
 - A body's mass is its inertial shape's volume times its density (g/cm³). A
   character's body can come out with none: Back-Flip-To-Combo's NormalMass is a
   zero-sized Sphyl. Only the environment's massless pieces stay fixed in place;
