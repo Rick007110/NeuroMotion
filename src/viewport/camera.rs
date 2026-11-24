@@ -67,7 +67,8 @@ impl OrbitCamera {
         let forward = (self.target - self.eye()).normalize();
         let right = forward.cross(Vec3::Y).normalize();
         let up = right.cross(forward);
-        let world_per_px = 2.0 * self.distance * (self.fov_y * 0.5).tan() / viewport_height.max(1.0);
+        let world_per_px =
+            2.0 * self.distance * (self.fov_y * 0.5).tan() / viewport_height.max(1.0);
         self.target += (-right * drag.x + up * drag.y) * world_per_px;
     }
 

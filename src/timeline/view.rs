@@ -76,7 +76,10 @@ mod tests {
 
     #[test]
     fn mapping_round_trips() {
-        let v = TimelineView { first_frame: 10.0, px_per_frame: 3.0 };
+        let v = TimelineView {
+            first_frame: 10.0,
+            px_per_frame: 3.0,
+        };
         let x = v.frame_to_x(42.0, 100.0);
         assert!((v.x_to_frame(x, 100.0) - 42.0).abs() < 1e-4);
     }
@@ -92,7 +95,10 @@ mod tests {
 
     #[test]
     fn zoom_keeps_anchor_in_place() {
-        let mut v = TimelineView { first_frame: 0.0, px_per_frame: 4.0 };
+        let mut v = TimelineView {
+            first_frame: 0.0,
+            px_per_frame: 4.0,
+        };
         let before = v.frame_to_x(50.0, 0.0);
         v.zoom_at(2.0, 50.0);
         assert!((v.frame_to_x(50.0, 0.0) - before).abs() < 1e-3);
@@ -101,8 +107,14 @@ mod tests {
 
     #[test]
     fn tick_step_grows_when_zoomed_out() {
-        let near = TimelineView { first_frame: 0.0, px_per_frame: 20.0 };
-        let far = TimelineView { first_frame: 0.0, px_per_frame: 0.5 };
+        let near = TimelineView {
+            first_frame: 0.0,
+            px_per_frame: 20.0,
+        };
+        let far = TimelineView {
+            first_frame: 0.0,
+            px_per_frame: 0.5,
+        };
         assert!(near.tick_step(60.0) < far.tick_step(60.0));
     }
 }

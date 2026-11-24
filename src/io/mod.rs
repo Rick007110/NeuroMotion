@@ -35,8 +35,15 @@ pub struct Opened {
 
 /// Opens a NeuroMotion project or an endorphin scene/character, chosen by extension.
 pub fn open(path: &Path) -> Result<Opened, IoError> {
-    let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    let imported = |import: endorphin::Import| Opened { project: import.project, native: false, notes: import.notes };
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    let imported = |import: endorphin::Import| Opened {
+        project: import.project,
+        native: false,
+        notes: import.notes,
+    };
     match ext.as_str() {
         "ens" => endorphin::import_scene(path).map(imported),
         "nmc" => endorphin::import_character(path).map(imported),
@@ -130,9 +137,17 @@ pub fn from_str(text: &str) -> Result<Project, IoError> {
 /// v1 projects had a single top-level `skeleton`; v2 has `characters` and every track
 /// names its character.
 fn migrate_v1(project: &mut Value) {
-    let Some(map) = project.as_object_mut() else { return };
-    let ids = ["tracks", "clips"].iter().flat_map(|k| map.get(*k).and_then(Value::as_array)).flatten();
-    let highest = ids.filter_map(|item| item.get("id").and_then(Value::as_u64)).max().unwrap_or(0);
+    let Some(map) = project.as_object_mut() else {
+        return;
+    };
+    let ids = ["tracks", "clips"]
+        .iter()
+        .flat_map(|k| map.get(*k).and_then(Value::as_array))
+        .flatten();
+    let highest = ids
+        .filter_map(|item| item.get("id").and_then(Value::as_u64))
+        .max()
+        .unwrap_or(0);
     let character = highest.max(map.get("next_id").and_then(Value::as_u64).unwrap_or(0)) + 1;
     if let Some(skeleton) = map.remove("skeleton") {
         map.insert(
@@ -183,7 +198,10 @@ mod tests {
 
         let migrated = from_str(&v1).unwrap();
         assert_eq!(migrated.characters.len(), 1);
-        assert_eq!(migrated.characters[0].skeleton, project.characters[0].skeleton);
+        assert_eq!(
+            migrated.characters[0].skeleton,
+            project.characters[0].skeleton
+        );
         let character = migrated.characters[0].id;
         assert!(migrated.tracks.iter().all(|t| t.character == character));
         assert_eq!(migrated.evaluate(120.0), project.evaluate(120.0));
@@ -215,7 +233,10 @@ mod tests {
           }
         }"#;
         let project = from_str(text).unwrap();
-        assert_eq!(project.characters[0].default_level, crate::document::SimLevel::Animated);
+        assert_eq!(
+            project.characters[0].default_level,
+            crate::document::SimLevel::Animated
+        );
         assert!(project.characters[0].physics.is_none());
         assert_eq!(project.evaluate(30.0)[0].joints[1][0], 20.0);
         // Edits made by this build allocate ids past the loaded ones.

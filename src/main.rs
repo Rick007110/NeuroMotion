@@ -8,6 +8,9 @@
 //! * `viewport` – camera and character preview drawing
 //! * `ui`       – the egui application shell and panels
 
+// Release builds on Windows open without a console window behind the app.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod document;
 mod io;
 mod physics;

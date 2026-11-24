@@ -35,7 +35,9 @@ impl Project {
             .map(|c| Pose::rest(c.skeleton.joints.len()))
             .collect();
         for track in self.tracks.iter().filter(|t| !t.muted) {
-            let Some(ci) = self.character_index(track.character) else { continue };
+            let Some(ci) = self.character_index(track.character) else {
+                continue;
+            };
             let skeleton = &self.characters[ci].skeleton;
             let pose = &mut poses[ci];
             let mut clips: Vec<_> = self
@@ -90,7 +92,10 @@ pub fn world_transforms(skeleton: &SkeletonRef, pose: &Pose) -> Vec<(Quat, Vec3)
         let transform = match joint.parent.filter(|&p| p < i) {
             Some(p) => {
                 let (parent_rot, parent_pos) = out[p];
-                ((parent_rot * local).normalize(), parent_pos + parent_rot * offset)
+                (
+                    (parent_rot * local).normalize(),
+                    parent_pos + parent_rot * offset,
+                )
             }
             None => (local, offset),
         };

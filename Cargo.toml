@@ -2,6 +2,7 @@
 name = "neuromotion"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
 description = "A timeline-based motion editor for physically simulated character animation that opens endorphin scenes."
 license = "GPL-3.0-or-later"
 repository = "https://github.com/Rick007110/NeuroMotion"
@@ -15,3 +16,10 @@ rfd = "0.17.2"
 roxmltree = "0.21.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+
+[lints.clippy]
+# The physics code indexes small fixed-size matrices and vectors by row and column;
+# index loops read more clearly there than iterator chains.
+needless_range_loop = "allow"
+# Test scene builders take many plain parameters on purpose.
+too_many_arguments = "allow"

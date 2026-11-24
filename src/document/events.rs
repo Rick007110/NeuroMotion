@@ -54,7 +54,12 @@ pub fn edited_keys(event: &str) -> &'static [&'static str] {
         FORCE => &[keys::VELOCITY, keys::TARGETS],
         TRANSITION => &[keys::REQUIRED_LEVEL],
         ACTIVE_POSE => &[keys::STRENGTH, keys::ENTRY_BLEND],
-        CONSTRAINT => &[keys::LOCK_TYPE, keys::TARGETS, keys::POSITION_STRENGTH, keys::ANGULAR_STRENGTH],
+        CONSTRAINT => &[
+            keys::LOCK_TYPE,
+            keys::TARGETS,
+            keys::POSITION_STRENGTH,
+            keys::ANGULAR_STRENGTH,
+        ],
         BEHAVIOUR => &[keys::BEHAVIOUR_NAME],
         _ => &[],
     }
@@ -72,8 +77,14 @@ pub enum NewClip {
 }
 
 impl NewClip {
-    pub const ALL: [NewClip; 6] =
-        [NewClip::Motion, NewClip::Simulation, NewClip::Force, NewClip::Transition, NewClip::ActivePose, NewClip::Constraint];
+    pub const ALL: [NewClip; 6] = [
+        NewClip::Motion,
+        NewClip::Simulation,
+        NewClip::Force,
+        NewClip::Transition,
+        NewClip::ActivePose,
+        NewClip::Constraint,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -89,7 +100,9 @@ impl NewClip {
     pub fn description(self) -> &'static str {
         match self {
             NewClip::Motion => "An empty clip to key joints in",
-            NewClip::Simulation => "Switches the character's simulation level (e.g. goes limp into physics)",
+            NewClip::Simulation => {
+                "Switches the character's simulation level (e.g. goes limp into physics)"
+            }
             NewClip::Force => "A push: a sudden change of velocity on one body",
             NewClip::Transition => "Blends the simulation back to the animation",
             NewClip::ActivePose => "Muscles pull towards the pose at the playhead",
@@ -137,7 +150,12 @@ pub struct ClipTemplate {
 
 /// A new clip of `kind` for `character`, with settings that do something sensible right
 /// away. `pose` (world joint transforms) is what an active pose holds.
-pub fn template(kind: NewClip, project: &Project, character: &Character, pose: Option<&[(Quat, Vec3)]>) -> ClipTemplate {
+pub fn template(
+    kind: NewClip,
+    project: &Project,
+    character: &Character,
+    pose: Option<&[(Quat, Vec3)]>,
+) -> ClipTemplate {
     let fps = project.settings.fps.max(1.0);
     let seconds = |s: f32| ((s * fps).round() as i32).max(1);
     let mut source = BTreeMap::new();
@@ -152,9 +170,18 @@ pub fn template(kind: NewClip, project: &Project, character: &Character, pose: O
             // Backwards and a little up, into the heaviest body (usually the torso).
             set_vector(&mut source, keys::VELOCITY, push(3.0, 180.0, 10.0));
             let heaviest = character.physics.as_ref().and_then(|rig| {
-                rig.bodies.iter().max_by(|a, b| a.mass.total_cmp(&b.mass)).map(|b| b.name.clone())
+                rig.bodies
+                    .iter()
+                    .max_by(|a, b| a.mass.total_cmp(&b.mass))
+                    .map(|b| b.name.clone())
             });
-            let targets: Vec<BodyRef> = heaviest.into_iter().map(|body| BodyRef { character: character.name.clone(), body }).collect();
+            let targets: Vec<BodyRef> = heaviest
+                .into_iter()
+                .map(|body| BodyRef {
+                    character: character.name.clone(),
+                    body,
+                })
+                .collect();
             set_targets(&mut source, &targets);
             ("Push", 1, Vec::new())
         }
@@ -165,21 +192,49 @@ pub fn template(kind: NewClip, project: &Project, character: &Character, pose: O
         NewClip::ActivePose => {
             set_number(&mut source, keys::STRENGTH, 1.0);
             set_number(&mut source, keys::ENTRY_BLEND, 0.2);
-            ("Hold pose", seconds(1.0), pose.map(|p| pose_channels(character, p)).unwrap_or_default())
+            (
+                "Hold pose",
+                seconds(1.0),
+                pose.map(|p| pose_channels(character, p))
+                    .unwrap_or_default(),
+            )
         }
         NewClip::Constraint => {
-            source.insert(keys::LOCK_TYPE.to_owned(), LockType::Lock.endorphin_name().to_owned());
-            let root = character.physics.as_ref().and_then(|rig| rig.bodies.first()).map(|b| b.name.clone());
-            let targets: Vec<BodyRef> = root.into_iter().map(|body| BodyRef { character: character.name.clone(), body }).collect();
+            source.insert(
+                keys::LOCK_TYPE.to_owned(),
+                LockType::Lock.endorphin_name().to_owned(),
+            );
+            let root = character
+                .physics
+                .as_ref()
+                .and_then(|rig| rig.bodies.first())
+                .map(|b| b.name.clone());
+            let targets: Vec<BodyRef> = root
+                .into_iter()
+                .map(|body| BodyRef {
+                    character: character.name.clone(),
+                    body,
+                })
+                .collect();
             set_targets(&mut source, &targets);
-            set_vector(&mut source, keys::POSITION_STRENGTH, Vec3::splat(DEFAULT_LOCK_STRENGTH));
-            set_vector(&mut source, keys::ANGULAR_STRENGTH, Vec3::splat(DEFAULT_LOCK_STRENGTH));
+            set_vector(
+                &mut source,
+                keys::POSITION_STRENGTH,
+                Vec3::splat(DEFAULT_LOCK_STRENGTH),
+            );
+            set_vector(
+                &mut source,
+                keys::ANGULAR_STRENGTH,
+                Vec3::splat(DEFAULT_LOCK_STRENGTH),
+            );
             ("Lock", seconds(1.0), Vec::new())
         }
     };
     ClipTemplate {
         name: name.to_owned(),
-        kind: kind.event().map_or(ClipKind::Motion, |e| ClipKind::Event { event: e.to_owned() }),
+        kind: kind.event().map_or(ClipKind::Motion, |e| ClipKind::Event {
+            event: e.to_owned(),
+        }),
         duration,
         channels,
         source,
@@ -195,7 +250,10 @@ pub fn pose_channels(character: &Character, pose: &[(Quat, Vec3)]) -> Vec<Channe
     if pose.len() != character.skeleton.joints.len() {
         return Vec::new();
     }
-    bake_channels(&character.skeleton, &[pose.to_vec()]).into_iter().filter(|c| c.property.is_rotation()).collect()
+    bake_channels(&character.skeleton, &[pose.to_vec()])
+        .into_iter()
+        .filter(|c| c.property.is_rotation())
+        .collect()
 }
 
 /// A velocity change from a speed (m/s), a heading (degrees about the up axis, 0 = +Z,
@@ -251,7 +309,11 @@ pub fn set_number(source: &mut BTreeMap<String, String>, key: &str, value: f32) 
 }
 
 pub fn vector(source: &BTreeMap<String, String>, key: &str) -> Option<Vec3> {
-    let v: Vec<f32> = source.get(key)?.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+    let v: Vec<f32> = source
+        .get(key)?
+        .split(',')
+        .filter_map(|p| p.trim().parse().ok())
+        .collect();
     (v.len() == 3).then(|| Vec3::new(v[0], v[1], v[2]))
 }
 
@@ -279,13 +341,21 @@ impl BodyRef {
 }
 
 pub fn targets(source: &BTreeMap<String, String>) -> Vec<BodyRef> {
-    let Some(list) = source.get(keys::TARGETS) else { return Vec::new() };
+    let Some(list) = source.get(keys::TARGETS) else {
+        return Vec::new();
+    };
     list.split(',')
         .map(str::trim)
         .filter(|t| !t.is_empty())
         .map(|t| match t.split_once(".MetaBodies.") {
-            Some((character, body)) => BodyRef { character: character.to_owned(), body: body.to_owned() },
-            None => BodyRef { character: String::new(), body: t.rsplit('.').next().unwrap_or(t).to_owned() },
+            Some((character, body)) => BodyRef {
+                character: character.to_owned(),
+                body: body.to_owned(),
+            },
+            None => BodyRef {
+                character: String::new(),
+                body: t.rsplit('.').next().unwrap_or(t).to_owned(),
+            },
         })
         .collect()
 }
@@ -296,7 +366,10 @@ pub fn set_targets(source: &mut BTreeMap<String, String>, targets: &[BodyRef]) {
         source.remove(keys::TARGETS);
         return;
     }
-    let list: Vec<String> = targets.iter().map(|t| format!("{}.MetaBodies.{}", t.character, t.body)).collect();
+    let list: Vec<String> = targets
+        .iter()
+        .map(|t| format!("{}.MetaBodies.{}", t.character, t.body))
+        .collect();
     source.insert(keys::TARGETS.to_owned(), list.join(", "));
 }
 
@@ -312,7 +385,12 @@ pub enum LockType {
 }
 
 impl LockType {
-    pub const ALL: [LockType; 4] = [LockType::Lock, LockType::LockPosition, LockType::LockOrientation, LockType::Join];
+    pub const ALL: [LockType; 4] = [
+        LockType::Lock,
+        LockType::LockPosition,
+        LockType::LockOrientation,
+        LockType::Join,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {

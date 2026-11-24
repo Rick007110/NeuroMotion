@@ -10,9 +10,16 @@ pub enum Selection {
     Character(CharacterId),
     Track(TrackId),
     Clip(ClipId),
-    Channel { clip: ClipId, channel: usize },
+    Channel {
+        clip: ClipId,
+        channel: usize,
+    },
     /// Keys are identified by their clip-local frame (unique within a channel).
-    Key { clip: ClipId, channel: usize, frame: i32 },
+    Key {
+        clip: ClipId,
+        channel: usize,
+        frame: i32,
+    },
 }
 
 impl Selection {
@@ -36,7 +43,10 @@ impl Selection {
     }
 
     pub fn is_deletable(self) -> bool {
-        matches!(self, Selection::Track(_) | Selection::Clip(_) | Selection::Key { .. })
+        matches!(
+            self,
+            Selection::Track(_) | Selection::Clip(_) | Selection::Key { .. }
+        )
     }
 
     /// Falls back to the nearest still-existing parent after undo/redo or deletion
@@ -51,7 +61,11 @@ impl Selection {
                 Selection::Channel { clip, channel } => project
                     .clip(clip)
                     .is_some_and(|c| channel < c.channels.len()),
-                Selection::Key { clip, channel, frame } => project
+                Selection::Key {
+                    clip,
+                    channel,
+                    frame,
+                } => project
                     .clip(clip)
                     .and_then(|c| c.channels.get(channel))
                     .is_some_and(|ch| ch.key(frame).is_some()),

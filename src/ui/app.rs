@@ -12,7 +12,10 @@ use super::selection::Selection;
 use super::timeline_panel::{self, TimelineState};
 use super::{inspector, shortcuts, theme};
 use crate::document::events::{self, NewClip};
-use crate::document::{CharacterId, ClipKind, ClipProps, Document, Edit, Project, SimLevel, TrackId, sample, world_transforms};
+use crate::document::{
+    CharacterId, ClipKind, ClipProps, Document, Edit, Project, SimLevel, TrackId, sample,
+    world_transforms,
+};
 use crate::io::{self, motion};
 use crate::physics::Simulation;
 use crate::timeline::Playback;
@@ -110,7 +113,10 @@ impl NeuroMotionApp {
         }
         // Any edit bumps the revision, which throws away stale frames.
         self.simulation.sync(revision);
-        if !self.simulation.advance(&self.doc.project, Instant::now() + SIMULATION_BUDGET) {
+        if !self
+            .simulation
+            .advance(&self.doc.project, Instant::now() + SIMULATION_BUDGET)
+        {
             ctx.request_repaint();
         }
     }
@@ -121,7 +127,11 @@ impl NeuroMotionApp {
         match self.selection {
             Selection::Character(id) => Some(id),
             Selection::Track(id) => project.track(id).map(|t| t.character),
-            other => other.clip().and_then(|id| project.clip(id)).and_then(|c| project.clip_character(c)).map(|c| c.id),
+            other => other
+                .clip()
+                .and_then(|id| project.clip(id))
+                .and_then(|c| project.clip_character(c))
+                .map(|c| c.id),
         }
     }
 
@@ -134,18 +144,27 @@ impl NeuroMotionApp {
     fn character_views(&self) -> Vec<CharacterView> {
         let project = &self.doc.project;
         let poses = project.evaluate(self.playback.playhead() as f32);
-        let simulated = self.physics_on().then(|| self.simulation.frame(self.playback.frame())).flatten();
+        let simulated = self
+            .physics_on()
+            .then(|| self.simulation.frame(self.playback.frame()))
+            .flatten();
         project
             .characters
             .iter()
             .enumerate()
-            .map(|(ci, character)| match simulated.and_then(|f| f.get(ci)).and_then(Option::as_ref) {
-                Some(frame) => CharacterView {
-                    joints: frame.joints.iter().map(|j| j.1).collect(),
-                    bodies: Some(frame.bodies.clone()),
-                    simulated: frame.level == SimLevel::Simulated,
-                },
-                None => CharacterView::animated(&character.skeleton, character.physics.as_ref(), &poses[ci]),
+            .map(|(ci, character)| {
+                match simulated.and_then(|f| f.get(ci)).and_then(Option::as_ref) {
+                    Some(frame) => CharacterView {
+                        joints: frame.joints.iter().map(|j| j.1).collect(),
+                        bodies: Some(frame.bodies.clone()),
+                        simulated: frame.level == SimLevel::Simulated,
+                    },
+                    None => CharacterView::animated(
+                        &character.skeleton,
+                        character.physics.as_ref(),
+                        &poses[ci],
+                    ),
+                }
             })
             .collect()
     }
@@ -167,7 +186,8 @@ impl NeuroMotionApp {
             }
             Action::OpenPhysicsDemo => {
                 self.load(sample::physics_demo_project(), None);
-                self.status = "Physics demo loaded: press Space. The character is shoved at frame 45.".into();
+                self.status =
+                    "Physics demo loaded: press Space. The character is shoved at frame 45.".into();
             }
             Action::OpenProject => match self.queued_open.take() {
                 Some(path) => self.open_path(path),
@@ -219,7 +239,12 @@ impl NeuroMotionApp {
             Action::GoToEnd => self.playback.seek(range.end as f64, range),
             Action::ToggleLoop => {
                 self.playback.looping = !self.playback.looping;
-                self.status = if self.playback.looping { "Looping on." } else { "Looping off." }.into();
+                self.status = if self.playback.looping {
+                    "Looping on."
+                } else {
+                    "Looping off."
+                }
+                .into();
             }
             Action::FitTimeline => self.timeline.fit_requested = true,
             Action::ResetCamera => {
@@ -252,7 +277,10 @@ impl NeuroMotionApp {
                 self.load(opened.project, Some(path));
             }
             Ok(opened) => {
-                self.status = format!("Imported {}. Save to keep it as a NeuroMotion project.", path.display());
+                self.status = format!(
+                    "Imported {}. Save to keep it as a NeuroMotion project.",
+                    path.display()
+                );
                 self.load(opened.project, None);
                 self.import_report = Some((file_name(&path), opened.notes));
             }
@@ -264,7 +292,10 @@ impl NeuroMotionApp {
     fn import_pose(&mut self, path: Option<PathBuf>) {
         let path = match path {
             Some(path) => path,
-            None => match rfd::FileDialog::new().add_filter("endorphin pose", &["nma"]).pick_file() {
+            None => match rfd::FileDialog::new()
+                .add_filter("endorphin pose", &["nma"])
+                .pick_file()
+            {
                 Some(path) => path,
                 None => return,
             },
@@ -276,7 +307,13 @@ impl NeuroMotionApp {
                 return;
             }
         };
-        let Some(track) = self.doc.project.tracks_of(pose.character).next().map(|t| t.id) else {
+        let Some(track) = self
+            .doc
+            .project
+            .tracks_of(pose.character)
+            .next()
+            .map(|t| t.id)
+        else {
             self.status = "That character has no track to put the pose on.".into();
             return;
         };
@@ -293,14 +330,25 @@ impl NeuroMotionApp {
         };
         let clip = self.doc.insert_clip(props, ClipKind::Motion, pose.channels);
         self.selection = Selection::Clip(clip);
-        self.status = format!("Imported pose \u{201c}{}\u{201d} at frame {start}.", pose.name);
+        self.status = format!(
+            "Imported pose \u{201c}{}\u{201d} at frame {start}.",
+            pose.name
+        );
     }
 
     /// Files dropped on the window: poses go onto the timeline, anything else opens.
     fn handle_dropped_files(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
-        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
+        let dropped: Vec<PathBuf> = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .filter_map(|f| f.path.clone())
+                .collect()
+        });
         for path in dropped {
-            let is_pose = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("nma"));
+            let is_pose = path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("nma"));
             if is_pose {
                 self.import_pose(Some(path));
             } else {
@@ -314,7 +362,8 @@ impl NeuroMotionApp {
         let path = match (&self.doc.path, choose_path) {
             (Some(path), false) => path.clone(),
             _ => {
-                let suggested = format!("{}.{}", self.doc.project.settings.name, io::FILE_EXTENSION);
+                let suggested =
+                    format!("{}.{}", self.doc.project.settings.name, io::FILE_EXTENSION);
                 let Some(path) = rfd::FileDialog::new()
                     .add_filter("NeuroMotion project", &[io::FILE_EXTENSION])
                     .set_file_name(suggested)
@@ -339,7 +388,9 @@ impl NeuroMotionApp {
             self.status = "Select a channel (or key) to add a key to.".into();
             return;
         };
-        let Some(clip) = self.doc.project.clip(clip_id) else { return };
+        let Some(clip) = self.doc.project.clip(clip_id) else {
+            return;
+        };
         let frame = self.playback.frame();
         if !clip.props.contains(frame as f32) {
             self.status = "The playhead is outside the selected clip.".into();
@@ -347,14 +398,22 @@ impl NeuroMotionApp {
         }
         let local = frame - clip.props.start;
         if self.doc.insert_key(clip_id, channel, local) {
-            self.selection = Selection::Key { clip: clip_id, channel, frame: local };
+            self.selection = Selection::Key {
+                clip: clip_id,
+                channel,
+                frame: local,
+            };
             self.status = format!("Keyed at frame {frame}.");
         }
     }
 
     fn delete_selection(&mut self) {
         match self.selection {
-            Selection::Key { clip, channel, frame } => {
+            Selection::Key {
+                clip,
+                channel,
+                frame,
+            } => {
                 if self.doc.remove_key(clip, channel, frame) {
                     self.selection = Selection::Channel { clip, channel };
                 }
@@ -378,7 +437,10 @@ impl NeuroMotionApp {
     pub(super) fn target_character(&self) -> Option<CharacterId> {
         let project = &self.doc.project;
         self.selected_character().or_else(|| {
-            let first = project.characters.iter().find(|c| c.kind != crate::document::CharacterKind::Environment);
+            let first = project
+                .characters
+                .iter()
+                .find(|c| c.kind != crate::document::CharacterKind::Environment);
             first.or(project.characters.first()).map(|c| c.id)
         })
     }
@@ -387,7 +449,11 @@ impl NeuroMotionApp {
     fn add_clip(&mut self, kind: NewClip, at: Option<(TrackId, i32)>) {
         let project = &self.doc.project;
         let (character, track, frame) = match at {
-            Some((track, frame)) => (project.track(track).map(|t| t.character), Some(track), frame),
+            Some((track, frame)) => (
+                project.track(track).map(|t| t.character),
+                Some(track),
+                frame,
+            ),
             None => {
                 let track = match self.selection {
                     Selection::Track(id) => Some(id),
@@ -402,14 +468,24 @@ impl NeuroMotionApp {
         };
         let owner = &project.characters[index];
         if kind.needs_physics() && owner.physics.is_none() {
-            self.status = format!("{} has no physics body, so a {} event would do nothing.", owner.name, kind.label().to_lowercase());
+            self.status = format!(
+                "{} has no physics body, so a {} event would do nothing.",
+                owner.name,
+                kind.label().to_lowercase()
+            );
             return;
         }
         let pose = (kind == NewClip::ActivePose).then(|| self.displayed_pose(index));
-        if let Some(clip) = self.doc.add_new_clip(kind, owner.id, track, frame, pose.as_deref()) {
+        if let Some(clip) = self
+            .doc
+            .add_new_clip(kind, owner.id, track, frame, pose.as_deref())
+        {
             self.selection = Selection::Clip(clip);
             self.status = match kind {
-                NewClip::ActivePose => format!("Added an active pose holding the pose at frame {}.", self.playback.frame()),
+                NewClip::ActivePose => format!(
+                    "Added an active pose holding the pose at frame {}.",
+                    self.playback.frame()
+                ),
                 _ => format!("Added {} at frame {frame}.", kind.label().to_lowercase()),
             };
         }
@@ -419,9 +495,19 @@ impl NeuroMotionApp {
     fn capture_pose(&mut self, clip: crate::document::ClipId) {
         let project = &self.doc.project;
         let Some(c) = project.clip(clip) else { return };
-        let Some(index) = project.clip_character(c).and_then(|ch| project.character_index(ch.id)) else { return };
-        let channels = events::pose_channels(&project.characters[index], &self.displayed_pose(index));
-        let edit = Edit::ClipChannels { clip, before: c.channels.clone(), after: channels };
+        let Some(index) = project
+            .clip_character(c)
+            .and_then(|ch| project.character_index(ch.id))
+        else {
+            return;
+        };
+        let channels =
+            events::pose_channels(&project.characters[index], &self.displayed_pose(index));
+        let edit = Edit::ClipChannels {
+            clip,
+            before: c.channels.clone(),
+            after: channels,
+        };
         self.doc.apply("Capture pose", edit, false);
         self.status = format!("Captured the pose at frame {}.", self.playback.frame());
     }
@@ -431,10 +517,19 @@ impl NeuroMotionApp {
     fn displayed_pose(&self, index: usize) -> Vec<(glam::Quat, glam::Vec3)> {
         let project = &self.doc.project;
         let frame = self.playback.frame();
-        let simulated = self.physics_on().then(|| self.simulation.frame(frame)).flatten();
-        match simulated.and_then(|f| f.get(index)).and_then(Option::as_ref) {
+        let simulated = self
+            .physics_on()
+            .then(|| self.simulation.frame(frame))
+            .flatten();
+        match simulated
+            .and_then(|f| f.get(index))
+            .and_then(Option::as_ref)
+        {
             Some(state) => state.joints.clone(),
-            None => world_transforms(&project.characters[index].skeleton, &project.evaluate(frame as f32)[index]),
+            None => world_transforms(
+                &project.characters[index].skeleton,
+                &project.evaluate(frame as f32)[index],
+            ),
         }
     }
 
@@ -442,7 +537,10 @@ impl NeuroMotionApp {
     pub(super) fn can_bake(&self) -> bool {
         let project = &self.doc.project;
         self.physics_on()
-            && self.selected_character().and_then(|id| project.character(id)).is_some_and(|c| c.physics.is_some())
+            && self
+                .selected_character()
+                .and_then(|id| project.character(id))
+                .is_some_and(|c| c.physics.is_some())
     }
 
     /// Replaces the selected character's simulation over the project range with keys.
@@ -452,7 +550,9 @@ impl NeuroMotionApp {
             return;
         };
         let project = &self.doc.project;
-        let Some(index) = project.character_index(id) else { return };
+        let Some(index) = project.character_index(id) else {
+            return;
+        };
         let name = project.characters[index].name.clone();
         if !Simulation::is_needed(project) {
             self.status = format!("{name} isn't simulated, so there's nothing to bake.");
@@ -461,11 +561,17 @@ impl NeuroMotionApp {
         motion::finish(&mut self.simulation, project, self.doc.revision());
         let range = project.settings.range;
         let simulated = (range.start..=range.end).any(|f| {
-            let state = self.simulation.frame(f).and_then(|s| s.get(index)).and_then(Option::as_ref);
+            let state = self
+                .simulation
+                .frame(f)
+                .and_then(|s| s.get(index))
+                .and_then(Option::as_ref);
             state.is_some_and(|s| s.level != SimLevel::Animated)
         });
         if !simulated {
-            self.status = format!("{name} is never simulated in the project range, so there's nothing to bake.");
+            self.status = format!(
+                "{name} is never simulated in the project range, so there's nothing to bake."
+            );
             return;
         }
         let motion = motion::sample(project, index, Some(&self.simulation));
@@ -483,10 +589,15 @@ impl NeuroMotionApp {
 
     fn update_title(&mut self, ctx: &egui::Context) {
         let name = match &self.doc.path {
-            Some(path) => path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
+            Some(path) => path
+                .file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
             None => self.doc.project.settings.name.clone(),
         };
-        let title = format!("{}{name} — NeuroMotion", if self.doc.is_dirty() { "• " } else { "" });
+        let title = format!(
+            "{}{name} — NeuroMotion",
+            if self.doc.is_dirty() { "• " } else { "" }
+        );
         if title != self.title {
             ctx.send_viewport_cmd(ViewportCommand::Title(title.clone()));
             self.title = title;
@@ -527,7 +638,9 @@ impl NeuroMotionApp {
             self.playback.state().label()
         )];
         for (id, weight) in project.active_clips(playhead) {
-            let Some(clip) = project.clip(id) else { continue };
+            let Some(clip) = project.clip(id) else {
+                continue;
+            };
             let who = project.clip_character(clip).map_or("", |c| c.name.as_str());
             let kind = match &clip.kind {
                 ClipKind::Motion => format!("{:>3.0}%", weight * 100.0),
@@ -544,8 +657,15 @@ impl NeuroMotionApp {
             }
             if let Some(frame) = self.simulation.frame(self.playback.frame()) {
                 for (character, state) in project.characters.iter().zip(frame) {
-                    if let Some(state) = state.as_ref().filter(|_| character.kind != crate::document::CharacterKind::Environment) {
-                        lines.push(format!("  {:<12} {}", character.name, state.level.label().to_lowercase()));
+                    if let Some(state) = state
+                        .as_ref()
+                        .filter(|_| character.kind != crate::document::CharacterKind::Environment)
+                    {
+                        lines.push(format!(
+                            "  {:<12} {}",
+                            character.name,
+                            state.level.label().to_lowercase()
+                        ));
                     }
                 }
             }
@@ -560,7 +680,10 @@ impl NeuroMotionApp {
                 .resizable(false)
                 .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ctx, |ui| {
-                    ui.label(format!("“{}” has unsaved changes.", self.doc.project.settings.name));
+                    ui.label(format!(
+                        "“{}” has unsaved changes.",
+                        self.doc.project.settings.name
+                    ));
                     ui.label(format!("{} anyway and lose them?", action.label()));
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
@@ -603,13 +726,18 @@ impl NeuroMotionApp {
             .show(ctx, |ui| {
                 ui.weak("Defined in src/ui/shortcuts.rs (BINDINGS).");
                 ui.add_space(4.0);
-                egui::Grid::new("shortcut_table").striped(true).num_columns(2).show(ui, |ui| {
-                    for binding in shortcuts::BINDINGS {
-                        ui.label(binding.action.label());
-                        ui.label(RichText::new(ctx.format_shortcut(&binding.shortcut)).monospace());
-                        ui.end_row();
-                    }
-                });
+                egui::Grid::new("shortcut_table")
+                    .striped(true)
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        for binding in shortcuts::BINDINGS {
+                            ui.label(binding.action.label());
+                            ui.label(
+                                RichText::new(ctx.format_shortcut(&binding.shortcut)).monospace(),
+                            );
+                            ui.end_row();
+                        }
+                    });
             });
 
         egui::Window::new("About NeuroMotion")
@@ -632,14 +760,18 @@ impl eframe::App for NeuroMotionApp {
         self.handle_dropped_files(ctx, &mut actions);
         self.advance_simulation(ctx);
 
-        if ctx.input(|i| i.viewport().close_requested()) && self.doc.is_dirty() && !self.close_confirmed {
+        if ctx.input(|i| i.viewport().close_requested())
+            && self.doc.is_dirty()
+            && !self.close_confirmed
+        {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             self.pending_discard = Some(Action::Quit);
         }
 
         let settings = &self.doc.project.settings;
         let dt = ctx.input(|i| i.unstable_dt).min(0.1) as f64;
-        self.playback.advance(dt, settings.fps as f64, settings.range);
+        self.playback
+            .advance(dt, settings.fps as f64, settings.range);
         if self.playback.is_playing() {
             ctx.request_repaint();
         }
@@ -670,7 +802,13 @@ impl eframe::App for NeuroMotionApp {
                 .min_width(240.0)
                 .show(ctx, |ui| {
                     let playhead = self.playback.playhead() as f32;
-                    inspector::show(ui, &mut self.doc, &mut self.selection, playhead, &mut actions)
+                    inspector::show(
+                        ui,
+                        &mut self.doc,
+                        &mut self.selection,
+                        playhead,
+                        &mut actions,
+                    )
                 });
         }
         let hud = self.hud_lines();
@@ -691,5 +829,8 @@ impl eframe::App for NeuroMotionApp {
 }
 
 fn file_name(path: &std::path::Path) -> String {
-    path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned())
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    )
 }
