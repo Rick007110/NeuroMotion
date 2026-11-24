@@ -1,5 +1,7 @@
-# Keeps one roadmap message in Discord's #roadmap channel up to date with
-# docs/discord-roadmap.md, through the webhook in the DISCORD_ROADMAP_WEBHOOK secret.
+# Keeps one roadmap message in Discord's #roadmap channel up to date: the text of
+# docs/discord-roadmap.md with a timeline image under it, drawn from
+# docs/roadmap-timeline.json by tools/roadmap_timeline.py. It posts through the
+# webhook in the DISCORD_ROADMAP_WEBHOOK secret.
 # - With no DISCORD_ROADMAP_MESSAGE_ID variable set, it posts a new message and
 #   prints its id: save that as the repository variable DISCORD_ROADMAP_MESSAGE_ID
 #   (Settings → Secrets and variables → Actions → Variables).
@@ -10,7 +12,10 @@ name: Discord roadmap
 on:
   push:
     branches: [main]
-    paths: [docs/discord-roadmap.md]
+    paths:
+      - docs/discord-roadmap.md
+      - docs/roadmap-timeline.json
+      - tools/roadmap_timeline.py
   workflow_dispatch:
 
 permissions:
@@ -21,6 +26,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Draw the timeline
+        run: |
+          sudo apt-get install -y -qq fonts-inter > /dev/null || echo "Inter not available; using the default font"
+          python3 tools/roadmap_timeline.py docs/roadmap-timeline.json timeline.html
+          google-chrome --headless=new --no-sandbox --disable-gpu --hide-scrollbars \
+            --force-device-scale-factor=2 --window-size=1200,330 \
+            --screenshot="$PWD/roadmap.png" "file://$PWD/timeline.html"
+          test -s roadmap.png
       - name: Post or edit the roadmap message
         env:
           WEBHOOK: ${{ secrets.DISCORD_ROADMAP_WEBHOOK }}
@@ -43,16 +56,20 @@ jobs:
             username: "NeuroMotion",
             avatar_url: "https://raw.githubusercontent.com/Rick007110/NeuroMotion/main/assets/logo-transparent.png",
             allowed_mentions: { parse: [] },
-            flags: 4
+            flags: 4,
+            attachments: [{ id: 0, filename: "roadmap.png" }]
           }' > payload.json
           if [ -n "$MESSAGE_ID" ]; then
             # Editing can't change the name or avatar; Discord keeps the ones it was posted with.
             jq 'del(.username, .avatar_url)' payload.json > edit.json
-            curl -fsS -X PATCH -H "Content-Type: application/json" -d @edit.json \
+            # Listing only the new attachment replaces the old image.
+            curl -fsS -X PATCH -F "payload_json=<edit.json;type=application/json" \
+              -F "files[0]=@roadmap.png;type=image/png" \
               "$WEBHOOK/messages/$MESSAGE_ID" > /dev/null
             echo "Edited the roadmap message $MESSAGE_ID."
           else
-            ID=$(curl -fsS -H "Content-Type: application/json" -d @payload.json "$WEBHOOK?wait=true" | jq -r '.id')
+            ID=$(curl -fsS -F "payload_json=<payload.json;type=application/json" \
+              -F "files[0]=@roadmap.png;type=image/png" "$WEBHOOK?wait=true" | jq -r '.id')
             echo "Posted the roadmap message. Save its id as the repository variable"
             echo "DISCORD_ROADMAP_MESSAGE_ID so later runs edit it instead of posting again:"
             echo "$ID"
