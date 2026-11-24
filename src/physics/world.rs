@@ -1477,7 +1477,11 @@ impl World {
         };
         for c in contacts.iter_mut() {
             // Friction first, limited by the current normal impulse or a fixed force cap.
+            // The cap only holds surfaces that touch: a contact found inside the
+            // speculative margin, still apart and not pushing, has nothing to grip with.
+            let touching = c.separation <= 0.0 || c.impulse[0] > 0.0;
             let limit = match self.contact_model {
+                ContactModel::ForceCapped if !touching => 0.0,
                 ContactModel::ForceCapped => c.interaction.friction * h,
                 ContactModel::Coulomb => c.interaction.friction / 100.0 * c.impulse[0].max(0.0),
             };
@@ -2000,6 +2004,26 @@ mod tests {
             body.position.y
         );
         assert!(body.linear_velocity.length() < 0.05);
+    }
+
+    /// A ball gliding 1 cm above the ground (inside the contact margin, weightless)
+    /// isn't touching it, so friction mustn't hold it; one rolling on it still slows.
+    #[test]
+    fn friction_grips_only_what_touches() {
+        let mut w = world();
+        w.gravity = Vec3::ZERO;
+        let gliding = ball(&mut w, Vec3::new(0.0, 0.11, 0.0), 0.1, 2.0);
+        w.bodies[gliding].linear_velocity = Vec3::X;
+        run(&mut w, 0.5);
+        let glided = w.bodies[gliding].position.x;
+        assert!((glided - 0.5).abs() < 0.01, "glided {glided} m");
+
+        let mut w = world();
+        let sliding = ball(&mut w, Vec3::new(0.0, 0.1, 0.0), 0.1, 2.0);
+        w.bodies[sliding].linear_velocity = Vec3::X;
+        run(&mut w, 0.5);
+        let slid = w.bodies[sliding].position.x;
+        assert!(slid < 0.45, "slid {slid} m on the ground without friction");
     }
 
     #[test]

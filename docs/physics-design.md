@@ -215,7 +215,7 @@ crouches on a box, backflips off it and lands; in NeuroMotion it floated above t
     With both, the character leaves the box, but not yet when it does in endorphin.
     The stand-in shows one reason: left alone, the placeholder doesn't stand. 25 N
     toe locks can't hold it and the pelvis lock leaves pitch free, so it tips
-    forwards from about frame 70, leans about 25° when the drive starts at 246, and
+    forwards from about frame 70, leans about 27° when the drive starts at 246, and
     the 200 N·m only slows that fall. Kept standing until the drive (Balance, in the
     stand-in), it flips backwards off the box as in endorphin.
 
@@ -273,6 +273,22 @@ Car Hit, the last sample scene failing the sweep, added one more.
     Floor two to three times slower. Solving every character directly all the time
     slowed single characters about twice and made Balance lose its footing, so the
     direct solve stays where a heavy body needs it.
+
+Teaching Balance to step showed one more.
+
+16. **Friction only grips surfaces that touch.** Contacts are found 2 cm before
+    surfaces meet (step 2 of the solver), so a fast body can't pass through in one
+    substep. With the default force-capped friction, every such contact gripped with
+    its full cap (100 N per contact by default) whether or not the surfaces
+    touched. A foot swinging 1-2 cm above the floor was held as if planted: its hip
+    and knee muscles, wanting 0.2 rad more, couldn't move it, and steps never landed.
+    Now a contact grips only while its surfaces touch or it pushes them apart (it has a
+    normal impulse). Coulomb friction was already right, being in proportion to that
+    impulse. A weightless ball gliding at 1 m/s 1 cm above the ground went 0.37 m in
+    0.5 s; it now goes 0.50 m (test `friction_grips_only_what_touches`). Of the
+    stand-ins only the back flip changed: standing, it leaves the box at frame 324
+    instead of 329 and lands at 387 instead of 393; left alone, it falls off the
+    front at 335 instead of 348.
 
 ## Status against endorphin's sample scenes
 
@@ -338,7 +354,7 @@ What each stand-in reproduces:
 | Turntable | No ground; a flat cylinder spinning | floats 0.9 m above it | rests on it |
 | Hanging weight | A 20-80 kg weight on a rope locked at the top, hanging straight (lesson 10) | 0.36 m stretch, 63 m/s | 1.5 cm, 0.6 m/s |
 | Car carry | Car Hit: a 747 kg car joined (1e5) to a keyed carrier drives into a standing character with clavicles at 8 m/s, catches its arm against its ribs, carries it on the bonnet and stops dead at 1.65 s (lesson 15). The join gives way by 23 cm as the carrier stops, by design | 5.8 cm (shoulder) | 1.0 cm |
-| Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -74° at 297, leaves the box at 329, lands behind it at 393, -285° in all. Left alone: tips forwards and falls off the front at 348 |
+| Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -73° at 297, leaves the box at 324, lands behind it at 387, -278° in all. Left alone: tips forwards and falls off the front at 335 (both changed by lesson 16) |
 
 Of endorphin's behaviours, Balance and CatchFall now have controllers of their own
 (docs/behaviours.md). Scenes that depend on others (e.g. Stagger Walk's stagger)
