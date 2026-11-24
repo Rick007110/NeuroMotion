@@ -143,6 +143,7 @@ pub(super) fn add_clip_items(
             NewClip::Transition => "Transition Event",
             NewClip::ActivePose => "Active Pose Event",
             NewClip::Constraint => "Constraint Event",
+            NewClip::Sever => "Sever Event",
         };
         let response = ui.add_enabled(enabled, Button::new(label));
         let response = if enabled {
