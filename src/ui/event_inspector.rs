@@ -13,7 +13,7 @@ use glam::Vec3;
 use super::actions::Action;
 use super::inspector::Gesture;
 use super::theme::{grid, section};
-use crate::document::events::{self, BodyRef, LockType, keys};
+use crate::document::events::{self, BodyRef, LockType, SeverType, keys};
 use crate::document::{Character, Clip, ClipId, Document, Edit, Project, SimLevel};
 
 type Settings = BTreeMap<String, String>;
@@ -38,6 +38,7 @@ pub(super) fn show(
         events::ACTIVE_POSE => active_pose(ui, &mut s, &mut g, clip, actions),
         events::CONSTRAINT => constraint(ui, &mut s, &mut g, project),
         events::BEHAVIOUR => behaviour(ui, &mut s, &mut g),
+        events::SEVER => sever(ui, &mut s, character),
         _ => {}
     }
     other_settings(ui, &before, events::edited_keys(event));
@@ -317,6 +318,70 @@ fn constraint(ui: &mut Ui, s: &mut Settings, g: &mut Gesture, project: &Project)
             "Strengths are springs along each world axis (N/m and N·m/rad); 0 leaves an axis free.",
         );
     });
+}
+
+fn sever(ui: &mut Ui, s: &mut Settings, character: Option<&Character>) {
+    section(ui, "Sever", |ui| {
+        let original = s
+            .get(keys::SEVER_TYPE)
+            .map_or(SeverType::Cut, |v| SeverType::from_name(v));
+        let mut kind = original;
+        grid(ui, "event_sever", |ui| {
+            ui.label("Type");
+            egui::ComboBox::from_id_salt("sever_type")
+                .selected_text(kind.label())
+                .show_ui(ui, |ui| {
+                    for option in SeverType::ALL {
+                        ui.selectable_value(&mut kind, option, option.label());
+                    }
+                });
+            ui.end_row();
+            ui.label("Joint of");
+            sever_body_combo(ui, s, character);
+            ui.end_row();
+        });
+        if kind != original {
+            s.insert(keys::SEVER_TYPE.to_owned(), kind.name().to_owned());
+        }
+        ui.weak("From the clip's first frame, for the rest of the scene. The joint is the body's joint to its parent. It only has an effect while the character is simulated.");
+    });
+}
+
+/// Which body's joint a sever event acts on (one body; imported lists are kept as they are).
+fn sever_body_combo(ui: &mut Ui, s: &mut Settings, character: Option<&Character>) {
+    let current = events::targets(s);
+    let text = match current.as_slice() {
+        [] => "None".to_owned(),
+        [one] => one.body.clone(),
+        many => format!("{} bodies", many.len()),
+    };
+    let (Some(character), Some(rig)) = (character, character.and_then(|c| c.physics.as_ref()))
+    else {
+        ui.weak(text);
+        return;
+    };
+    let mut chosen = None;
+    egui::ComboBox::from_id_salt("sever_body")
+        .selected_text(text)
+        .height(320.0)
+        .show_ui(ui, |ui| {
+            // Only bodies that hang from a joint have one to cut.
+            for joint in &rig.joints {
+                let Some(body) = rig.bodies.get(joint.body) else {
+                    continue;
+                };
+                let selected = current.len() == 1 && current[0].body == body.name;
+                if ui.selectable_label(selected, &body.name).clicked() {
+                    chosen = Some(vec![BodyRef {
+                        character: character.name.clone(),
+                        body: body.name.clone(),
+                    }]);
+                }
+            }
+        });
+    if let Some(targets) = chosen.filter(|t| *t != current) {
+        events::set_targets(s, &targets);
+    }
 }
 
 fn behaviour(ui: &mut Ui, s: &mut Settings, g: &mut Gesture) {

@@ -82,6 +82,19 @@ struct Plan {
     active: Vec<(i32, i32, f32)>,
     /// (start, end, behaviour) of behaviour events NeuroMotion has a controller for.
     behaviours: Vec<(i32, i32, Behaviour)>,
+    /// Joints cut or switched off, from the frame each event starts.
+    severs: Vec<Sever>,
+}
+
+/// A sever event aimed at one joint of the rig.
+#[derive(Clone, Copy)]
+struct Sever {
+    /// First frame the joint is severed; it stays so for the rest of the scene.
+    start: i32,
+    /// Index into the rig's joints.
+    joint: usize,
+    /// Cut the joint, or only switch its muscle off.
+    cut: bool,
 }
 
 /// A lock/join constraint event, across characters.
@@ -691,6 +704,25 @@ fn plan(project: &Project, character_index: usize) -> Plan {
                         plan.behaviours.push((start, end, behaviour));
                     }
                 }
+                "Sever" => {
+                    let Some(rig) = &character.physics else {
+                        continue;
+                    };
+                    let cut = clip
+                        .source
+                        .get("severType")
+                        .is_none_or(|v| !v.eq_ignore_ascii_case("MuscleOff"));
+                    let named = clip.source.get("targets").into_iter().flat_map(|t| {
+                        t.split(',')
+                            .filter_map(|n| rig.body_index(n.trim().rsplit('.').next()?))
+                    });
+                    for body in named {
+                        // A body with no joint (the root) has nothing to cut.
+                        if let Some(joint) = rig.joints.iter().position(|j| j.body == body) {
+                            plan.severs.push(Sever { start, joint, cut });
+                        }
+                    }
+                }
                 "Active pose" => {
                     let skeleton = &character.skeleton;
                     let mut pose = Pose::rest(skeleton.joints.len());
@@ -780,6 +812,18 @@ fn step_frame(project: &Project, running: &mut Running) -> Frame {
         for b in 0..binding.rig.bodies.len() {
             running.world.bodies[binding.first_body + b].motion = motion;
         }
+        // Severed from the event's first frame on. This is read from the plan every
+        // frame, so a restarted simulation needs no remembered state. A cut joint stops
+        // acting entirely, and its child body no longer counts the old parent as its
+        // parent, so the two collide like any unjointed bodies (rather than being left
+        // to pass through each other as neighbours in a skeleton do).
+        for sever in plan.severs.iter().filter(|s| s.cut && s.start <= frame) {
+            let child = binding.first_body + binding.rig.joints[sever.joint].body;
+            let joint = &mut running.world.joints[binding.first_joint + sever.joint];
+            joint.enabled = false;
+            joint.muscle = None;
+            running.world.bodies[child].parent = None;
+        }
         for (start, dv, bodies) in &plan.forces {
             if *start == frame && level == SimLevel::Simulated {
                 let targets: Vec<usize> = if bodies.is_empty() {
@@ -812,6 +856,7 @@ fn step_frame(project: &Project, running: &mut Running) -> Frame {
                     ci,
                     &poses[ci],
                     frame,
+                    t,
                 );
             } else {
                 // Move kinematic bodies onto the animation, with matching velocity.
@@ -886,6 +931,7 @@ fn set_muscles(
     ci: usize,
     anim: &Pose,
     frame: i32,
+    t: f32,
 ) {
     let skeleton = &project.characters[ci].skeleton;
     let pose_target = plan
@@ -943,7 +989,7 @@ fn set_muscles(
         .iter()
         .rev()
         .find(|(s, e, _)| *s <= frame && frame < *e);
-    if let (Some(&(.., behaviour)), Some(layout)) = (behaviour, &binding.layout) {
+    if let (Some(&(start, _, behaviour)), Some(layout)) = (behaviour, &binding.layout) {
         let mut drive = Drive {
             world,
             first_body: binding.first_body,
@@ -952,6 +998,7 @@ fn set_muscles(
             layout,
             targets: &mut targets,
             gains: &mut gains,
+            elapsed: ((t - start as f32) / project.settings.fps.max(1.0)).max(0.0),
         };
         behaviour.drive(&mut drive);
     }
@@ -959,7 +1006,8 @@ fn set_muscles(
         let Some(joint) = world.joints.get_mut(binding.first_joint + j) else {
             break;
         };
-        joint.muscle = Some(Muscle {
+        let off = plan.severs.iter().any(|s| s.joint == j && s.start <= frame);
+        joint.muscle = (!off).then_some(Muscle {
             target,
             twist: gains.twist,
             swing: gains.swing,
@@ -1176,6 +1224,126 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The demo character with a sever event on `body`'s joint at `frame`.
+    fn severed(frame: i32, body: &str, kind: &str) -> Project {
+        let mut project = physics_demo_project();
+        let character = project.characters[0].id;
+        let track = project.add_track(character, "Severs");
+        let id = project.add_clip(
+            crate::document::ClipProps {
+                name: "Sever".into(),
+                track,
+                start: frame,
+                duration: 1,
+                blend_in: 0,
+                blend_out: 0,
+                weight: 1.0,
+                enabled: true,
+            },
+            ClipKind::Event {
+                event: "Sever".into(),
+            },
+            vec![],
+        );
+        let clip = project.clip_mut(id).unwrap();
+        clip.source
+            .insert("targets".into(), format!("character01.MetaBodies.{body}"));
+        clip.source.insert("severType".into(), kind.into());
+        project
+    }
+
+    /// How far the forearm's elbow is from the end of the upper arm's bone.
+    fn elbow_gap(project: &Project, sim: &Simulation, frame: i32) -> f32 {
+        let c = &project.characters[0];
+        let rig = c.physics.as_ref().unwrap();
+        let state = sim.frame(frame).unwrap()[0].as_ref().unwrap();
+        let upper = rig.body_index("l_shoulder").unwrap();
+        let half = Vec3::from(rig.bodies[upper].frame.position).length();
+        let (rot, pos) = state.bodies[upper];
+        let end = pos + rot * Vec3::Z * half;
+        state.joints[c.skeleton.joint_index("l_elbow").unwrap()]
+            .1
+            .distance(end)
+    }
+
+    #[test]
+    fn severed_forearm_comes_away_and_follows_its_own_body() {
+        let project = severed(60, "l_elbow", "Cut");
+        let sim = simulate(&project);
+        let intact_project = physics_demo_project();
+        let intact = simulate(&intact_project);
+        for f in [0, 59] {
+            assert!(elbow_gap(&project, &sim, f) < 0.03, "joined at frame {f}");
+        }
+        // After the cut the elbow joint follows the forearm, not the upper arm.
+        let apart = (60..=150)
+            .map(|f| elbow_gap(&project, &sim, f))
+            .fold(0.0f32, f32::max);
+        assert!(apart > 0.15, "forearm only came {apart} m away");
+        let together = (0..=150)
+            .map(|f| elbow_gap(&intact_project, &intact, f))
+            .fold(0.0f32, f32::max);
+        assert!(together < 0.03, "intact arm stretched {together} m");
+
+        // Exports see it too: the severed elbow gets a translation curve (it moves
+        // away from its offset), the intact one stays rotation only.
+        use crate::io::motion::{joint_curves, sample};
+        let skeleton = &project.characters[0].skeleton;
+        let elbow = skeleton.joint_index("l_elbow").unwrap();
+        let curves = |p: &Project, s: &Simulation| joint_curves(skeleton, &sample(p, 0, Some(s)));
+        assert!(curves(&project, &sim)[elbow].translation.is_some());
+        assert!(
+            curves(&intact_project, &intact)[elbow]
+                .translation
+                .is_none()
+        );
+        for frame in 0..=150 {
+            let f = sim.frame(frame).unwrap()[0].as_ref().unwrap();
+            for (_, p) in &f.bodies {
+                assert!(
+                    p.is_finite() && p.length() < 10.0,
+                    "exploded at {frame}: {p}"
+                );
+                assert!(p.y > -0.05, "sank through the ground at {frame}: {p}");
+            }
+        }
+    }
+
+    #[test]
+    fn severed_simulation_is_deterministic() {
+        let project = severed(60, "l_elbow", "Cut");
+        let (a, b) = (simulate(&project), simulate(&project));
+        let pos = |s: &Simulation, f| s.frame(f).unwrap()[0].as_ref().unwrap().bodies.clone();
+        for f in [61, 100, 150] {
+            assert_eq!(pos(&a, f), pos(&b, f));
+        }
+        // Frames before the event are the intact simulation's.
+        let intact = simulate(&physics_demo_project());
+        assert_eq!(pos(&a, 59), pos(&intact, 59));
+    }
+
+    #[test]
+    fn muscle_off_goes_limp_but_stays_attached() {
+        let off = severed(60, "l_elbow", "MuscleOff");
+        let sim = simulate(&off);
+        let intact_project = physics_demo_project();
+        let intact = simulate(&intact_project);
+        for f in 0..=150 {
+            assert!(elbow_gap(&off, &sim, f) < 0.03, "came apart at frame {f}");
+        }
+        let hand = |p: &Project, s: &Simulation| body_at(p, s, 150, "l_wrist");
+        let moved = hand(&off, &sim).distance(hand(&intact_project, &intact));
+        assert!(moved > 0.02, "switching the muscle off changed nothing");
+    }
+
+    #[test]
+    fn severing_a_body_with_no_joint_does_nothing() {
+        let project = severed(60, "hips", "Cut");
+        let (a, b) = (simulate(&project), simulate(&physics_demo_project()));
+        let pos = |s: &Simulation| s.frame(150).unwrap()[0].as_ref().unwrap().bodies.clone();
+        assert_eq!(pos(&a), pos(&b));
     }
 
     #[test]

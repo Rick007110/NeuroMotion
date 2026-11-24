@@ -65,11 +65,12 @@ Keep these boundaries: `document`, `timeline` and `physics` must never depend on
 ### `physics`
 
 - `world.rs`: bodies, joints, muscles, locks and contacts, and the solver (substepped
-  sequential impulses with soft constraints; locked groups solved directly).
+  sequential impulses with soft constraints; locked groups, and characters something
+  heavy presses on, solved directly).
 - `collide.rs`: contact generation between shapes (spheres, capsules, boxes,
   cylinders).
 - `behaviour.rs`: controllers that drive muscles while a character is simulated
-  (Balance, CatchFall). New behaviours go here; see [docs/behaviours.md](docs/behaviours.md).
+  (Balance, CatchFall, Stagger). New behaviours go here; see [docs/behaviours.md](docs/behaviours.md).
 - `sim.rs`: runs a project through the world frame by frame, following its physics
   events, and caches the results for the timeline.
 - `scenes.rs` (tests only): small test scenes ("stand-ins") that pin down physical
@@ -97,7 +98,9 @@ Research on how endorphin behaves is in [docs/endorphin-physics.md](docs/endorph
 
 ## Principles
 
-- **Deterministic simulation.** The same project gives the same motion every time.
+- **Deterministic simulation.** The same project gives the same motion every time
+  with the same build on the same machine (other platforms can differ in the last
+  bits: docs/physics-design.md).
   Behaviours are stateless; nothing in the physics reads the clock or randomness.
 - **Undo covers everything.** If the user can change it, it's an `Edit`.
 - **Tests pin down behaviour.** Physics changes come with a stand-in scene in
@@ -109,7 +112,7 @@ Research on how endorphin behaves is in [docs/endorphin-physics.md](docs/endorph
 
 | You want to... | Start in |
 |---|---|
-| Add a behaviour (stagger, writhe, ...) | `physics/behaviour.rs`, `docs/behaviours.md`, a stand-in test in `physics/scenes.rs` |
+| Add a behaviour (stagger, ...) | `physics/behaviour.rs`, `docs/behaviours.md`, a stand-in test in `physics/scenes.rs` |
 | Add a physics event type | `document/events.rs`, `physics/sim.rs`, `ui/event_inspector.rs`, `docs/events.md` |
 | Fix how an endorphin file imports | `io/endorphin.rs`, `docs/endorphin-formats.md` |
 | Add an export format | `io/motion.rs` and a new module next to `bvh.rs` |

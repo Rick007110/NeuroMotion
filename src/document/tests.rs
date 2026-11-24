@@ -954,3 +954,97 @@ fn constraint_locks_a_body_in_place() {
         "locked hips moved {drift} m, free hips {fall} m"
     );
 }
+
+/// A sever event added through the editor and edited in its settings simulates exactly
+/// like one built directly, and undo takes it away again.
+#[test]
+fn editor_sever_event_simulates_like_a_direct_one() {
+    let mut doc = Document::new(sample::physics_demo_project());
+    let character = doc.project.characters[0].id;
+    let sever = doc
+        .add_new_clip(events::NewClip::Sever, character, None, 60, None)
+        .unwrap();
+    let clip = doc.project.clip(sever).unwrap();
+    assert_eq!(
+        clip.kind,
+        ClipKind::Event {
+            event: "Sever".into()
+        }
+    );
+    assert_eq!(
+        clip.source.get("severType").map(String::as_str),
+        Some("Cut")
+    );
+    let before = clip.source.clone();
+    let mut after = before.clone();
+    events::set_targets(
+        &mut after,
+        &[events::BodyRef {
+            character: "character01".into(),
+            body: "l_elbow".into(),
+        }],
+    );
+    doc.apply(
+        "Edit event settings",
+        Edit::ClipSource {
+            clip: sever,
+            before,
+            after,
+        },
+        false,
+    );
+
+    // The same event built by hand.
+    let mut direct = sample::physics_demo_project();
+    let track = direct.add_track(character, "Severs");
+    let id = direct.add_clip(
+        ClipProps {
+            name: "Sever".into(),
+            track,
+            start: 60,
+            duration: 1,
+            blend_in: 0,
+            blend_out: 0,
+            weight: 1.0,
+            enabled: true,
+        },
+        ClipKind::Event {
+            event: "Sever".into(),
+        },
+        vec![],
+    );
+    direct.clip_mut(id).unwrap().source = [
+        ("severType", "Cut"),
+        ("targets", "character01.MetaBodies.l_elbow"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+
+    let (ours, theirs) = (run_simulation(&doc.project), run_simulation(&direct));
+    for frame in [59, 61, 100, 150] {
+        for body in ["hips", "l_shoulder", "l_elbow", "l_wrist"] {
+            assert_eq!(
+                body_position(&doc.project, &ours, frame, body),
+                body_position(&direct, &theirs, frame, body),
+                "{body} differs at frame {frame}"
+            );
+        }
+    }
+    // And it does something: the forearm isn't where the intact simulation puts it.
+    let intact_project = sample::physics_demo_project();
+    let intact = run_simulation(&intact_project);
+    assert!(
+        body_position(&doc.project, &ours, 150, "l_elbow").distance(body_position(
+            &intact_project,
+            &intact,
+            150,
+            "l_elbow"
+        )) > 0.05
+    );
+
+    doc.undo();
+    assert!(doc.project.clip(sever).is_some(), "undo of the edit only");
+    doc.undo();
+    assert!(doc.project.clip(sever).is_none());
+}

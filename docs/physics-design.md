@@ -37,7 +37,8 @@ Each tick (1/rate s) runs 4 substeps. Each substep:
    - muscles;
    - locks (one 6-row block each, each row capped at its strength);
    - bodies that locks tie together, with the joints between them, solved directly as
-     one system (lesson 12);
+     one system (lesson 12), and the same for characters something much heavier
+     presses on (lesson 15);
    - contact normals, as *soft* constraints (frequency and damping ratio);
    - friction.
 5. Integrate positions.
@@ -59,7 +60,14 @@ to ±(force limit × h). This makes them unconditionally stable at any gain, whi
 what makes endorphin's 1000–6000 N·m/rad presets usable.
 
 Everything is single-threaded with a fixed order, so a scene always simulates the same
-way. That determinism is what allows automatic re-simulation.
+way with the same build on the same machine. That determinism is what allows
+automatic re-simulation. It isn't bit-identical across platforms: `sin`, `cos`,
+`atan2`, `acos` and `powf` come from the platform's maths library, which can round
+differently in the last bit (glibc even picks FMA variants by CPU at run time).
+Usually that stays in the last bits, but a chaotic moment (a foot landing near the
+edge of a recovery, a light limb whipping round) amplifies it into a visibly different
+outcome. Tests therefore check statements that hold when the scene is nudged slightly
+(`nudge_survey`), not one exact number near a limit.
 
 ## Muscle targets (what the muscles try to reach)
 
@@ -214,7 +222,7 @@ crouches on a box, backflips off it and lands; in NeuroMotion it floated above t
     With both, the character leaves the box, but not yet when it does in endorphin.
     The stand-in shows one reason: left alone, the placeholder doesn't stand. 25 N
     toe locks can't hold it and the pelvis lock leaves pitch free, so it tips
-    forwards from about frame 70, leans about 25° when the drive starts at 246, and
+    forwards from about frame 70, leans about 27° when the drive starts at 246, and
     the 200 N·m only slows that fall. Kept standing until the drive (Balance, in the
     stand-in), it flips backwards off the box as in endorphin.
 
@@ -232,6 +240,78 @@ Writing the test for a join's drive showed one more.
     measured from the target as before. The same gap now stays under 1 mm. For a
     held lock the two levers differ only by the lock's error, so every join's rows
     change by about that much.
+
+Car Hit, the last sample scene failing the sweep, added one more.
+
+15. **A character something much heavier presses on is solved directly, like a locked
+    group.** In Car Hit a 747 kg car, joined to a keyed carrier, drives into a
+    pedestrian at 8 m/s, carries them on the bonnet and stops dead, and a clavicle
+    came apart by 10 cm. The Car carry stand-in sets it up the same way, with
+    clavicles on the placeholder: the bonnet's edge catches the arm hanging at the
+    pedestrian's side and drives it into their ribs, and the shoulder opened 5.8 cm
+    and stayed open for about ten frames, right after the hit (whether the scene's
+    clavicle goes at the hit or at the stop isn't known without its files). The car
+    can't give way (its join holds it to the carrier) and the ribs only as the whole
+    body does, so the arm is caught between them,
+    and what keeps it on the body is a chain of joints, 2.2 kg upper arm, 0.4 kg
+    clavicle, through to a 14 kg chest, under a contact load from something hundreds
+    of times heavier than any of its links. Sequential impulses pass that load along
+    the chain one link per iteration, and the contacts, solved last, win: the arm is
+    pushed where the car wants it and the shoulder lets go. It is lesson 12's mass
+    ratio problem without a lock in the chain.
+    So the direct solve of lesson 12 now also covers, for the substep, every group of
+    jointed bodies with a contact (closer than 1 cm) from a moving group that is at
+    least 5 times heavier than it, or that a lock holds to the world or to a keyed
+    body. The whole character's joint anchors are then solved as one system (no lock
+    rows), and the load reaches the chest in one go. The shoulder now stays within
+    1 cm (0.96 cm worst, a toe). The same rule closes two other ways a car came
+    through the placeholder in the experiments that led to the stand-in: run over
+    lying head first, the neck stretched 6.6 cm (now 0.4); lying on the bonnet with
+    an arm under the body when the car stopped, the shoulder reached 4.9 cm (now
+    2.5 cm, all of it in that pose's first frames).
+    Characters that nothing heavy touches are unchanged, and every other stand-in
+    gives the same numbers. Car carry takes about 110 ms instead of 75 for its 2 s
+    (the character is direct-solved for most of the scene); scenes without such a
+    contact don't pay for it.
+    Keyed bodies don't trigger it. Counting a keyed body moving faster than 2 m/s
+    as heavy helped the old Car Hit stand-in, whose car is keyed (3.0 to 1.5 cm), but
+    nudged Balcony and Tackle (0.50 to 0.55 cm, 0.59 to 0.65 cm). Counting slow ones
+    too (moving floors) helped Turntable (0.9 to 0.2 cm) but made it and Rotating
+    Floor two to three times slower. Solving every character directly all the time
+    slowed single characters about twice and made Balance lose its footing, so the
+    direct solve stays where a heavy body needs it.
+    Since lesson 16, nudging the car's speed by up to ±1e-3 over 201 runs
+    (`nudge_survey`) shows how much of this holds: up to the stop (frame 99) no joint
+    of the body, shoulders and clavicles included, opens more than 0.5 cm (an ankle);
+    the toes' and fingers' hinges, which the bonnet strikes directly, open 0.5 to
+    2.7 cm at the hit. After the stop is another matter, and still open. Friction no
+    longer holds the pedestrian on the bonnet (lesson 16), so they slide off, and the
+    arm whips round (fingers at 11-15 m/s) with nothing heavy on it: a light chain
+    moving fast, not a crush, so this lesson's direct solve doesn't apply. The
+    shoulder then opens by 1.3 cm in a typical run, over 2 cm in a third of them,
+    over 4.3 cm in a tenth and over the sweep's 5 cm in 11 of the 201 (7.0 cm worst),
+    always between frames 113 and 120. On CI it reached 3.9 cm (Linux), 4.6 (macOS)
+    and 3.8 (Windows), against 2.1 here. The test (`car_carry_keeps_joints_together`)
+    holds the hit and carry to lesson 15's bound (2 cm for the body, 3.5 for the toes
+    and fingers) and the whole scene only to the sweep's checks, which the whip could
+    fail on a platform that rounds differently.
+
+Teaching Balance to step (docs/behaviours.md) showed one more.
+
+16. **Friction only grips surfaces that touch.** Contacts are found 2 cm before
+    surfaces meet (step 2 of the solver), so a fast body can't pass through in one
+    substep. With the default force-capped friction, every such contact gripped with
+    its full cap (100 N per contact by default) whether or not the surfaces
+    touched. A foot swinging 1-2 cm above the floor was held as if planted: its hip
+    and knee muscles, wanting 0.2 rad more, couldn't move it, and steps never landed.
+    Now a contact grips only while its surfaces touch or it pushes them apart (it has a
+    normal impulse). Coulomb friction was already right, being in proportion to that
+    impulse. A weightless ball gliding at 1 m/s 1 cm above the ground went 0.37 m in
+    0.5 s; it now goes 0.50 m (test `friction_grips_only_what_touches`). Of the
+    stand-ins only the back flip changed: standing, it leaves the box at frame 324
+    instead of 329 and lands at 387 instead of 393; left alone, it falls off the
+    front at 335 instead of 348. Car carry changed after its stop: its pedestrian now
+    slides off the bonnet (lesson 15).
 
 ## Status against endorphin's sample scenes
 
@@ -260,6 +340,10 @@ skipped for size):
 |---|---|
 | Clean | Arrows, Balcony, Bendy Stick, Car Crash, Catch Rope, Catch Run, Gymnast Rings, Heli Leap, Multi Martial, Rotating Floor, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
 | Failing | Car Hit: a clavicle stretches 10 cm. The 747 kg car, joined to a keyed carrier, drives into the pedestrian at 8 m/s, carries them on the bonnet, and stops dead when the carrier's keys end at 1.65 s, with an arm under it |
+
+Lesson 15 fixes Car Hit's stand-in (Car carry). Whether it fixes the scene itself still
+needs confirming with `cargo test --release -- --ignored` on a machine with endorphin
+installed.
 
 Four of the five scenes still failing after lesson 12 weren't solver problems at all:
 the importer set them up wrongly. Looking at Balcony in the app showed it: one
@@ -292,22 +376,37 @@ What each stand-in reproduces:
 | Rotating Floor | No ground; a thin collision-only slab spinning and rocking | sinks through | rides it |
 | Turntable | No ground; a flat cylinder spinning | floats 0.9 m above it | rests on it |
 | Hanging weight | A 20-80 kg weight on a rope locked at the top, hanging straight (lesson 10) | 0.36 m stretch, 63 m/s | 1.5 cm, 0.6 m/s |
-| Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -74° at 297, leaves the box at 329, lands behind it at 393, -285° in all. Left alone: tips forwards and falls off the front at 348 |
+| Car carry | Car Hit: a 747 kg car joined (1e5) to a keyed carrier drives into a standing character with clavicles at 8 m/s, catches its arm against its ribs, carries it on the bonnet and stops dead at 1.65 s (lesson 15). The join gives way by 23 cm as the carrier stops, by design | 5.8 cm (shoulder) | 1.0 cm. Since lesson 16, up to the stop: 0.5 cm at most for the body (shoulder included), toes and fingers 0.5-2.7 cm at the hit (201 nudged runs). After the stop, as the pedestrian slides off and the arm whips round: the shoulder 1.3 cm typically, but up to 7.0 cm, over the sweep's 5 cm in 11 of 201 runs (open, lesson 15) |
+| Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -73° at 297, leaves the box at 324, lands behind it at 387, -278° in all. Left alone: tips forwards and falls off the front at 335 (both changed by lesson 16) |
 
-Of endorphin's behaviours, Balance and CatchFall now have controllers of their own
-(docs/behaviours.md). Scenes that depend on others (e.g. Stagger Walk's stagger)
-simulate as if the character went limp.
+Of endorphin's behaviours, Balance (which now steps), CatchFall and Stagger have
+controllers of their own (docs/behaviours.md). Scenes that depend on others simulate
+as if the character went limp. Stagger Walk now runs the Stagger controller; it
+hasn't been re-run against endorphin's scene since.
 
 ## Not yet
 
-- Behaviours beyond Balance and CatchFall (stagger, writhe, …), and stepping.
-  endorphin's are vendor-protected, so these need original designs.
-- Sever events.
+- Behaviours beyond Balance, Stagger, CatchFall, BodyFoetal and Writhe, and stepping
+  that holds sideways pushes. endorphin's are vendor-protected, so these need original
+  designs.
+- Sever events are in (cut a joint, or switch its muscle off; `events.md`), but
+  endorphin's own option names for them are unverified (`endorphin-formats.md`), and
+  a severed joint can't be re-attached later.
 - Virtual-muscle reach springs.
 - Exact cylinders: long ones have rounded ends; flat ones a rounded rim, touching
   flat things at six rim points, the lowest rim point and the point nearest them.
-- An exact solve for joint anchors where no lock holds the chain (lesson 12 covers
-  what locks hold).
+- An exact solve for joint anchors where no lock holds the chain and nothing heavy
+  presses on it (lessons 12 and 15 cover those). Keyed bodies pressing on a character
+  don't count as heavy yet: lesson 15 says what that cost. A light limb whipping round
+  fast is the case that shows: Car carry's shoulder opens up to 7 cm after the stop,
+  past the sweep's 5 cm in about one run in twenty when the car's speed is nudged
+  (lesson 15).
+- Bit-identical results across platforms. Results are identical run to run with the
+  same build on the same machine, but `sin`, `cos`, `atan2`, `acos` and `powf` come
+  from the platform's maths library and can differ in the last bit, which a chaotic
+  moment can grow into a different outcome. If identical results everywhere become a
+  goal, the physics could use pure-Rust maths that rounds the same everywhere (the
+  `libm` crate, say) instead of the platform's.
 - Interpolated output between frames.
 
 ## Improvements planned beyond endorphin

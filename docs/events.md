@@ -10,7 +10,8 @@ clips and are drawn as outlined bands. They don't change the keyed animation its
   event at the clicked frame, on that track. The playhead moves there too.
 - **Edit → Add**: adds at the playhead for the selected character (or the first one).
   With a track selected it goes on that track; otherwise each kind gets its own track
-  (Simulations, Forces, Transitions, Active poses, Constraints), created when needed.
+  (Simulations, Forces, Transitions, Active poses, Constraints, Severs), created when
+  needed.
 
 Events need a character with a physics body; for others the menu items are disabled.
 Every addition is one undo step.
@@ -32,6 +33,31 @@ step.
 | **Transition** | Blends from the simulation back to the animation over the clip, then switches level. | *Then*: the level at the end (Animated by default). |
 | **Active pose** | While simulated, the character's muscles pull towards a pose. | *Strength* (multiplies muscle strength), *Ease in* (seconds), and the pose itself: captured from what the viewport shows at the playhead when the event is added; **Capture pose at playhead** re-records it. |
 | **Constraint** | From its first frame to its last, holds bodies: each where it was when the clip started, or all of them to the last body listed. | *Type*: Lock in place, Lock position only, Lock orientation only, Join bodies together. *Position* / *Rotation strength*: spring stiffness along each world axis (N/m, N·m/rad); 0 leaves an axis free. *Bodies*: any body of any character. |
+
+### Sever
+
+From its first frame to the end of the scene, the joint between the target body and
+its parent body is cut, or only its muscle is switched off (*Type*). *Joint of* picks
+the body whose joint to its parent is meant: a forearm body cuts the elbow. The root
+body has no joint, so targeting it does nothing.
+
+- **Cut the joint**: the joint stops acting altogether (anchor, limits, soft limits and
+  muscle), so the two parts move on separately. The body's parts below it, the hand
+  say, stay attached to it. A cut body no longer counts as its old parent's child, so
+  it collides with it like any unjointed body, instead of being excluded as joined
+  neighbours are. (This is our choice: we don't know which of those endorphin does.)
+- **Muscle off**: the joint, its limits and its collisions stay; the muscle no longer
+  pulls, so the part hangs limp from the joint.
+
+It acts while the character is simulated. The simulation restarts from the first
+frame on every edit and works out what is severed at each frame from the events
+themselves, so removing, moving or disabling the event takes effect on the next run.
+The viewport and exports show the severed part where its body is: the joint follows its
+own body, so exports key a translation on it. In an export the bone between the cut
+joints stretches, as for any simulated joint that comes away.
+
+The endorphin key names for sever events are a best guess; see
+[endorphin-formats.md](endorphin-formats.md#sever-events).
 
 Imported endorphin behaviours show their behaviour name. Balance and CatchFall run
 NeuroMotion's own controllers ([behaviours.md](behaviours.md)); the others aren't
@@ -56,6 +82,7 @@ events behave identically and project files stay format v2:
 | `Active pose` | `strength`, `entryBlendPeriod` (seconds); the pose is the clip's channels (one key each) |
 | `Constraint` | `lockType` (`Lock`, `LockPosition`, `LockOrientation`, `JoinBodies`), `targets`, `positionStrength`, `angularStrength` (`"x, y, z"`) |
 | `Behaviour` | `behaviourName` |
+| `Sever` | `severType` (`Cut`, `MuscleOff`), `targets` (guessed, see below) |
 
 `targets` lists bodies as `character.MetaBodies.Body`, comma separated. A force with no
 targets pushes every body of its character.
