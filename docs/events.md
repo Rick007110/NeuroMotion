@@ -30,9 +30,9 @@ step.
 |---|---|---|
 | **Simulation** | At its first frame, switches the character's simulation level. It stays there until the next simulation or transition event. | *Switch to*: Animated, Collision only, Collision with momentum, Simulated. *Momentum kept* (0–1): how much of the animation's velocity carries into physics. |
 | **Force** | A one-frame push at its first frame: a sudden change of velocity on one body (or every body). Only acts while the character is simulated. | *Strength* (m/s), *Heading* (degrees about the up axis: 0° = +Z, the way NeuroMotion's characters face at rest; 90° = +X; 180° = −Z), *Elevation* (degrees above horizontal), *Body*. New forces push the heaviest body (usually the torso) backwards at 3 m/s. |
-| **Transition** | Blends from the simulation back to the animation over the clip, then switches level. | *Then*: the level at the end (Animated by default). |
-| **Active pose** | While simulated, the character's muscles pull towards a pose. | *Strength* (multiplies muscle strength), *Ease in* (seconds), and the pose itself: captured from what the viewport shows at the playhead when the event is added; **Capture pose at playhead** re-records it. |
-| **Constraint** | From its first frame to its last, holds bodies: each where it was when the clip started, or all of them to the last body listed. | *Type*: Lock in place, Lock position only, Lock orientation only, Join bodies together. *Position* / *Rotation strength*: spring stiffness along each world axis (N/m, N·m/rad); 0 leaves an axis free. *Bodies*: any body of any character. |
+| **Transition** | Blends from the simulation back to the animation over the clip, then switches level. The blend weight goes from 0 at the first frame to 1 at the last, so the drawn pose is the animation from the last frame on (the simulated bodies switch one frame later). | *Then*: the level at the end (Animated by default). |
+| **Active pose** | While simulated, the character's muscles pull towards a pose. Overlapping active poses each drive their own joints (an imported one only the joints it names); where two drive the same joint, the one that started last wins once it has eased in. | *Strength* (multiplies muscle strength), *Ease in* (seconds to move the muscles over from what they were doing), and the pose itself: captured from what the viewport shows at the playhead when the event is added; **Capture pose at playhead** re-records it. |
+| **Constraint** | From its first frame to its last, holds bodies: each where it was when the clip started, or all of them to the last body listed. | *Type*: Lock in place, Lock position only, Lock orientation only, Join bodies together. *Position* / *Rotation strength*: the most force (N) or torque (N·m) the hold may use along each axis (the world's for a lock, the anchor's for a join); a hold that can't keep up pulls with all of it (physics-design.md, lessons 5 and 20); 0 leaves an axis free, and a negative value drives instead (lesson 13). *Bodies*: any body of any character. |
 
 ### Sever
 
@@ -79,13 +79,16 @@ events behave identically and project files stay format v2:
 | `Simulation` | `physicsLevel` (`NoPhysics`, `CollisionOnly`, `CollisionOnlyWithInertia`, `FullPhysics`), `momentumScale` |
 | `Force` | `matrix.Vi` (`"x, y, z"` velocity change, m/s), `targets` |
 | `Transition` | `requiredPhysicsLevel` |
-| `Active pose` | `strength`, `entryBlendPeriod` (seconds); the pose is the clip's channels (one key each) |
+| `Active pose` | `strength`, `entryBlendPeriod` (seconds), `targets` (the joints it drives as `character.Joints.Joint`; none = all); the pose is the clip's channels (one key each), and a driven joint without a channel is held at rest |
 | `Constraint` | `lockType` (`Lock`, `LockPosition`, `LockOrientation`, `JoinBodies`), `targets`, `positionStrength`, `angularStrength` (`"x, y, z"`) |
 | `Behaviour` | `behaviourName` |
 | `Sever` | `severType` (`Cut`, `MuscleOff`), `targets` (guessed, see below) |
 
-`targets` lists bodies as `character.MetaBodies.Body`, comma separated. A force with no
-targets pushes every body of its character.
+`targets` lists bodies as `character.MetaBodies.Body` (joints, for active poses),
+comma separated. A force with no targets pushes every body of its character. A force
+pushes the bodies it names whichever character's track holds it (Catch Rope keeps its
+push on the rope on the environment's track), and one naming only bodies that don't
+exist pushes nothing.
 
 `src/document/tests.rs` rebuilds the physics demo's events through the editor's own
 operations and checks the simulation is identical to the built-in demo's, and that

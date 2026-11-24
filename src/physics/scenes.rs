@@ -9,7 +9,11 @@
 //! - no non-finite values;
 //! - no simulated body more than 10 cm below the ground (fixed scenery, and bodies
 //!   without collision shapes, aside: those fall through everything, in endorphin too);
-//! - no joint stretched by 5 cm or more (free props have no joint to stretch);
+//!   in a scene without a ground plane, where things may fall as far as they like, no
+//!   body more than 10 cm under the underside of fixed scenery it is beneath (fallen
+//!   through the floor);
+//! - no joint stretched by 5 cm or more (free props have no joint to stretch, and
+//!   joints a sever event cuts none from the frame they are cut);
 //! - no simulated body faster than 40 m/s;
 //! - (stand-ins) no locked body drifting 5 cm or more from where its lock holds it;
 //! - (stand-ins) no body centre inside solid scenery.
@@ -18,9 +22,10 @@ use std::time::{Duration, Instant};
 
 use glam::{Quat, Vec3};
 
-use super::sim::{Simulation, lock_spans, rig_bodies};
+use super::sim::{Simulation, cut_joints, lock_spans, rig_bodies};
 use crate::document::physics::{
-    BodyDef, Frame, Gains, Geometry, JointDef, Limits, MuscleGains, MuscleSet, PhysicsRig, ShapeDef,
+    BodyDef, ContactModel, Frame, Gains, Geometry, JointDef, Limits, MuscleGains, MuscleSet,
+    PhysicsRig, ShapeDef,
 };
 use crate::document::sample::{humanoid_rig, humanoid_skeleton};
 use crate::document::{
@@ -32,8 +37,14 @@ use crate::document::{
 #[derive(Debug)]
 pub struct Report {
     pub nan: bool,
-    /// Lowest body centre, m.
+    /// Lowest body centre above the ground plane, m (its height, when the scene has no
+    /// ground plane).
     pub lowest: f32,
+    /// Whether the scene has a ground plane to measure `lowest` against.
+    pub ground: bool,
+    /// Deepest a body centre got under the underside of fixed scenery it is beneath, m,
+    /// in a scene without a ground plane (0 with one).
+    pub under: f32,
     /// Largest change in a skeleton bone's length, m.
     pub stretch: f32,
     /// Fastest body while simulated, m/s.
@@ -43,15 +54,20 @@ pub struct Report {
     pub drift: f32,
     /// Deepest a character's or prop's body centre got inside fixed scenery, m.
     pub buried: f32,
-    /// Where each worst value happened ("character.body @ frame"), in the order above.
-    pub places: [String; 5],
+    /// Where each worst value happened ("character.body @ frame"): lowest, stretch,
+    /// fastest, drift, buried, under.
+    pub places: [String; 6],
     pub elapsed: Duration,
 }
 
 impl Report {
     /// The endorphin sweep's checks.
     pub fn ok(&self) -> bool {
-        !self.nan && self.lowest > -0.1 && self.stretch < 0.05 && self.fastest < 40.0
+        !self.nan
+            && (!self.ground || self.lowest > -0.1)
+            && self.under < 0.1
+            && self.stretch < 0.05
+            && self.fastest < 40.0
     }
 
     /// The sweep's checks, plus locks holding and nothing sinking into scenery.
@@ -69,6 +85,7 @@ impl Report {
             "fastest",
             "lock drift",
             "buried",
+            "under scenery",
         ];
         names
             .iter()
@@ -83,8 +100,10 @@ impl std::fmt::Display for Report {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "lowest body {:>6.3} m  max joint stretch {:.4} m  fastest {:>5.1} m/s  lock drift {:.3} m  buried {:.3} m{}",
+            "lowest body {:>6.3} m{}  under scenery {:.3} m  max joint stretch {:.4} m  fastest {:>5.1} m/s  lock drift {:.3} m  buried {:.3} m{}",
             self.lowest,
+            if self.ground { "" } else { " (no ground)" },
+            self.under,
             self.stretch,
             self.fastest,
             self.drift,
@@ -121,9 +140,13 @@ pub fn measure_frames(
     range: FrameRange,
 ) -> Report {
     let fps = project.settings.fps;
+    let ground = project.physics.ground.as_ref().map(|g| g.height);
+    let cut = cut_joints(project);
     let mut report = Report {
         nan: false,
         lowest: f32::MAX,
+        ground: ground.is_some(),
+        under: 0.0,
         stretch: 0.0,
         fastest: 0.0,
         drift: 0.0,
@@ -188,8 +211,9 @@ pub fn measure_frames(
                 if cf.level == SimLevel::Simulated
                     && body.is_none_or(|b| !fixed(ci, b) && !b.shapes.is_empty())
                 {
-                    if p.y < report.lowest {
-                        report.lowest = p.y;
+                    let height = p.y - ground.unwrap_or(0.0);
+                    if height < report.lowest {
+                        report.lowest = height;
                         report.places[0] = format!("{} @ frame {frame}", body_name(ci, bi));
                     }
                     for &(geometry, r, at) in &scenery {
@@ -197,6 +221,16 @@ pub fn measure_frames(
                         if depth > report.buried {
                             report.buried = depth;
                             report.places[4] = format!("{} @ frame {frame}", body_name(ci, bi));
+                        }
+                        // With a ground, things beneath scenery (a balcony, a beam) are
+                        // usually meant to be there; without one, they fell through it.
+                        let under = match ground {
+                            Some(_) => 0.0,
+                            None => depth_under(geometry, r, at, *p),
+                        };
+                        if under > report.under {
+                            report.under = under;
+                            report.places[5] = format!("{} @ frame {frame}", body_name(ci, bi));
                         }
                     }
                 }
@@ -210,8 +244,12 @@ pub fn measure_frames(
                         .any(|(bi, b)| b.joint == joint && !r.joints.iter().any(|jd| jd.body == bi))
                 })
             };
+            let severed = |joint: usize| {
+                cut.iter()
+                    .any(|&(c, j, start)| (c, j) == (ci, joint) && start <= frame)
+            };
             for (i, j) in skeleton.joints.iter().enumerate() {
-                if let Some(p) = j.parent.filter(|_| !free(i)) {
+                if let Some(p) = j.parent.filter(|_| !free(i) && !severed(i)) {
                     let stretch = bone_stretch(j, &cf.joints, i, p);
                     if stretch > report.stretch {
                         report.stretch = stretch;
@@ -424,6 +462,28 @@ fn depth_inside(geometry: Geometry, rotation: Quat, position: Vec3, point: Vec3)
         }
         Geometry::Box { size } => (Vec3::from(size) * 0.5 - local.abs()).min_element(),
     }
+}
+
+/// How far `point` is under the underside of a placed shape, within its outline seen
+/// from above (0 when it isn't beneath it). "Up" is whichever of the shape's own axes is
+/// closest to the world's, so a tilting floor keeps its top and underside.
+fn depth_under(geometry: Geometry, rotation: Quat, position: Vec3, point: Vec3) -> f32 {
+    let half = match geometry {
+        Geometry::Sphere { radius } => Vec3::splat(radius),
+        Geometry::Capsule { radius, length } => Vec3::new(radius, radius, radius + length * 0.5),
+        Geometry::Cylinder { radius, length } => Vec3::new(radius, radius, length * 0.5),
+        Geometry::Box { size } => Vec3::from(size) * 0.5,
+    };
+    let local = rotation.inverse() * (point - position);
+    let up = rotation.inverse() * Vec3::Y;
+    let axis = (0..3)
+        .max_by(|&a, &b| up[a].abs().total_cmp(&up[b].abs()))
+        .unwrap();
+    let beside = (0..3).any(|i| i != axis && local[i].abs() > half[i]);
+    if beside {
+        return 0.0;
+    }
+    (-half[axis] - local[axis] * up[axis].signum()).max(0.0)
 }
 
 // ---------------------------------------------------------------------------------
@@ -1537,6 +1597,147 @@ pub fn turntable() -> Project {
     p
 }
 
+/// Rotating Floor's last seconds: no ground plane; a long collision-only slab with a
+/// wall at one end tilts 20° about its middle, carrying a character standing near the
+/// low end about 1.7 m below where the ground would be, on the floor all the while.
+pub fn tilting_floor() -> Project {
+    let mut p = new_scene("Tilting floor", 2.0);
+    p.physics.ground = None;
+    let slab = Geometry::Box {
+        size: [4.0, 0.3, 12.0],
+    };
+    let wall = Geometry::Box {
+        size: [4.0, 2.0, 0.2],
+    };
+    let floor = add_prop(
+        &mut p,
+        "floor",
+        CharacterKind::Environment,
+        scenery(&[
+            (slab, Quat::IDENTITY, Vec3::new(0.0, -0.15, 0.0)),
+            (wall, Quat::IDENTITY, Vec3::new(0.0, 1.0, 5.9)),
+        ]),
+        SimLevel::CollisionOnly,
+    );
+    // Positive turns about X lower +Z: the walled end, where the character stands.
+    motion(
+        &mut p,
+        floor,
+        "Tilt",
+        0,
+        120,
+        false,
+        vec![channel("root", Property::RotX, &[(0, 0.0), (60, 20.0)])],
+    );
+    person(&mut p, "dancer", Vec3::new(0.0, 0.0, 5.0), 180.0, &[]);
+    p
+}
+
+/// Heli Leap's jumper: no ground plane; a character runs off the edge of a roof (its
+/// top at y = 0, the building under it) and falls past the building's side.
+pub fn roof_edge() -> Project {
+    let mut p = new_scene("Roof edge", 2.0);
+    p.physics.ground = None;
+    let roof = Geometry::Box {
+        size: [6.0, 1.0, 6.0],
+    };
+    let building = Geometry::Box {
+        size: [5.0, 8.0, 5.0],
+    };
+    add_prop(
+        &mut p,
+        "building",
+        CharacterKind::Environment,
+        scenery(&[
+            (roof, Quat::IDENTITY, Vec3::new(0.0, -0.5, -3.0)),
+            (building, Quat::IDENTITY, Vec3::new(0.0, -5.0, -3.0)),
+        ]),
+        SimLevel::CollisionOnly,
+    );
+    let jumper = person(&mut p, "jumper", Vec3::new(0.0, 0.0, -1.5), 0.0, &[]);
+    let run = vec![
+        channel("hips", Property::PosZ, &[(0, -1.5), (30, 0.5)]),
+        channel("hips", Property::PosY, &[(0, 0.0), (30, 0.1)]),
+    ];
+    motion(&mut p, jumper, "Run", 0, 30, true, run);
+    level(&mut p, jumper, 0, "CollisionOnlyWithInertia");
+    level(&mut p, jumper, 30, "FullPhysics");
+    p
+}
+
+/// Catch Rope after the catch: a rope locked at the top beside a roof is set swinging by
+/// a force event that sits on the environment's track but names the rope's end (as the
+/// real scene's does), and its last link is cut at 1 s. The roof is the environment's
+/// massless piece, with a character standing on it.
+pub fn cut_rope() -> Project {
+    let mut p = new_scene("Cut rope", 2.0);
+    let roof = Geometry::Box {
+        size: [4.0, 0.4, 4.0],
+    };
+    let (skeleton, mut rig) = scenery(&[(roof, Quat::IDENTITY, Vec3::new(0.0, 2.8, 0.0))]);
+    rig.bodies[0].mass = 0.0;
+    rig.bodies[0].inertia = [0.0; 3];
+    let building = add_prop(
+        &mut p,
+        "building",
+        CharacterKind::Environment,
+        (skeleton, rig),
+        SimLevel::Simulated,
+    );
+    let rig = chain(
+        Vec3::new(0.0, 6.5, 2.6),
+        10,
+        0.3,
+        0.02,
+        0.15,
+        None,
+        Limits {
+            twist_min: -0.5,
+            twist_max: 0.5,
+            swing1: 1.2,
+            swing2: 1.2,
+        },
+        Gains {
+            stiffness: 0.5,
+            damping: 0.05,
+            force_limit: 5.0,
+        },
+    );
+    let rope = add_prop(
+        &mut p,
+        "rope",
+        CharacterKind::Prop,
+        rig,
+        SimLevel::Simulated,
+    );
+    constrain(
+        &mut p,
+        rope,
+        0,
+        120,
+        "Lock",
+        &["rope.MetaBodies.seg0"],
+        (Vec3::new(1e5, 1e5, 0.0), Vec3::ZERO),
+    );
+    push(
+        &mut p,
+        building,
+        1,
+        "rope.MetaBodies.seg9",
+        Vec3::new(0.31, 0.0, 0.95),
+    );
+    event(
+        &mut p,
+        rope,
+        "Sever",
+        60,
+        1,
+        &[("targets", "rope.MetaBodies.seg9")],
+    );
+    person(&mut p, "climber", Vec3::new(0.0, 3.0, -1.0), 0.0, &[]);
+    p
+}
+
 /// Car Hit: a car (collision with momentum) drives through a standing character at
 /// 15 m/s, bumper first.
 pub fn car_hit() -> Project {
@@ -1613,10 +1814,15 @@ pub fn car_carry() -> Project {
 /// slightly different hit changes).
 pub fn car_carry_at(speed: f32) -> Project {
     let mut p = new_scene("Car carry", 2.0);
+    // Friction as endorphin's scenes have it once imported (lesson 21).
+    p.physics.contact = ContactModel::Coulomb;
     let mass = 747.0;
-    // Chassis 0.07-0.77 m above the ground, a cabin behind the bonnet.
+    // Chassis 0.15-0.77 m above the ground, a cabin behind the bonnet. Car Hit's car
+    // clears the ground by about 15 cm too. With 7 cm, which this stand-in had until
+    // friction gripped in proportion to the load (lesson 21), a foot caught under the
+    // chassis is dragged along the road at 8 m/s under the car's weight.
     let chassis = Geometry::Box {
-        size: [1.7, 0.7, 4.2],
+        size: [1.7, 0.62, 4.2],
     };
     let cabin = Geometry::Box {
         size: [1.5, 0.55, 2.0],
@@ -1645,7 +1851,7 @@ pub fn car_carry_at(speed: f32) -> Project {
             mass,
             inertia: chassis.inertia(mass),
             shapes: vec![
-                shape(chassis, Vec3::ZERO),
+                shape(chassis, Vec3::new(0.0, 0.04, 0.0)),
                 shape(cabin, Vec3::new(0.0, 0.6, -0.7)),
             ],
         }],
@@ -1734,6 +1940,179 @@ pub fn car_carry_at(speed: f32) -> Project {
     p
 }
 
+/// Car Hit's join on its own: a 747 kg car on the ground, joined (1e5 N and N·m) to a
+/// light carrier hidden underground, which is keyed to drive off at 8 m/s at once, stop
+/// dead at 1 s and stay. A force of 1e5 N moves 747 kg at 134 m/s², so the car falls
+/// behind for the first few frames (8 m/s takes 60 ms) and runs on past the stop, by
+/// design; what matters is that it then catches up (lesson 20).
+pub fn heavy_join() -> Project {
+    let mut p = new_scene("Heavy join", 2.0);
+    let car = Piece::at(
+        Geometry::Box {
+            size: [1.7, 0.62, 4.2],
+        },
+        747.0,
+        Quat::IDENTITY,
+        Vec3::ZERO,
+    );
+    let carrier = Piece::at(
+        Geometry::Box {
+            size: [0.1, 0.1, 0.1],
+        },
+        0.004,
+        Quat::IDENTITY,
+        Vec3::ZERO,
+    );
+    let still = Limits {
+        twist_min: 0.0,
+        twist_max: 0.0,
+        swing1: 0.0,
+        swing2: 0.0,
+    };
+    let no_muscle = Gains {
+        stiffness: 0.0,
+        damping: 0.0,
+        force_limit: 0.0,
+    };
+    let car = add_prop(
+        &mut p,
+        "car",
+        CharacterKind::Prop,
+        prop_rig(
+            vec![("body", None, Vec3::new(0.0, 0.31, 0.0), car)],
+            still,
+            no_muscle,
+        ),
+        SimLevel::Simulated,
+    );
+    let carrier = add_prop(
+        &mut p,
+        "carrier",
+        CharacterKind::Prop,
+        prop_rig(
+            vec![("box", None, Vec3::new(0.0, -1.0, 0.0), carrier)],
+            still,
+            no_muscle,
+        ),
+        SimLevel::CollisionOnly,
+    );
+    motion(
+        &mut p,
+        carrier,
+        "Drive",
+        0,
+        120,
+        false,
+        vec![channel(
+            "box",
+            Property::PosZ,
+            &[(0, 0.0), (60, 8.0), (120, 8.0)],
+        )],
+    );
+    constrain(
+        &mut p,
+        car,
+        0,
+        120,
+        "JoinBodies",
+        &["car.MetaBodies.body", "carrier.MetaBodies.box"],
+        (STRONG, STRONG),
+    );
+    p
+}
+
+/// How far Heavy join's car is from where its join holds it, m, at each frame.
+pub fn heavy_join_gaps(project: &Project, sim: &Simulation) -> Vec<f32> {
+    let index = |name: &str| {
+        project
+            .characters
+            .iter()
+            .position(|c| c.name == name)
+            .unwrap()
+    };
+    let (car, carrier) = (index("car"), index("carrier"));
+    let offset = |f: i32| {
+        let frame = sim.frame(f).unwrap();
+        let at = |ci: usize| frame[ci].as_ref().unwrap().bodies[0].1;
+        at(car) - at(carrier)
+    };
+    let start = offset(0);
+    (0..=project.settings.range.end)
+        .map(|f| offset(f).distance(start))
+        .collect()
+}
+
+/// Car Hit's pedestrian landing on the bonnet, as a box: Heavy join's car drives at
+/// 8 m/s, and a 75 kg box (0.5 m), thrown at 4 m/s the other way, drops 1.4 m onto
+/// its bonnet half a second in, sliding back over it at 12 m/s. How much of the
+/// car's speed the box picks up is friction's doing, under the load of its landing
+/// and its weight (lesson 21).
+pub fn bonnet_slide() -> Project {
+    let mut p = heavy_join();
+    p.settings.name = "Bonnet slide".into();
+    // Friction as endorphin's scenes have it once imported (lesson 21).
+    p.physics.contact = ContactModel::Coulomb;
+    let piece = Piece::at(
+        Geometry::Box {
+            size: [0.5, 0.5, 0.5],
+        },
+        75.0,
+        Quat::IDENTITY,
+        Vec3::ZERO,
+    );
+    let free = Limits {
+        twist_min: 0.0,
+        twist_max: 0.0,
+        swing1: 0.0,
+        swing2: 0.0,
+    };
+    let no_muscle = Gains {
+        stiffness: 0.0,
+        damping: 0.0,
+        force_limit: 0.0,
+    };
+    let id = add_prop(
+        &mut p,
+        "box",
+        CharacterKind::Prop,
+        prop_rig(
+            vec![("body", None, Vec3::new(0.0, 2.0, 7.0), piece)],
+            free,
+            no_muscle,
+        ),
+        SimLevel::Simulated,
+    );
+    push(
+        &mut p,
+        id,
+        0,
+        "box.MetaBodies.body",
+        Vec3::new(0.0, 0.0, -4.0),
+    );
+    p
+}
+
+/// Bonnet slide measured: the box's velocity along the road (m/s) at each frame, and
+/// the first frame it touches the car.
+pub fn bonnet_slide_track(project: &Project, sim: &Simulation) -> (Vec<f32>, i32) {
+    let ci = project
+        .characters
+        .iter()
+        .position(|c| c.name == "box")
+        .unwrap();
+    let z = |f: i32| sim.frame(f).unwrap()[ci].as_ref().unwrap().bodies[0].1.z;
+    let fps = project.settings.fps;
+    let end = project.settings.range.end;
+    let speeds = (0..=end)
+        .map(|f| (z((f + 1).min(end)) - z((f - 1).max(0))) * fps / 2.0)
+        .collect();
+    // Landed: its centre within 0.3 m of the bonnet (0.62 m up).
+    let landed = (0..=end)
+        .find(|&f| sim.frame(f).unwrap()[ci].as_ref().unwrap().bodies[0].1.y < 0.92)
+        .unwrap_or(end);
+    (speeds, landed)
+}
+
 /// Car carry's hit and carry: from the start until the carrier's keys end and the car
 /// stops, frame 99 (the hit is around frame 15). Lesson 15 is about this part.
 pub const CAR_CARRY_HIT: std::ops::RangeInclusive<i32> = 0..=99;
@@ -1783,11 +2162,15 @@ pub fn car_carry_numbers(speed: f32) -> CarCarry {
 /// The scene's character stands until the flip; the placeholder, without the scene's
 /// animation, doesn't: left alone it tips forwards from about frame 70 and is leaning
 /// about 25° when the drive starts, too far for 200 N·m to bring back. With `balance`,
-/// Balance keeps it standing until the drive starts.
+/// Balance keeps it standing until the drive starts. 5 s long: with Coulomb friction
+/// (lesson 21) its feet grip the box for longer, and left alone it lands at frame 412
+/// and only settles by 520.
 pub fn backflip(balance: bool) -> Project {
-    let mut p = new_scene("Back flip", 4.0);
+    let mut p = new_scene("Back flip", 5.0);
+    // Friction as endorphin's scenes have it once imported (lesson 21).
+    p.physics.contact = ContactModel::Coulomb;
     p.settings.fps = 120.0;
-    p.settings.range.end = 480;
+    p.settings.range.end = 600;
     let block = Geometry::Box {
         size: [1.2, 2.5, 1.2],
     };
@@ -1858,6 +2241,99 @@ pub fn curl_hand_back() -> Project {
         135,
         45,
         &[("requiredPhysicsLevel", "No Simulation")],
+    );
+    p
+}
+
+/// An active pose event on a character, driving `targets` (`character.Joints.name`,
+/// none = every joint) towards its held channels.
+fn active_pose(
+    project: &mut Project,
+    on: CharacterId,
+    start: i32,
+    end: i32,
+    targets: &[&str],
+    channels: Vec<Channel>,
+) {
+    let track = project.add_track(on, "Active pose");
+    let id = project.add_clip(
+        props("Active pose", track, start, end - start),
+        ClipKind::Event {
+            event: "Active pose".into(),
+        },
+        channels,
+    );
+    let source = &mut project.clip_mut(id).unwrap().source;
+    source.insert("strength".into(), "1".into());
+    if !targets.is_empty() {
+        source.insert("targets".into(), targets.join(", "));
+    }
+}
+
+/// Back-Flip-To-Combo splits its character between overlapping active poses: one
+/// event drives the legs, another, overlapping it, the spine and arms, and so on. Like
+/// endorphin's, each pose here stores the whole body (the joints it doesn't drive at
+/// rest) and names the joints it drives. Hung by the hips so it doesn't fall, the
+/// placeholder bends its knees by 60° in one event from frame 10, then its elbows by
+/// 60° in another from frame 20 that leaves the knees at rest.
+pub fn split_poses() -> Project {
+    let mut p = new_scene("Split poses", 3.0);
+    let id = person(&mut p, "poser", Vec3::new(0.0, 1.5, 0.0), 0.0, &[]);
+    constrain(
+        &mut p,
+        id,
+        0,
+        180,
+        "Lock",
+        &["poser.MetaBodies.hips"],
+        (STRONG, STRONG),
+    );
+    let pose = |knee: f32, elbow: f32| {
+        ["l", "r"]
+            .into_iter()
+            .flat_map(|side| {
+                [
+                    held(&format!("{side}_knee"), Property::RotX, knee),
+                    held(&format!("{side}_elbow"), Property::RotX, elbow),
+                ]
+            })
+            .collect::<Vec<_>>()
+    };
+    let knees = ["poser.Joints.l_knee", "poser.Joints.r_knee"];
+    let elbows = ["poser.Joints.l_elbow", "poser.Joints.r_elbow"];
+    active_pose(&mut p, id, 10, 180, &knees, pose(60.0, 0.0));
+    active_pose(&mut p, id, 20, 180, &elbows, pose(0.0, -60.0));
+    p
+}
+
+/// A character whose head may collide with its parent (endorphin's `collidesWithParent`)
+/// and already overlaps the neck at rest, like Back-Flip-To-Combo's: the placeholder's
+/// head sphere grown and moved down onto the neck. Hung by the hips, with the soft
+/// muscles a character starts with.
+pub fn head_on_neck() -> Project {
+    let mut p = new_scene("Head on neck", 1.0);
+    let (skeleton, mut rig) = person_rig();
+    let head = rig.body_index("head").unwrap();
+    let shape = &mut rig.bodies[head].shapes[0];
+    shape.geometry = Geometry::Sphere { radius: 0.12 };
+    shape.collides_with_parent = true;
+    rig.bodies[head].frame.position = [0.0, -0.02, 0.08];
+    let id = add_person(
+        &mut p,
+        "nodder",
+        (skeleton, rig),
+        Vec3::new(0.0, 1.5, 0.0),
+        0.0,
+        &[],
+    );
+    constrain(
+        &mut p,
+        id,
+        0,
+        60,
+        "Lock",
+        &["nodder.MetaBodies.hips"],
+        (STRONG, STRONG),
     );
     p
 }
@@ -1942,18 +2418,10 @@ pub fn nudges() -> Vec<f32> {
 mod tests {
     use super::*;
 
-    /// `NM_TRACE=<stand-in> cargo test --release trace_stand_in -- --ignored --nocapture`
-    /// (or `NM_TRACE=<path to an .ens scene>`: its first two seconds)
-    #[test]
-    #[ignore = "debugging aid"]
-    fn trace_stand_in() {
-        // Runs with every `--ignored` sweep; only does something when asked to.
-        let Ok(name) = std::env::var("NM_TRACE") else {
-            return;
-        };
-        let describe_only = name.starts_with("describe:");
-        let name = name.trim_start_matches("describe:");
-        let project = match name {
+    /// A stand-in by name, or an endorphin scene by path (`.ens`) cut to its first
+    /// `NM_SECONDS` (`seconds` if unset), for the debugging aids below.
+    fn named_project(name: &str, seconds: f32) -> Project {
+        match name {
             "tackle" => tackle(),
             "balcony" => balcony(),
             "catch_rope" => catch_rope(),
@@ -1962,7 +2430,12 @@ mod tests {
             "heli_leap" => heli_leap(),
             "rotating_floor" => rotating_floor(),
             "turntable" => turntable(),
+            "tilting_floor" => tilting_floor(),
+            "roof_edge" => roof_edge(),
+            "cut_rope" => cut_rope(),
             "car_hit" => car_hit(),
+            "heavy_join" => heavy_join(),
+            "bonnet_slide" => bonnet_slide(),
             "car_carry" => car_carry(),
             "backflip" => backflip(true),
             "backflip_passive" => backflip(false),
@@ -1979,21 +2452,174 @@ mod tests {
                 let seconds = std::env::var("NM_SECONDS")
                     .ok()
                     .and_then(|s| s.parse().ok())
-                    .unwrap_or(2.0);
-                project.settings.range.end =
-                    project.settings.range.end.min(
-                        project.settings.range.start + (seconds * project.settings.fps) as i32,
-                    );
+                    .unwrap_or(seconds);
+                let frames = (seconds * project.settings.fps) as i32;
+                project.settings.range.end = project
+                    .settings
+                    .range
+                    .end
+                    .min(project.settings.range.start.saturating_add(frames));
                 project
             }
-            _ => panic!("set NM_TRACE to a stand-in's name or an .ens scene"),
+            _ => panic!("expected a stand-in's name or an .ens scene, got {name:?}"),
+        }
+    }
+
+    /// `NM_TRACE=<stand-in> cargo test --release trace_stand_in -- --ignored --nocapture`
+    /// (or `NM_TRACE=<path to an .ens scene>`: its first two seconds, or `NM_SECONDS`)
+    #[test]
+    #[ignore = "debugging aid"]
+    fn trace_stand_in() {
+        // Runs with every `--ignored` sweep; only does something when asked to.
+        let Ok(name) = std::env::var("NM_TRACE") else {
+            return;
         };
+        let describe_only = name.starts_with("describe:");
+        let project = named_project(name.trim_start_matches("describe:"), 2.0);
         if describe_only {
             let report = sweep(&project);
             print!("{report}\n{}{}", report.places(), describe(&project));
             return;
         }
         trace(&project);
+    }
+
+    /// `NM_DUMP=<stand-in or .ens path> cargo test --release dump_scene_motion -- --ignored --nocapture`
+    ///
+    /// Simulates a scene and writes its motion as CSV, for comparing it with a
+    /// reference (endorphin's own run, exported or measured) outside the tests. Into
+    /// `NM_DUMP_OUT` (default `target/dump/<scene name>`):
+    ///
+    /// - `bodies.csv`: per frame, character and rig body, the body's world position
+    ///   (m) and rotation (quaternion x, y, z, w) and the character's simulation level;
+    /// - `joints.csv`: the same for every skeleton joint, characters without a rig
+    ///   included (they follow their animation). This is the pose the viewport draws
+    ///   and exports write: while a transition blends back to animation the joints
+    ///   are blended and the bodies aren't;
+    /// - `rig.csv`: every body's mass and its frame relative to the joint it hangs
+    ///   from, to place bodies on the joints;
+    /// - `shapes.csv`: every collision shape, relative to its body, for drawing.
+    ///
+    /// `NM_SECONDS` sets how long to simulate from the start of the range, past its
+    /// end if need be (endorphin runs a scene for its own number of ticks, which can be
+    /// longer than the playback range); the whole range by default.
+    #[test]
+    #[ignore = "debugging aid"]
+    fn dump_scene_motion() {
+        use std::fmt::Write as _;
+        let Ok(name) = std::env::var("NM_DUMP") else {
+            return;
+        };
+        let mut project = named_project(&name, f32::MAX);
+        if let Some(seconds) = std::env::var("NM_SECONDS")
+            .ok()
+            .and_then(|s| s.parse::<f32>().ok())
+        {
+            let range = &mut project.settings.range;
+            range.end = range.start + (seconds * project.settings.fps).round() as i32;
+        }
+        let out = std::path::PathBuf::from(std::env::var("NM_DUMP_OUT").unwrap_or_else(|_| {
+            format!(
+                "{}/target/dump/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                project.settings.name
+            )
+        }));
+        std::fs::create_dir_all(&out).unwrap();
+        let (sim, elapsed) = simulate(&project);
+        let range = project.settings.range;
+        let fps = project.settings.fps;
+        let level_name = |level: Option<SimLevel>| match level {
+            Some(SimLevel::Animated) => "animated",
+            Some(SimLevel::CollisionOnly) => "collision_only",
+            Some(SimLevel::CollisionWithMomentum) => "collision_with_momentum",
+            Some(SimLevel::Simulated) => "simulated",
+            None => "no_rig",
+        };
+        let row = |csv: &mut String, head: &str, (q, p): (Quat, Vec3)| {
+            writeln!(
+                csv,
+                "{head},{:.5},{:.5},{:.5},{:.6},{:.6},{:.6},{:.6}",
+                p.x, p.y, p.z, q.x, q.y, q.z, q.w
+            )
+            .unwrap();
+        };
+        const POSE: &str = "x,y,z,qx,qy,qz,qw";
+        let mut bodies = format!("frame,seconds,character,level,body,{POSE}\n");
+        let mut joints = format!("frame,seconds,character,level,joint,parent,{POSE}\n");
+        for frame in range.start..=range.end {
+            let state = sim.frame(frame).unwrap();
+            let poses = project.evaluate(frame as f32);
+            let t = (frame - range.start) as f32 / fps;
+            for (ci, c) in project.characters.iter().enumerate() {
+                let cf = state[ci].as_ref();
+                let level = level_name(cf.map(|cf| cf.level));
+                let at = match cf {
+                    Some(cf) => cf.joints.clone(),
+                    None => world_transforms(&c.skeleton, &poses[ci]),
+                };
+                for (j, joint) in c.skeleton.joints.iter().enumerate() {
+                    let parent = joint
+                        .parent
+                        .map_or("", |p| c.skeleton.joints[p].name.as_str());
+                    let head = format!("{frame},{t:.4},{},{level},{},{parent}", c.name, joint.name);
+                    row(&mut joints, &head, at[j]);
+                }
+                let (Some(cf), Some(rig)) = (cf, &c.physics) else {
+                    continue;
+                };
+                for (body, at) in rig.bodies.iter().zip(&cf.bodies) {
+                    let head = format!("{frame},{t:.4},{},{level},{}", c.name, body.name);
+                    row(&mut bodies, &head, *at);
+                }
+            }
+        }
+        let mut bodies_on_joints = format!("character,body,joint,mass,{POSE}\n");
+        let mut shapes =
+            format!("character,body,mass,shape,geometry,radius,length,sx,sy,sz,{POSE}\n");
+        let frame_of = |f: &crate::document::physics::Frame| {
+            (Quat::from_array(f.rotation), Vec3::from(f.position))
+        };
+        for c in &project.characters {
+            let Some(rig) = &c.physics else { continue };
+            for body in &rig.bodies {
+                let joint = &c.skeleton.joints[body.joint].name;
+                let head = format!("{},{},{joint},{}", c.name, body.name, body.mass);
+                row(&mut bodies_on_joints, &head, frame_of(&body.frame));
+                for (si, shape) in body.shapes.iter().enumerate() {
+                    let (kind, r, l, size) = match shape.geometry {
+                        Geometry::Sphere { radius } => ("sphere", radius, 0.0, [0.0; 3]),
+                        Geometry::Capsule { radius, length } => {
+                            ("capsule", radius, length, [0.0; 3])
+                        }
+                        Geometry::Cylinder { radius, length } => {
+                            ("cylinder", radius, length, [0.0; 3])
+                        }
+                        Geometry::Box { size } => ("box", 0.0, 0.0, size),
+                    };
+                    let head = format!(
+                        "{},{},{},{si},{kind},{r},{l},{},{},{}",
+                        c.name, body.name, body.mass, size[0], size[1], size[2]
+                    );
+                    row(&mut shapes, &head, frame_of(&shape.frame));
+                }
+            }
+        }
+        for (file, text) in [
+            ("bodies.csv", bodies),
+            ("joints.csv", joints),
+            ("rig.csv", bodies_on_joints),
+            ("shapes.csv", shapes),
+        ] {
+            std::fs::write(out.join(file), text).unwrap();
+        }
+        println!(
+            "{}: frames {}-{} at {fps} fps simulated in {elapsed:.0?}, written to {}",
+            project.settings.name,
+            range.start,
+            range.end,
+            out.display()
+        );
     }
 
     fn check(project: Project) -> Simulation {
@@ -2070,6 +2696,65 @@ mod tests {
         // Lying or standing on the disc, not floating above it.
         let height = resting_height(&project, &sim, "dancer");
         assert!(height < 0.1, "dancer rests {height} m above the turntable");
+    }
+
+    /// Without a ground plane, things may go as low as the scenery takes them: a floor
+    /// tilting below where the ground would be, or the void beside a roof.
+    #[test]
+    fn tilting_floor_carries_character_below_zero() {
+        let project = tilting_floor();
+        let sim = check(project.clone());
+        let height = resting_height(&project, &sim, "dancer");
+        assert!(height < -1.0, "the dancer only went down to {height} m");
+    }
+
+    #[test]
+    fn jumper_falls_past_the_roof_edge() {
+        let project = roof_edge();
+        let sim = check(project.clone());
+        let height = resting_height(&project, &sim, "jumper");
+        assert!(height < -5.0, "the jumper only fell to {height} m");
+    }
+
+    /// The check that replaces "below the ground" in scenes without one still sees a
+    /// body fall through the floor: Rotating Floor's dancer, started under the slab.
+    #[test]
+    fn sweep_sees_a_body_under_the_floor_without_ground() {
+        let mut project = rotating_floor();
+        let dancer = project.characters.last().unwrap().id;
+        let track = project.tracks_of(dancer).next().unwrap().id;
+        let start = project
+            .clips
+            .iter_mut()
+            .find(|c| c.props.track == track)
+            .unwrap();
+        for channel in &mut start.channels {
+            if channel.joint == "hips" && channel.property == Property::PosY {
+                channel.keys[0].value = -1.0;
+            }
+        }
+        let report = sweep(&project);
+        assert!(
+            !report.ok() && report.under > 0.5,
+            "a dancer under the floor passed: {report}"
+        );
+    }
+
+    /// Catch Rope: a force naming the rope's end, on the environment's track, pushes the
+    /// rope and not the environment, whose massless roof stays put; the link a sever
+    /// event cuts falls away without counting as a joint coming apart.
+    #[test]
+    fn force_on_another_track_pushes_what_it_names() {
+        let project = cut_rope();
+        let sim = check(project.clone());
+        let roof = |frame: i32| sim.frame(frame).unwrap()[0].as_ref().unwrap().bodies[0].1;
+        let moved = roof(120).distance(roof(0));
+        assert!(moved < 1e-4, "the massless roof moved {moved} m");
+        let end = |frame: i32| sim.frame(frame).unwrap()[1].as_ref().unwrap().bodies[9].1;
+        let swing = end(30).z - end(0).z;
+        assert!(swing > 0.05, "the rope's end only swung {swing} m");
+        let fell = end(60).y - end(120).y;
+        assert!(fell > 2.0, "the cut end only fell {fell} m");
     }
 
     /// A rope hanging straight down from a Lock with a heavy weight on the end stays
@@ -2293,11 +2978,127 @@ mod tests {
         }
     }
 
+    /// Angle (degrees) between the bones either side of `joint`, from its parent to it
+    /// and from it to `child`, at a frame.
+    fn bend(project: &Project, sim: &Simulation, frame: i32, joint: &str, child: &str) -> f32 {
+        let skeleton = &project.characters[0].skeleton;
+        let at = |name: &str| {
+            sim.frame(frame).unwrap()[0].as_ref().unwrap().joints
+                [skeleton.joint_index(name).unwrap()]
+            .1
+        };
+        let j = skeleton.joint_index(joint).unwrap();
+        let parent = &skeleton.joints[skeleton.joints[j].parent.unwrap()].name;
+        let (a, b, c) = (at(parent), at(joint), at(child));
+        (b - a).angle_between(c - b).to_degrees()
+    }
+
+    /// Overlapping active poses each drive the joints they name (lesson 19). The
+    /// elbows' event starts last; it used to drive the whole body, so the knees went
+    /// back to rest when it started (0° at frame 150, with the elbows at 59°). Now
+    /// 59° and 60°.
+    #[test]
+    fn overlapping_active_poses_each_drive_their_own_joints() {
+        let project = split_poses();
+        let sim = check(project.clone());
+        let knees = bend(&project, &sim, 150, "l_knee", "l_ankle");
+        let elbows = bend(&project, &sim, 150, "l_elbow", "l_wrist");
+        let early = bend(&project, &sim, 18, "l_elbow", "l_wrist");
+        println!(
+            "split poses: knees {knees:.0}°, elbows {elbows:.0}° at frame 150; elbows {early:.0}° at 18"
+        );
+        assert!((45.0..75.0).contains(&knees), "knees bent {knees}°");
+        assert!((45.0..75.0).contains(&elbows), "elbows bent {elbows}°");
+        assert!(early < 15.0, "elbows bent {early}° before their event");
+    }
+
+    /// A head that may collide with its parent but overlaps the neck at rest isn't
+    /// thrown off it when the simulation starts (lesson 19). It turned 44° against the
+    /// neck within the first second; now 2.6°.
+    #[test]
+    fn a_shape_overlapping_its_parent_at_rest_does_not_push_it() {
+        let project = head_on_neck();
+        let sim = check(project.clone());
+        let rig = project.characters[0].physics.as_ref().unwrap();
+        let (head, neck) = (
+            rig.body_index("head").unwrap(),
+            rig.body_index("neck").unwrap(),
+        );
+        // The head's turn relative to the neck.
+        let rot = |f: i32| {
+            let bodies = &sim.frame(f).unwrap()[0].as_ref().unwrap().bodies;
+            bodies[neck].0.inverse() * bodies[head].0
+        };
+        let turned = (0..=60)
+            .map(|f| rot(0).angle_between(rot(f)).to_degrees())
+            .fold(0.0f32, f32::max);
+        println!("head on neck: turned {turned:.1}° at most");
+        assert!(turned < 5.0, "head turned {turned}°");
+    }
+
     /// endorphin's Car Hit stretched a joint by 6 cm. The stand-in's character takes the
     /// hit within limits, so this guards against regressions rather than reproducing it.
     #[test]
     fn car_hit_keeps_joints_together() {
         check(car_hit());
+    }
+
+    /// Heavy join (lesson 20): the car falls behind its carrier as it drives off (23 cm
+    /// at frame 4) and runs on past the stop (23 cm), as 1e5 N allows, but catches up
+    /// within 7 frames each time. It used to stay 15-18 cm behind for the whole drive
+    /// and the second after the stop: a lock at its strength only ever closed the gap
+    /// at strength × substep / mass, 0.3 m/s here.
+    #[test]
+    fn heavy_join_catches_up() {
+        let project = heavy_join();
+        let (sim, _) = simulate(&project);
+        let gaps = heavy_join_gaps(&project, &sim);
+        let worst = |frames: std::ops::RangeInclusive<usize>| {
+            gaps[frames].iter().copied().fold(0.0f32, f32::max)
+        };
+        println!(
+            "heavy join: gap {:.3} m at frame 5, {:.3} at 15, {:.3} worst over 20-60, {:.3} worst after the stop, {:.3} over 80-120",
+            gaps[5],
+            gaps[15],
+            worst(20..=60),
+            worst(61..=120),
+            worst(80..=120)
+        );
+        assert!(worst(20..=60) < 0.01, "behind while driving: {gaps:?}");
+        assert!(worst(80..=120) < 0.01, "not back after the stop: {gaps:?}");
+    }
+
+    /// Bonnet slide (lesson 21): the box, moving at 4 m/s against the car, is stopped
+    /// dead as it lands, as endorphin's Car Hit pedestrian is (-0.3 m/s 3 frames after
+    /// landing, -0.05 after 6), and the car then drags it along. With friction capped
+    /// at 100 N per contact, as before, it slid on at 3.7 m/s and only slowly lost
+    /// that (2.7 m/s 24 frames after landing).
+    #[test]
+    fn bonnet_slide_stops_the_box() {
+        let mut after = Vec::new();
+        for contact in [ContactModel::Coulomb, ContactModel::ForceCapped] {
+            let mut project = bonnet_slide();
+            project.physics.contact = contact;
+            let (sim, _) = simulate(&project);
+            let (speeds, landed) = bonnet_slide_track(&project, &sim);
+            let at = |f: i32| speeds[f as usize];
+            println!(
+                "bonnet slide ({contact:?}): lands at frame {landed}; along the road {:.2} m/s before, \
+                 {:.2} 3 frames after, {:.2} 6 after, {:.2} 12 after, {:.2} 24 after",
+                at(landed - 2),
+                at(landed + 3),
+                at(landed + 6),
+                at(landed + 12),
+                at(landed + 24)
+            );
+            after.push(at(landed + 6));
+        }
+        assert_eq!(bonnet_slide().physics.contact, ContactModel::Coulomb);
+        assert!(
+            after[0].abs() < 1.0,
+            "still {} m/s 6 frames after landing",
+            after[0]
+        );
     }
 
     /// endorphin's Car Hit: a heavy car joined to a keyed carrier catches the
@@ -2318,6 +3119,10 @@ mod tests {
     /// than 0.7 cm after the stop (2.1 cm here before), and none at all more than
     /// 2.7 cm in the whole scene (the toes at the hit), so the whole scene is held to
     /// 3.5 cm and the body after the stop to 1.5 cm.
+    ///
+    /// Since lesson 21 (Coulomb friction, and the car 15 cm off the ground) the same
+    /// 201 runs give, up to the stop, 0.3 to 0.7 cm for the body and 0.5 to 2.2 cm in
+    /// all; after the stop, 0.1 to 1.1 cm.
     #[test]
     fn car_carry_keeps_joints_together() {
         let CarCarry {
@@ -2881,6 +3686,54 @@ mod behaviour_tests {
         assert!(blend < 0.02, "{blend:.4} m at {place}");
     }
 
+    /// Car Hit's drawn pose jumped for exactly one frame at its transition's last
+    /// frame: 111 blended (-0.97 m), 112 the raw simulated pose (-1.85 m), 113 the
+    /// animation (-0.93 m). The blend ran over `start <= frame < end` while the level
+    /// only changes to animated after frame `end` is recorded (lesson "transition end").
+    /// The curled character lies far from its standing animation, so a pop shows.
+    #[test]
+    fn transition_ends_on_the_animation_without_a_pop() {
+        let project = curl_hand_back();
+        let (sim, _) = simulate(&project);
+        let (start, end) = (135, 180);
+        let joints = |f: i32| &sim.frame(f).unwrap()[0].as_ref().unwrap().joints;
+        // Largest move of any joint between two frames, in metres.
+        let step = |a: i32, b: i32| {
+            joints(a)
+                .iter()
+                .zip(joints(b))
+                .map(|(x, y)| x.1.distance(y.1))
+                .fold(0.0_f32, f32::max)
+        };
+        // How fast the blend moves the pose before the end, the pace to compare with.
+        let pace = (end - 6..end - 1)
+            .map(|f| step(f, f + 1))
+            .fold(0.0, f32::max);
+        let (into, out) = (step(end - 1, end), step(end, end + 1));
+        println!(
+            "transition {start}-{end}: pace {pace:.3} m/frame, into end {into:.3} m, out of end {out:.3} m"
+        );
+        assert!(
+            into < pace * 2.0,
+            "pops into the last frame: {into:.3} m vs pace {pace:.3} m"
+        );
+        assert!(
+            out < pace * 2.0,
+            "pops out of the last frame: {out:.3} m vs pace {pace:.3} m"
+        );
+        // The last frame already is the animation.
+        let anim = world_transforms(
+            &project.characters[0].skeleton,
+            &project.evaluate(end as f32)[0],
+        );
+        let off = joints(end)
+            .iter()
+            .zip(&anim)
+            .map(|(j, a)| j.1.distance(a.1))
+            .fold(0.0_f32, f32::max);
+        assert!(off < 1e-3, "frame {end} is {off:.3} m from the animation");
+    }
+
     #[test]
     fn writhe_keeps_moving_and_is_deterministic() {
         let project = limp_then(Some("Writhe"));
@@ -2944,10 +3797,8 @@ mod endorphin_scenes {
             if name.contains("Large File") {
                 continue;
             }
-            let mut project = crate::io::endorphin::import_scene(&path).unwrap().project;
-            // Keep the check quick: the first 2 seconds.
-            let fps = project.settings.fps as i32;
-            project.settings.range.end = project.settings.range.start + 2 * fps;
+            // The whole range: a scene can go wrong long after its first seconds.
+            let project = crate::io::endorphin::import_scene(&path).unwrap().project;
             let report = sweep(&project);
             let ok = report.ok();
             println!(

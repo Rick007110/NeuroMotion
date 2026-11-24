@@ -262,12 +262,15 @@ pub struct Ground {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContactModel {
-    /// endorphin-compatible: each contact's friction force is capped at the
-    /// interaction's `friction` value in newtons, whatever the load.
+    /// Each contact's friction force is capped at the interaction's `friction` value in
+    /// newtons, whatever the load. NeuroMotion's own default for now: Balance and
+    /// Stagger were tuned on it, and lose ground with load-proportional grip
+    /// (docs/physics-design.md, lesson 21).
     #[default]
     ForceCapped,
     /// Coulomb friction: the cap is `friction / 100` times the normal force, so
-    /// endorphin's default 100 maps to μ = 1.
+    /// endorphin's Default (100) is μ = 1 and its Grippy (300) μ = 3. That is what
+    /// endorphin's friction values mean (lesson 21), so imported scenes use it.
     Coulomb,
 }
 

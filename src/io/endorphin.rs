@@ -23,8 +23,8 @@ use roxmltree::Node;
 
 use super::IoError;
 use crate::document::physics::{
-    BodyDef, Frame, Gains, Geometry, Ground, Interaction, JointDef, Limits, MuscleGains, MuscleSet,
-    PhysicsRig, ShapeDef,
+    BodyDef, ContactModel, Frame, Gains, Geometry, Ground, Interaction, JointDef, Limits,
+    MuscleGains, MuscleSet, PhysicsRig, ShapeDef,
 };
 use crate::document::{
     Channel, CharacterId, CharacterKind, ClipKind, ClipProps, FrameRange, Interp, Joint, Keyframe,
@@ -294,8 +294,19 @@ pub fn import_scene(path: &Path) -> Result<Import, IoError> {
                 end: attr_i32(&r, "end")?,
             })
         });
+    // endorphin simulates and plays `numTicksToRun` physics ticks, which can run well
+    // past the playback range (Car Hit: 400 ticks = 200 frames, range 0-162). Scenes
+    // that set no run length carry the default of 10000, which isn't a length.
+    let run_end = engine.and_then(|e| {
+        let ticks = attr_i32(&e, "numTicksToRun").filter(|t| (1..10_000).contains(t))?;
+        let rate = attr_f32(e, "bsimulationFrameRate").filter(|r| *r > 0.0)?;
+        Some((ticks as f32 / rate * fps).round() as i32)
+    });
     project.settings.range = match playback {
-        Some(range) if range.end > range.start => range,
+        Some(range) if range.end > range.start => FrameRange {
+            start: range.start,
+            end: range.end.max(run_end.unwrap_or(0)),
+        },
         _ if first < last => FrameRange {
             start: first.min(0),
             end: last,
@@ -981,6 +992,8 @@ fn read_physics_settings(project: &mut Project, scene: Node, engine: Node) {
     if let Some(g) = vec3(child(engine, "Gravity")) {
         settings.gravity = g.to_array();
     }
+    // endorphin's friction values are Coulomb coefficients × 100 (lesson 21).
+    settings.contact = ContactModel::Coulomb;
     settings.ground = (scene.attribute("useDefaultGround") != Some("false")).then(|| Ground {
         height: 0.0,
         material: "tarmac".into(),
@@ -1500,6 +1513,30 @@ mod tests {
         std::io::Write::write_all(&mut encoder, xml.as_bytes()).unwrap();
         fs::write(&path, encoder.finish().unwrap()).unwrap();
         import_scene(&path).unwrap()
+    }
+
+    /// endorphin plays the whole run, not only the playback range (Car Hit: 400 ticks at
+    /// 120 Hz and 60 fps is 200 frames, playback range 0-162); 10000 ticks is the
+    /// default of a scene that sets no length.
+    #[test]
+    fn range_follows_the_run_length() {
+        let with_ticks = |ticks: u32, fps: f32| {
+            let engine = format!(
+                r#"<Engine bpositionBufferFrameRate="{}" bsimulationFrameRate="{}" numTicksToRun="{ticks}">"#,
+                hex(fps),
+                hex(120.0)
+            );
+            let xml = scene_xml().replace(
+                &format!(r#"<Engine bpositionBufferFrameRate="{}">"#, hex(30.0)),
+                &engine,
+            );
+            assert_ne!(xml, scene_xml());
+            import(&xml).project.settings.range
+        };
+        assert_eq!(with_ticks(400, 60.0), FrameRange { start: 0, end: 200 });
+        // 120 ticks at 30 fps is 30 frames: the playback range already covers it.
+        assert_eq!(with_ticks(60, 30.0), FrameRange { start: 0, end: 30 });
+        assert_eq!(with_ticks(10_000, 60.0), FrameRange { start: 0, end: 30 });
     }
 
     #[test]

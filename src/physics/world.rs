@@ -369,6 +369,12 @@ struct LockBlock {
     /// Impulse caps (strength × h); 0 on free axes.
     bound: [f32; 6],
     impulse: [f32; 6],
+    /// Axes that ended position correction at their strength. A lock that can't keep up
+    /// pulls with all of it, so relaxing leaves them there (lesson 20).
+    pulling: [bool; 6],
+    /// √(2 × strength / effective mass) per held axis: an axis `e` off target can close
+    /// at up to this × √e and still stop on target using its strength (lesson 20).
+    brake: [f32; 6],
     key: (usize, usize, usize),
 }
 
@@ -569,6 +575,17 @@ impl World {
 
     fn substep(&mut self, h: f32) {
         self.forget_switched_bodies();
+        // A dynamic body without mass is fixed in place, whatever velocity it was handed
+        // (a force event, or its animation's before it went simulated). Kept, it would
+        // drift forever, carrying whatever stands on it.
+        for body in self
+            .bodies
+            .iter_mut()
+            .filter(|b| b.motion == Motion::Dynamic && !b.is_dynamic())
+        {
+            body.linear_velocity = Vec3::ZERO;
+            body.angular_velocity = Vec3::ZERO;
+        }
         for body in self.bodies.iter_mut().filter(|b| b.is_dynamic()) {
             body.linear_velocity += self.gravity * h;
         }
@@ -638,6 +655,12 @@ impl World {
             solve_locks(&mut sb, &mut locks, joint_soft.bias_rate);
             solve_groups(&mut sb, &mut groups, &mut joints, &mut locks, true);
             self.solve_contacts(&mut sb, &mut contacts, contact_soft, h, true);
+        }
+        // A lock axis still at its strength after position correction can't keep up: it
+        // pulls with all of it, and relaxing leaves it there (lesson 20).
+        for l in &mut locks {
+            l.pulling =
+                std::array::from_fn(|r| l.bound[r] > 0.0 && l.impulse[r].abs() >= l.bound[r]);
         }
 
         // Integrate positions with the biased velocities.
@@ -1062,6 +1085,7 @@ impl World {
             let strength = [lock.linear.to_array(), lock.angular.to_array()].concat();
             let mut k = [[0.0f32; 6]; 6];
             let mut bound = [0.0f32; 6];
+            let mut brake = [0.0f32; 6];
             for r in 0..6 {
                 for c in 0..6 {
                     k[r][c] = blocks[r / 3][c / 3].col(c % 3)[r % 3];
@@ -1071,6 +1095,7 @@ impl World {
                 // Free axes, and axes neither body can move along, drop out of the block.
                 if strength[r] > 0.0 && k[r][r] > 1e-9 {
                     bound[r] = strength[r] * h;
+                    brake[r] = (2.0 * strength[r] * k[r][r]).sqrt();
                 } else {
                     for c in 0..6 {
                         k[r][c] = 0.0;
@@ -1096,6 +1121,8 @@ impl World {
                 inv_k,
                 bound,
                 impulse,
+                pulling: [false; 6],
+                brake,
                 key,
             });
         }
@@ -1176,10 +1203,7 @@ impl World {
             let Some(g) = group_of(l.a, l.b).and_then(|g| locked.binary_search(&g).ok()) else {
                 continue;
             };
-            let push =
-                (Vec3::from_slice(&l.error[..3]) * bias_rate).clamp_length_max(MAX_PUSH_SPEED);
-            let turn = (Vec3::from_slice(&l.error[3..]) * bias_rate)
-                .clamp_length_max(MAX_PUSH_SPEED * 4.0);
+            let biases = l.bias(bias_rate);
             for axis in (0..6).filter(|&r| l.bound[r] > 0.0) {
                 let f = l.frame.col(axis % 3);
                 let jacobian = if axis < 3 {
@@ -1187,7 +1211,7 @@ impl World {
                 } else {
                     [Vec3::ZERO, -f, Vec3::ZERO, f]
                 };
-                let bias = if axis < 3 { push[axis] } else { turn[axis - 3] };
+                let bias = biases[axis];
                 rows[g].push(GroupRow {
                     a: l.a,
                     b: l.b,
@@ -1532,6 +1556,24 @@ impl World {
 }
 
 impl LockBlock {
+    /// Position-correcting velocity along the lock's rows; `bias_rate` is the share of
+    /// the error corrected per second. An axis closes no faster than its strength could
+    /// stop it on target (`brake`): faster, and a lock that has fallen far behind would
+    /// arrive with more speed than its strength can take off, and swing past.
+    fn bias(&self, bias_rate: f32) -> [f32; 6] {
+        let push =
+            (Vec3::from_slice(&self.error[..3]) * bias_rate).clamp_length_max(MAX_PUSH_SPEED);
+        let turn =
+            (Vec3::from_slice(&self.error[3..]) * bias_rate).clamp_length_max(MAX_PUSH_SPEED * 4.0);
+        let mut bias = [0.0f32; 6];
+        for r in 0..6 {
+            let b = if r < 3 { push[r] } else { turn[r - 3] };
+            let most = self.brake[r] * self.error[r].abs().sqrt();
+            bias[r] = b.clamp(-most, most);
+        }
+        bias
+    }
+
     /// Velocity along the lock's rows.
     fn velocity(&self, sb: &[SolverBody]) -> [f32; 6] {
         let linear =
@@ -1554,18 +1596,16 @@ impl LockBlock {
 fn solve_locks(sb: &mut [SolverBody], locks: &mut [LockBlock], bias_rate: f32) {
     for l in locks.iter_mut() {
         let mut rhs = l.velocity(sb);
-        let push = Vec3::from_slice(&l.error[..3]) * bias_rate;
-        let turn = Vec3::from_slice(&l.error[3..]) * bias_rate;
-        let bias = [
-            push.clamp_length_max(MAX_PUSH_SPEED).to_array(),
-            turn.clamp_length_max(MAX_PUSH_SPEED * 4.0).to_array(),
-        ]
-        .concat();
-        for (r, b) in rhs.iter_mut().zip(bias) {
+        for (r, b) in rhs.iter_mut().zip(l.bias(bias_rate)) {
             *r = -(*r + b);
         }
         let mut delta = [0.0f32; 6];
         for (r, d) in delta.iter_mut().enumerate() {
+            // Relaxing takes back what position correction added, but not from an axis
+            // that can't keep up: a real force-capped constraint would still pull.
+            if bias_rate == 0.0 && l.pulling[r] {
+                continue;
+            }
             let wanted = l.impulse[r] + (0..6).map(|c| l.inv_k[r][c] * rhs[c]).sum::<f32>();
             let clamped = wanted.clamp(-l.bound[r], l.bound[r]);
             *d = clamped - l.impulse[r];
@@ -1824,6 +1864,22 @@ fn solve_groups(
     use_bias: bool,
 ) {
     for group in groups.iter_mut() {
+        // Relaxing leaves axes that are pulling with their full strength alone.
+        if !use_bias {
+            let mut changed = false;
+            for (r, out) in group.rows.iter().zip(group.out.iter_mut()) {
+                if let RowSource::Lock(l, axis) = r.source
+                    && locks[l].pulling[axis]
+                    && !*out
+                {
+                    *out = true;
+                    changed = true;
+                }
+            }
+            if changed {
+                group.factorize();
+            }
+        }
         loop {
             let x = group.impulses(sb, use_bias);
             let over = group
@@ -2021,6 +2077,35 @@ mod tests {
             body.position.y
         );
         assert!(body.linear_velocity.length() < 0.05);
+    }
+
+    /// Coulomb friction stops a sliding box in v² / (2 μ g) whatever it weighs: 0.82 m
+    /// from 4 m/s at μ = 1 (endorphin's Default, 100). Force-capped friction, 100 N per
+    /// contact, stops a light box in a fraction of that and lets a heavy one slide on
+    /// (lesson 21).
+    #[test]
+    fn coulomb_friction_scales_with_the_load() {
+        let slide = |model: ContactModel, mass: f32| {
+            let mut w = world();
+            w.contact_model = model;
+            let b = ball(&mut w, Vec3::new(0.0, 0.2, 0.0), 0.2, mass);
+            let size = 0.4;
+            w.shapes[b].geometry = Geometry::Box { size: [size; 3] };
+            w.bodies[b].inv_inertia = Vec3::splat(6.0 / (mass * size * size));
+            w.bodies[b].linear_velocity = Vec3::new(4.0, 0.0, 0.0);
+            run(&mut w, 1.5);
+            w.bodies[b].position.x
+        };
+        let [light, heavy] = [10.0, 100.0].map(|m| slide(ContactModel::Coulomb, m));
+        let [capped_light, capped_heavy] =
+            [10.0, 100.0].map(|m| slide(ContactModel::ForceCapped, m));
+        println!(
+            "slid from 4 m/s: Coulomb {light:.2} m (10 kg), {heavy:.2} m (100 kg); \
+             force-capped {capped_light:.2} m, {capped_heavy:.2} m"
+        );
+        for d in [light, heavy] {
+            assert!((d - 0.82).abs() < 0.08, "slid {d} m");
+        }
     }
 
     /// A ball gliding 1 cm above the ground (inside the contact margin, weightless)
@@ -2307,6 +2392,31 @@ mod tests {
         // Net acceleration (98.1 - 50) N / 10 kg ≈ 4.8 m/s², so ≈ 2.4 m in a second.
         let fallen = 2.0 - w.bodies[b].position.y;
         assert!((fallen - 2.4).abs() < 0.1, "fell {fallen} m");
+    }
+
+    /// A lock that has fallen behind pulls with its full strength until it catches up, as
+    /// a force-capped constraint would, and brakes in time not to swing past (lesson 20).
+    /// 50 N on a weightless 10 kg ball held 1 m from its target: 5 m/s² to half way and
+    /// back down, 0.9 s in all. It used to creep in at strength × substep / mass, 1 cm/s.
+    #[test]
+    fn a_lock_that_falls_behind_pulls_with_its_full_strength() {
+        let mut w = world();
+        w.ground = None;
+        w.gravity = Vec3::ZERO;
+        let b = ball(&mut w, Vec3::ZERO, 0.1, 10.0);
+        w.locks.push(Lock {
+            anchor: None,
+            body: b,
+            target: (Quat::IDENTITY, Vec3::new(1.0, 0.0, 0.0)),
+            linear: Vec3::splat(50.0),
+            angular: Vec3::ZERO,
+        });
+        run(&mut w, 0.5);
+        let half = w.bodies[b].position.x;
+        run(&mut w, 0.5);
+        let gap = (1.0 - w.bodies[b].position.x).abs();
+        assert!(half > 0.5, "moved {half} m in 0.5 s");
+        assert!(gap < 0.01, "{gap} m from the target after 1 s");
     }
 
     /// A negative linear strength pushes with that many newtons: -10 N down on 2 kg adds

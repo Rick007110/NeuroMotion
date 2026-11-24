@@ -19,7 +19,7 @@ use glam::{Quat, Vec3};
 
 use super::behaviour::{Behaviour, Drive, Layout};
 use super::world::{Body, CollisionFlags, Joint, Lock, Motion, Muscle, Shape, World};
-use crate::document::physics::{Gains, MuscleGains, PhysicsRig, SimLevel};
+use crate::document::physics::{Gains, MuscleGains, MuscleSet, PhysicsRig, SimLevel};
 use crate::document::{CharacterKind, Clip, ClipKind, Pose, Project, world_transforms};
 
 /// One character's simulated state at a frame.
@@ -273,6 +273,7 @@ fn build(project: &Project) -> Running {
             )
         };
         let first_body = world.bodies.len();
+        let first_shape = world.shapes.len();
         let level = initial_level(&plans[ci], character.default_level, start as i32);
 
         for (bi, body) in rig.bodies.iter().enumerate() {
@@ -314,6 +315,7 @@ fn build(project: &Project) -> Running {
                 });
             }
         }
+        unflag_overlapping_parents(&mut world, first_shape, first_body, |bi| place(&rest, bi));
         let first_joint = world.joints.len();
         for jd in &rig.joints {
             // Keep world joints aligned with rig joints: invalid ones become disabled placeholders.
@@ -491,6 +493,22 @@ fn clip_vec3(clip: &Clip, key: &str) -> Vec3 {
         .unwrap_or(Vec3::ZERO)
 }
 
+/// Skeleton joints that sever events cut, as (character index, skeleton joint index,
+/// first frame cut), for the tests: a cut joint's bone comes apart on purpose.
+#[cfg(test)]
+pub(crate) fn cut_joints(project: &Project) -> Vec<(usize, usize, i32)> {
+    let mut out = Vec::new();
+    for (ci, character) in project.characters.iter().enumerate() {
+        let Some(rig) = &character.physics else {
+            continue;
+        };
+        for sever in plan(project, ci).severs.iter().filter(|s| s.cut) {
+            out.push((ci, rig.joints[sever.joint].joint, sever.start));
+        }
+    }
+    out
+}
+
 /// A lock as the tests see it: bodies as (character index, rig body index).
 #[cfg(test)]
 pub(crate) struct LockSpan {
@@ -582,6 +600,56 @@ fn update_constraints(running: &mut Running, frame: i32) {
     }
 }
 
+/// A shape that may collide with its parent body (endorphin's `collidesWithParent`) but
+/// already overlaps one of the parent's shapes in the rig's rest pose would be pushed
+/// off it at once, up to 3 m/s, every time the simulation starts: Back-Flip-To-Combo's
+/// head, whose shapes sit inside the neck, was thrown 50° forward in its first
+/// ten frames (lesson 19). Such a shape doesn't collide with its parent,
+/// unless the parent is fixed: a prop sitting in the scenery it belongs to (Heli
+/// Leap's and Bendy Stick's background) stands on it.
+fn unflag_overlapping_parents(
+    world: &mut World,
+    first_shape: usize,
+    first_body: usize,
+    rest: impl Fn(usize) -> (Quat, Vec3),
+) {
+    let placed = |world: &World, s: usize| {
+        let shape = &world.shapes[s];
+        let (r, p) = rest(shape.body? - first_body);
+        Some(super::collide::Placed {
+            geometry: shape.geometry,
+            rotation: r * shape.rotation,
+            position: p + r * shape.position,
+        })
+    };
+    let shapes = first_shape..world.shapes.len();
+    for s in shapes.clone() {
+        let Some(body) = world.shapes[s].body else {
+            continue;
+        };
+        let Some(parent) = world.bodies[body].parent else {
+            continue;
+        };
+        // Resting on a fixed parent (a prop on the scenery it hangs from) is support.
+        if !world.shapes[s].flags.parent || world.bodies[parent].inv_mass == 0.0 {
+            continue;
+        }
+        let overlaps = shapes.clone().any(|o| {
+            let (Some(a), Some(b)) = (placed(world, s), placed(world, o)) else {
+                return false;
+            };
+            let mut contacts = Vec::new();
+            if world.shapes[o].body == Some(parent) {
+                super::collide::between(&a, &b, 0.0, &mut contacts);
+            }
+            contacts.iter().any(|c| c.separation < 0.0)
+        });
+        if overlaps {
+            world.shapes[s].flags.parent = false;
+        }
+    }
+}
+
 fn shape_frame(shape: &crate::document::physics::ShapeDef) -> (Quat, Vec3) {
     (
         Quat::from_array(shape.frame.rotation).normalize(),
@@ -645,7 +713,22 @@ fn plan(project: &Project, character_index: usize) -> Plan {
             .and_then(|v| v.trim().parse::<f32>().ok())
     };
     for clip in &project.clips {
-        if !clip.props.enabled || project.clip_character(clip).map(|c| c.id) != Some(character.id) {
+        if !clip.props.enabled {
+            continue;
+        }
+        // A force pushes the bodies it names, whichever character's track holds it.
+        if matches!(&clip.kind, ClipKind::Event { event } if event == "Force") {
+            let own = project.clip_character(clip).map(|c| c.id) == Some(character.id);
+            if let (Some(rig), Some(dv)) = (
+                &character.physics,
+                clip.source.get("matrix.Vi").and_then(|v| parse_vec3(v)),
+            ) && let Some(bodies) = force_bodies(clip, &character.name, rig, own)
+            {
+                plan.forces.push((clip.props.start, dv, bodies));
+            }
+            continue;
+        }
+        if project.clip_character(clip).map(|c| c.id) != Some(character.id) {
             continue;
         }
         let (start, end) = (clip.props.start, clip.props.end());
@@ -678,26 +761,6 @@ fn plan(project: &Project, character_index: usize) -> Plan {
                         .unwrap_or(SimLevel::Animated);
                     plan.switches.push((end, level));
                 }
-                "Force" => {
-                    let Some(rig) = &character.physics else {
-                        continue;
-                    };
-                    let Some(dv) = clip.source.get("matrix.Vi").and_then(|v| parse_vec3(v)) else {
-                        continue;
-                    };
-                    let bodies: Vec<usize> = clip
-                        .source
-                        .get("targets")
-                        .map(|t| {
-                            t.split(',')
-                                .filter_map(|name| {
-                                    rig.body_index(name.trim().rsplit('.').next().unwrap_or(""))
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    plan.forces.push((start, dv, bodies));
-                }
                 "Behaviour" => {
                     let name = clip.source.get("behaviourName").unwrap_or(&clip.props.name);
                     if let Some(behaviour) = Behaviour::from_name(name) {
@@ -726,15 +789,28 @@ fn plan(project: &Project, character_index: usize) -> Plan {
                 "Active pose" => {
                     let skeleton = &character.skeleton;
                     let mut pose = Pose::rest(skeleton.joints.len());
-                    let mut present = vec![false; skeleton.joints.len()];
                     for channel in &clip.channels {
                         if let (Some(j), Some(v)) =
                             (skeleton.joint_index(&channel.joint), channel.sample(0.0))
                         {
                             pose.joints[j][channel.property.index()] = v;
-                            present[j] = true;
                         }
                     }
+                    // The joints it drives: those its `targets` name
+                    // (`character.Joints.Name`, as endorphin lists them), or all of them.
+                    // Scenes split the body between overlapping events, legs in one and
+                    // arms in another. A joint the pose leaves at rest has no channel
+                    // (the importer drops those), but is still held at rest.
+                    let named: Vec<usize> = clip
+                        .source
+                        .get("targets")
+                        .into_iter()
+                        .flat_map(|t| t.split(','))
+                        .filter_map(|n| skeleton.joint_index(n.trim().rsplit('.').next()?))
+                        .collect();
+                    let present: Vec<bool> = (0..skeleton.joints.len())
+                        .map(|j| named.is_empty() || named.contains(&j))
+                        .collect();
                     let locals = local_rotations(skeleton, &pose);
                     plan.poses.push(PoseTarget {
                         start,
@@ -756,6 +832,25 @@ fn plan(project: &Project, character_index: usize) -> Plan {
     plan.switches.sort_by_key(|s| s.0);
     plan.momentum.sort_by_key(|s| s.0);
     plan
+}
+
+/// The bodies of a character's rig (`rig`, named `character`) a force event pushes:
+/// every body it names as `character.MetaBodies.<body>`, or a bare body name when the
+/// clip is on the character's own track (`own`). A force naming no body pushes every
+/// body of its own character (an empty list). `None` when it pushes none of them: a
+/// force aimed at another character's body (Catch Rope's push on its rope sits on the
+/// environment's track) must not fall back to pushing everything here.
+fn force_bodies(clip: &Clip, character: &str, rig: &PhysicsRig, own: bool) -> Option<Vec<usize>> {
+    let targets = crate::document::events::targets(&clip.source);
+    if targets.is_empty() {
+        return own.then(Vec::new);
+    }
+    let bodies: Vec<usize> = targets
+        .iter()
+        .filter(|t| t.character == character || (t.character.is_empty() && own))
+        .filter_map(|t| rig.body_index(&t.body))
+        .collect();
+    (!bodies.is_empty()).then_some(bodies)
 }
 
 fn parse_vec3(text: &str) -> Option<Vec3> {
@@ -934,11 +1029,6 @@ fn set_muscles(
     t: f32,
 ) {
     let skeleton = &project.characters[ci].skeleton;
-    let pose_target = plan
-        .poses
-        .iter()
-        .rev()
-        .find(|p| p.start <= frame && frame < p.end);
     let active = plan
         .active
         .iter()
@@ -947,42 +1037,69 @@ fn set_muscles(
         .fold(None, |m: Option<f32>, s| Some(m.map_or(s, |m| m.max(s))));
     let anim_locals = active.map(|_| local_rotations(skeleton, anim));
 
-    let (set_name, strength) = match (pose_target, active) {
-        (Some(p), _) => {
-            let ramp = if p.blend > 0 {
-                ((frame - p.start) as f32 / p.blend as f32).clamp(0.0, 1.0)
-            } else {
-                1.0
-            };
-            ("DesiredPoseCalibration", p.strength * ramp)
-        }
-        (None, Some(s)) => ("Normal", s),
-        (None, None) => ("Default", 1.0),
+    let set = |name: &str| {
+        binding
+            .rig
+            .muscle_set(name)
+            .or_else(|| binding.rig.muscle_sets.first())
     };
-    let set = binding
-        .rig
-        .muscle_set(set_name)
-        .or_else(|| binding.rig.muscle_sets.first());
+    let gains_of = |set: Option<&MuscleSet>, muscle: &str, strength: f32| {
+        let g = set.map_or(DEFAULT_GAINS, |s| s.gains(muscle));
+        MuscleGains {
+            twist: scale(g.twist, strength),
+            swing: scale(g.swing, strength),
+        }
+    };
+    let (base_set, base_strength) = match active {
+        Some(s) => (set("Normal"), s),
+        None => (set("Default"), 1.0),
+    };
+    let pose_set = set("DesiredPoseCalibration");
+    // Active poses running now, oldest first. Each holds only the joints it drives, so
+    // events covering different parts of the body (legs in one, arms in another) act
+    // together. Where several hold the same joint, each moves the target and gains over
+    // from what was there before it during its ease-in, so the latest to start wins.
+    let poses: Vec<(&PoseTarget, f32)> = {
+        let mut running: Vec<&PoseTarget> = plan
+            .poses
+            .iter()
+            .filter(|p| p.start <= frame && frame < p.end)
+            .collect();
+        running.sort_by_key(|p| p.start);
+        running
+            .into_iter()
+            .map(|p| {
+                let ramp = if p.blend > 0 {
+                    ((frame - p.start) as f32 / p.blend as f32).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
+                (p, ramp)
+            })
+            .collect()
+    };
     let joints = &binding.rig.joints;
-    let mut targets: Vec<Quat> = joints
+    let (mut targets, mut gains): (Vec<Quat>, Vec<MuscleGains>) = joints
         .iter()
         .map(|jd| {
-            pose_target
-                .and_then(|p| p.targets.get(jd.joint).copied().flatten())
-                .or_else(|| anim_locals.as_ref().map(|l| l[jd.joint]))
-                .unwrap_or(binding.frozen[jd.joint])
-        })
-        .collect();
-    let mut gains: Vec<MuscleGains> = joints
-        .iter()
-        .map(|jd| {
-            let g = set.map_or(DEFAULT_GAINS, |s| s.gains(&jd.muscle));
-            MuscleGains {
-                twist: scale(g.twist, strength),
-                swing: scale(g.swing, strength),
+            let mut target = anim_locals
+                .as_ref()
+                .map_or(binding.frozen[jd.joint], |l| l[jd.joint]);
+            let mut gains = gains_of(base_set, &jd.muscle, base_strength);
+            for &(p, ramp) in &poses {
+                let Some(pose) = p.targets.get(jd.joint).copied().flatten() else {
+                    continue;
+                };
+                let held = gains_of(pose_set, &jd.muscle, p.strength);
+                target = target.slerp(pose, ramp);
+                gains = MuscleGains {
+                    twist: blend(gains.twist, held.twist, ramp),
+                    swing: blend(gains.swing, held.swing, ramp),
+                };
             }
+            (target, gains)
         })
-        .collect();
+        .unzip();
     // The latest behaviour running now takes over from there.
     let behaviour = plan
         .behaviours
@@ -1027,6 +1144,16 @@ const DEFAULT_GAINS: MuscleGains = MuscleGains {
         force_limit: 50.0,
     },
 };
+
+/// `a` moved fraction `t` of the way to `b`.
+fn blend(a: Gains, b: Gains, t: f32) -> Gains {
+    let mix = |a: f32, b: f32| a + (b - a) * t;
+    Gains {
+        stiffness: mix(a.stiffness, b.stiffness),
+        damping: mix(a.damping, b.damping),
+        force_limit: mix(a.force_limit, b.force_limit),
+    }
+}
 
 fn scale(g: Gains, s: f32) -> Gains {
     Gains {
@@ -1101,12 +1228,15 @@ fn record(project: &Project, running: &Running, t: f32) -> Frame {
             let binding = binding.as_ref()?;
             let skeleton = &project.characters[ci].skeleton;
             let mut joints = joints_from_bodies(&running.world, binding, skeleton, &poses[ci]);
-            // Transitions blend the simulated pose back onto the animation.
+            // Transitions blend the simulated pose back onto the animation. The blend
+            // includes the last frame (weight 1): the level only changes to animated
+            // after that frame is recorded, so without it the last frame would show the
+            // raw simulated pose between a blended and an animated one.
             let plan = &running.plans[ci];
             if let Some(&(start, end)) = plan
                 .transitions
                 .iter()
-                .find(|(s, e)| *s <= frame && frame < *e)
+                .find(|(s, e)| *s <= frame && frame <= *e)
             {
                 let w = ((frame - start) as f32 / (end - start).max(1) as f32).clamp(0.0, 1.0);
                 // Blend orientations, then rebuild positions down the hierarchy so bones
