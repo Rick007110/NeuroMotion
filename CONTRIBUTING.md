@@ -113,6 +113,13 @@ Some tests are `#[ignore]`d because they need something not in the repository:
 If you change the physics and have endorphin, please run the ignored tests and say in
 your pull request what changed.
 
+### Working with AI assistants
+
+AI-assisted contributions are welcome under the same rules. [AGENTS.md](AGENTS.md)
+tells AI coding agents how to work here (Claude Code reads it through
+[CLAUDE.md](CLAUDE.md)). You remain responsible for what you submit: review it, and
+sign off the commits yourself.
+
 ### Where things are
 
 [ARCHITECTURE.md](ARCHITECTURE.md) is a map of the code. The design notes in
