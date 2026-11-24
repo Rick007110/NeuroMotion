@@ -5,6 +5,7 @@
 - Own physics engine at **120 Hz**: all **16 endorphin sample scenes** simulate stably over their **full length**
 - **Car Hit matches endorphin**: compared frame by frame with endorphin's own run
 - Friction and constraints that behave like endorphin's, smooth transitions back to animation
+- Balance and Stagger on endorphin's friction, now used by NeuroMotion's own projects too
 - Behaviours: **Balance** (with stepping), **Stagger**, **CatchFall**, **BodyFoetal**, **Writhe**, now running in imported scenes too
 - Sever events, constraints, active poses, forces
 - Export to **FBX** and **BVH**, bake simulation to keys
@@ -14,7 +15,7 @@
 - Comparing **more scenes with endorphin, by numbers**, so every change is checked against endorphin's real results
 - Active poses applied the way endorphin does (Back-Flip-To-Combo)
 - New behaviours: **Look and Reach** and **Explosion**, designed from endorphin's own runs
-- Balance and Stagger tuned for the new friction, and stepping sideways
+- Stepping on endorphin's own characters (Stagger Walk), and stepping sideways
 - **Physics settings panel** (gravity, materials, friction) and a **scene tree**
 
 ### 📋 Planned

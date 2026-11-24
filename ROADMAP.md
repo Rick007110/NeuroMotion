@@ -50,8 +50,8 @@ NeuroMotion, and we need numbers to prove it.
   characters with a joint come apart solved directly (lessons 15, 16 and 17)
 - ✅ Car Hit measured against a recording of endorphin's: a lock that falls behind
   now pulls with its full strength, and imported friction is Coulomb, μ = friction
-  / 100 (lessons 20 and 21). NeuroMotion's own projects keep force-capped friction
-  until Balance and Stagger are tuned for Coulomb
+  / 100 (lessons 20 and 21). NeuroMotion's own projects use it too now; projects
+  saved before keep force-capped friction
 - ✅ A force pushes the bodies it names, a massless body never moves, and a
   transition ends exactly on the animation (lessons 22-24); scenes run as long as
   endorphin runs them, and the sweep checks each scene's whole range
@@ -95,8 +95,9 @@ protected, so every one is an original design that shares only the name. Importe
 scenes then run something sensible.
 
 - ✅ Balance (ankle strategy), CatchFall
-- ⬜ **Balance and Stagger tuned for Coulomb friction**, so NeuroMotion's own projects
-  can use endorphin's friction too (lesson 21)
+- ✅ **Balance and Stagger on Coulomb friction**, so NeuroMotion's own projects use
+  endorphin's friction too (lessons 21 and 26): Balance's swing foot
+  now clears the ground, and Stagger shuffles and steps short
 - ✅ **Inventory**: the behaviour names and settings that endorphin scenes use,
   gathered from scenes (not from the protected `.nmb` files), to plan the rest:
   [docs/behaviour-inventory.md](docs/behaviour-inventory.md)
@@ -104,10 +105,13 @@ scenes then run something sensible.
   imported names like `Bob2: Balance 2.5` matched none of our controllers, so no
   imported scene ran a behaviour; that is fixed
 - 🟡 **Stepping** when Balance can't hold ([#9](https://github.com/Rick007110/NeuroMotion/issues/9)):
-  forwards and backwards it now stands after pushes up to about twice as hard
-  (50 of 84 test pushes, from 29); sideways it barely helps yet, because the foot on
-  the falling side carries the weight and can't lift
-  ([details](docs/behaviours.md#not-yet))
+  on the placeholder it now stands after 68 of 84 test pushes (29 without
+  stepping, 50 before its swing foot was raised), up to 3 m/s forwards; sideways
+  is still weakest, because the foot on the falling side carries the weight and
+  can't lift ([details](docs/behaviours.md#not-yet)). On endorphin's own character
+  (Stagger Walk) it doesn't step at all: the engine's spring cap weakens that rig's
+  hips, knees and ankles several times over
+  ([details](docs/behaviours.md#stagger-walk))
 - 🟡 **Stagger** ([#8](https://github.com/Rick007110/NeuroMotion/issues/8)): Balance
   that keeps stepping with a loose trunk; its event settings aren't read and it
   hasn't been compared with endorphin
@@ -204,7 +208,8 @@ What moves NeuroMotion closest to endorphin quality now, in order:
    what keeps Back-Flip-To-Combo from standing until its flip.
 3. **Explosion and the other missing behaviours** in the inventory's order (Look and
    Reach, Explosion, JumpDive); Car Hit's flight over the car needs Explosion.
-4. **Balance and Stagger on Coulomb friction**, and sideways stepping
+4. **Stepping on endorphin's characters** (the spring cap on light pelvises and
+   multi-body feet, `docs/behaviours.md#stagger-walk`), and sideways stepping
    ([#9](https://github.com/Rick007110/NeuroMotion/issues/9)).
 5. **Import BVH and FBX** ([#25](https://github.com/Rick007110/NeuroMotion/issues/25)) and the **3D viewport**
    ([#26](https://github.com/Rick007110/NeuroMotion/issues/26)).

@@ -244,6 +244,26 @@ mod tests {
         assert!(doc.add_track(1, "Layer") > 3);
     }
 
+    /// New projects use Coulomb friction; one saved with the force caps NeuroMotion
+    /// used before keeps them, so it simulates as it did when it was made.
+    #[test]
+    fn keeps_the_contact_model_a_project_was_saved_with() {
+        use crate::document::physics::ContactModel;
+        let project = placeholder_project();
+        assert_eq!(project.physics.contact, ContactModel::Coulomb);
+        let text = to_string(&project).unwrap();
+        let old = text.replacen(
+            "\"contact\": \"coulomb\"",
+            "\"contact\": \"force_capped\"",
+            1,
+        );
+        assert_ne!(old, text);
+        assert_eq!(
+            from_str(&old).unwrap().physics.contact,
+            ContactModel::ForceCapped
+        );
+    }
+
     #[test]
     fn rejects_foreign_and_future_files() {
         let text = to_string(&placeholder_project()).unwrap();

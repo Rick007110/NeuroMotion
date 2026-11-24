@@ -53,6 +53,11 @@ Pretty-printed JSON, chosen over RON because every language and diff tool reads 
 - `rest_rotation` is the joint's rest orientation relative to its parent (`[x, y, z, w]`);
   rotation channels are applied on top of it.
 - Version 1 files (single top-level `skeleton`) are migrated automatically on load.
+- `physics.contact` is the friction model: `"coulomb"` (μ = the interaction's
+  friction / 100, endorphin's meaning, the default for new projects) or
+  `"force_capped"` (a cap of that many newtons per contact, what NeuroMotion used
+  before). A project keeps the one it was saved with, so it simulates as it did; a
+  file with no `physics` settings gets the default.
 - Key frames are local to the clip. Rotations are degrees, offsets are metres added to
   the joint's rest offset.
 - `skeleton.source` points at an external rig file; `joints` is a cached copy so the

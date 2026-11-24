@@ -15,7 +15,7 @@ target is the same model, the same parameters, and the same behaviour.
 | Ball joints: twist range + swing cone between a parent-side and a child-side limit frame; soft zone inside a hard stop | Same frames, ranges and soft-zone springs (elliptical cone) |
 | Effectors: force-limited PD on twist and swing; calibration presets | Same gains and presets, solved as implicit force-capped springs |
 | Velocity-level constraint solver at 120 Hz | Velocity-level sequential-impulse solver at the scene's rate (120 Hz), substepped |
-| Material pairs → restitution, friction, adhesion, softness | Same table. Imported friction is Coulomb with μ = friction / 100 (lesson 21); NeuroMotion's own projects still cap friction at that many newtons per contact |
+| Material pairs → restitution, friction, adhesion, softness | Same table. Friction is Coulomb with μ = friction / 100 (lesson 21), in imported scenes and NeuroMotion's own projects (lesson 26); projects saved before keep a cap of that many newtons per contact |
 | Simulation levels; momentum carried into physics | Same four levels; kinematic bodies carry animation velocity into the switch |
 | Force events are velocity changes on bodies | Same |
 | Lock and join constraints, with per-axis position and orientation strengths | Rigid constraints whose force on each axis is capped by its strength (read as Karma's relative-position-relative-orientation joint; 0 = free; a negative strength pushes or turns instead, lesson 13); one that has fallen behind pulls with its full strength until it catches up (lesson 20) |
@@ -520,7 +520,7 @@ The second was friction.
       runs 5 s.
 
     NeuroMotion's own projects, and stand-ins other than those built from Car Hit and
-    Back-Flip-To-Combo, keep force-capped friction for now. Balance and Stagger were
+    Back-Flip-To-Combo, kept force-capped friction until lesson 26. Balance and Stagger were
     tuned on it, and their margins shrink with grip in proportion to load: a
     lightly loaded foot landing a step slides where a force cap held it. Over the
     nudge survey with Coulomb friction everywhere, Balance survives 4-7 of its 8 hard
@@ -805,6 +805,79 @@ Tracing Back-Flip-To-Combo itself (#6), with the user's scene file, showed two m
     whether a pose holds its joints after it ends (here the ankles are driven by
     nothing between frames 102 and 199), and how `strength` scales the preset.
 
+Switching NeuroMotion's own projects to Coulomb friction too taught one more.
+
+26. **New projects use Coulomb friction, and
+    Balance's swing foot clears the ground.** Lesson 21 left NeuroMotion's own
+    projects on force-capped friction because Balance and Stagger did worse with
+    Coulomb friction. Measured again on the placeholder, its planted feet hardly slip
+    with either model (rubber soles on tarmac are endorphin's Grippy, μ = 3): over
+    24 pushes, 1-15 cm in all over 3 s with Coulomb friction, 1-9 cm with force caps.
+    What changed was which pushes a recovery near its limit survives, and the
+    recovery was fragile for a reason of its own: a swing foot carried at 10% of the
+    leg's length reached only 2-5 cm, sagged back within 2 cm of the ground, was
+    taken for planted and started lifting again. Carried at 25% (15% straight
+    forwards) and brought down along a slope it clears the ground, and Balance holds
+    far more pushes whichever friction it has (`docs/behaviours.md`). Stagger now
+    shuffles at the old height and looks half as far ahead, so it keeps stepping.
+
+    Pushes survived of the 21 each way (1.0-3.0 m/s, `push_sweep`), averaged over 11
+    runs with the speeds nudged by up to ±5e-4:
+
+    | Balance | forwards | backwards | to its left | to its right |
+    |---|---|---|---|---|
+    | Before, force-capped friction | 17.3 | 10.6 | 11.7 | 8.7 |
+    | Before, Coulomb friction | 15.5 | 9.8 | 11.4 | 8.8 |
+    | Now, Coulomb friction | 19.7 | 19.3 | 17.7 | 11.4 |
+    | Now, force-capped friction | 16.1 | 19.2 | 19.1 | 14.4 |
+
+    One run each (the `push_sweep` rows are in `behaviours.md`): Balance 19, 11, 11
+    and 9 before, 20, 19, 18 and 11 now; 68 of 84 from 50. Over 101 nudged runs
+    (±1e-3), `balance_steps_when_the_ankles_cannot_hold`'s counts went from 5-8, 3-7
+    and 6-11 (backwards, sideways, forwards; 3-7, 2-6 and 6-11 with Coulomb friction
+    and the old swing) to 6-8, 8-12 and 9-12, against bounds of 4, 2 and 5.
+    `stagger_keeps_stepping_after_a_hard_push`: fewest steps after one push 3 (3
+    before; 2 with Coulomb friction and the old Stagger), 25-41 in all (17-31; bound
+    12), feet 1.9-4.5 times as far as Balance's (2.3-4.2; 0.7-2.8 with Coulomb
+    friction and the old Stagger; bound 1.5). No test bound changed.
+
+    `PhysicsSettings::default()` is now Coulomb, so new projects, the placeholder, the
+    physics demo and the stand-ins built on it use it. A saved project stores its
+    contact model (`"contact": "force_capped"` in every `.nmproj` written so far), and
+    it keeps it: a project simulates as it did when it was made, with no migration.
+    Such a project gets the new swing on force caps, the last row above (forwards
+    16.1 instead of 17.3, the rest better). Only a file with no physics settings at
+    all, from before physics existed, gets the new default. There is no setting in
+    the app to change it yet; editing the file's `contact` to `"coulomb"` does.
+
+    Stand-ins that moved with the new default (all tests pass unchanged): Car Hit's
+    stand-in stretches 2.0 cm instead of 1.4 and its lowest body is 3.1 cm under the
+    ground instead of 0.5 cm above it; Balcony 1.2 cm instead of 0.8 (fastest body 4.4
+    m/s instead of 6.1); Turntable 1.1 cm instead of 0.2 and Rotating Floor 1.1
+    instead of 0.2; Tilting floor carries its character to -1.76 m instead of -1.90;
+    Heli Leap's lowest body -1.9 cm instead of 2.5 above; Tackle 0.9 cm instead of
+    0.7; the animation-cut stand-in 0.3 cm instead of 0.9. Catch fall's head and
+    chest land 0.5-0.9 s after the hands instead of 0.3-0.5 s; Writhe keeps 13 of 17
+    bodies moving after 3 s instead of 17 (a body lying on the ground grips it in
+    proportion to its weight); Body foetal and Split poses within a centimetre and a
+    degree; Curl hand-back within 1 mm; the transition at the end of an animation
+    still ends on it (0.0 cm out of the end), its character arriving at 9.9 cm per
+    frame instead of 6.4 (lesson 24). The physics demo exports
+    within 0.9 mm (from 0.8). Car carry, Bonnet slide and Back flip already used
+    Coulomb friction and are unchanged, and so is `nudge_survey`'s Car carry part.
+
+    endorphin's sample sweep (whole range) stays 16 of 16 clean. Imported scenes
+    already used Coulomb friction; the scenes whose behaviours run Balance or Stagger
+    moved: Arrows' stretch 1.27 to 0.27 cm, Balcony 0.78 to 0.60 cm (drift 3.1 to 1.6
+    cm), Stagger Walk 0.46 to 0.22 cm, Trapeze 1.09 to 1.74 cm (buried 7.7 to 11.9 cm),
+    Multi Martial's fastest body 18.0 to 16.2 m/s, Rotating Floor's lowest body -4.73
+    to -4.81 m; the others are unchanged.
+
+    Stagger Walk showed a limit that has nothing to do with friction: on endorphin's
+    own character stepping doesn't work at all, because the spring cap (lesson 4)
+    weakens its hips, knees and ankles several times over (`behaviours.md`, *Stagger
+    Walk*).
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over
@@ -933,12 +1006,12 @@ hasn't been re-run against endorphin's scene since.
   Coulomb friction holding it to the road, tears its ankle open (lesson 21): the direct
   solve holds the joints, but contacts are solved after it.
 - Saved projects keep the friction model they were saved with: one imported before
-  lesson 21 keeps force-capped friction until it is imported again.
+  lesson 21, or made in NeuroMotion before lesson 26, keeps force-capped friction
+  until it is imported again or its `contact` is edited; the app has no setting for
+  it yet.
 
 ## Improvements planned beyond endorphin
 
 - Re-simulate automatically from the edited frame onward, instead of from the start.
 - Muscle strength as keyable curves per body region.
 - Pose-matched hand-back from simulation to animation.
-- Coulomb friction for NeuroMotion's own projects too (imported scenes have it,
-  lesson 21), once Balance and Stagger are tuned for it.

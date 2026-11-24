@@ -124,8 +124,10 @@ When the capture point is further out, one leg steps while the other stands:
    hip-to-ankle, the knee bending forwards, and keeps the foot level. While the foot
    is still on the ground it is lifted straight up (15% of the leg's length), at the
    rig's `Strong` preset, rather than dragged: the body often still leans on it, and
-   a gentle lift only sinks the hips onto it. In the air it is carried at 10% of the
-   leg's length towards the target and lowered as it gets there. Its muscles are
+   a gentle lift only sinks the hips onto it. In the air it is carried at 25% of the
+   leg's length towards the target (15% for a step straight forwards) and comes
+   down along a slope, 0.9 leg lengths of height per metre it still has to go, so it
+   reaches the ground as it reaches the target (*Swing height*, below). Its muscles are
    damped critically for the leg they swing (2√(stiffness × inertia)): the `Normal`
    preset, tuned to hold poses against the ground, is about 3 times overdamped at the
    hip and 12 times at the knee for a leg in the air, which then swung too slowly to
@@ -143,53 +145,94 @@ and can restart anywhere (test `stepping_is_deterministic`). It works on any bip
 `Layout` finds: the soles, ankle heights, facing and hip widths all come from the rig
 (test `balance_steps_with_toes_facing_any_way`, the stand-in with toes, turned).
 
+### Swing height
+
+Balance first carried its swing foot at 10% of the leg's length and dropped it over
+the last 6 cm. The foot rarely got that high: about 2 to 5 cm under the sole, as the
+hips sank on the stance leg. Within 2 cm of the ground it counts as planted (a foot
+in the air is the one stepping, and nothing else says so), so a foot sagging back
+down was taken for a planted one and went back to lifting straight up, at the
+`Strong` preset, before it could carry on. Steps came late and short, and stalled
+most often where a foot had to come out from under the body's weight. Carried at 25%
+and brought down along a slope instead, it stays clear until it is nearly there.
+Over five pushes each way (1.9 to 2.7 m/s), the ticks Balance spent lifting a foot
+back off the ground fell from 314 to 229 to the left, 351 to 164 to the right, 447 to
+69 backwards and 143 to 108 forwards.
+
+Straight forwards the foot is carried at 15%. Carried at 25% there too, forward pushes
+were held less often: about 15 of the 21 in the sweep below, averaged over 11 nudged
+runs, against 19. Why is not pinned down: the trunk doesn't tip back more after the
+higher step (measured), and the forward step itself lands as well; what differs is
+how the body sways back over the two feet afterwards, which is chaotic.
+
+### Friction
+
+Balance was tuned with NeuroMotion's old friction, a cap of so many newtons per
+contact whatever the load. Since the friction fix (lesson 21 in `physics-design.md`)
+imported scenes use Coulomb friction, μ = endorphin's friction value / 100, and since
+this change NeuroMotion's own projects do too (the placeholder's rubber soles on
+tarmac grip at μ = 3, its skin at μ = 1). Planted feet hardly slip with either: over
+24 pushes, 1.5 to 3.0 m/s each way, a planted foot slid 1-15 cm in all over the 3 s
+after a push with Coulomb friction and 1-9 cm with force caps. What changed was which
+pushes it survived, as a chaotic recovery near its limit turns on small differences
+(lesson 21's numbers; the rows below). Coulomb friction alone, with the old swing,
+lost a few forwards and backwards; the higher swing gained far more than that.
+
 ### Results
 
 Pushes on the placeholder's chest from 1.0 to 3.0 m/s, every 0.1 m/s, each way; `#`
 means the head stayed above 1.45 m for the next 3 s (`push_sweep`, an ignored test):
 
-| | forwards | backwards | to its left | to its right |
-|---|---|---|---|---|
-| Before stepping | `#######..............` | `####.................` | `##########...........` | `########.............` |
-| Ankle strategy alone, after the friction fix below | `#######..............` | `####.................` | `#########............` | `#######..............` |
-| Balance (stepping) | `########.#.##########` | `########.###.........` | `##########........#..` | `#########............` |
-
-In all: 29 of 84 pushes before, 50 now, and every push survived before is still
-survived in this run. In speeds: forwards up to 1.6 m/s before, now up to 3.0 (1.8
-and 2.0 aside); backwards up to 1.3, now up to 2.1 (1.8 aside); to the left 1.9 both
-before and now; to the right 1.7 before, 1.8 now. The steps leave the feet 0.25 to
-0.6 m from where they stood, in 2 to 7 steps, with joints stretching under 3 mm.
+| | forwards | backwards | to its left | to its right | in all |
+|---|---|---|---|---|---|
+| Before stepping | `#######..............` | `####.................` | `##########...........` | `########.............` | 29 |
+| Ankle strategy alone, after the friction fix below | `#######..............` | `####.................` | `#########............` | `#######..............` | 27 |
+| Stepping, force-capped friction | `########.#.##########` | `########.###.........` | `##########........#..` | `#########............` | 50 |
+| The same with Coulomb friction | `########.###...####..` | `#########............` | `##########........#..` | `#########............` | 44 |
+| Higher swing, Coulomb friction (now) | `#######.#############` | `#####.##############.` | `##########..#.#######` | `#########.#....#.....` | 68 |
 
 Each row is one run on one machine, and near the limit it is sharper than the truth:
 whether a push is survived turns on small differences in where a foot lands, and
 another platform's rounding is enough to change it (CI fell at 1.9 m/s to the left on
-Linux and at 1.8 to the right on Windows). With each push's speed nudged by up to
-±1e-3 (101 runs, `nudge_survey`), the share of runs in which Balance stepped and stayed
-up (head above 1.45 m, hips above 0.8 m):
+Linux and at 1.8 to the right on Windows). Averaged over 11 runs with every speed
+nudged by up to ±5e-4, the pushes survived of the 21 each way:
 
-| | |
-|---|---|
-| backwards | 1.4-1.7 m/s: 91-100%; 1.8: 36%; 1.9 and 2.0: 91-95%; 2.1: 53% |
-| forwards | 1.7: 77%; 1.8: 6%; 1.9: 64%; 2.0: never; 2.1: 58%; 2.2 and 2.3: 90-95%; 2.4: 53%; 2.5-2.8: 94-100% |
-| to its left | 1.9: 71%; 2.0-2.4: never; 2.5: 47%; 2.6: 3%; 2.7: 63%; 2.8: always |
-| to its right | 1.7: always; 1.8: 42%; 1.9-2.8: never |
+| | forwards | backwards | to its left | to its right |
+|---|---|---|---|---|
+| Stepping, force-capped friction | 17.3 | 10.6 | 11.7 | 8.7 |
+| The same with Coulomb friction | 15.5 | 9.8 | 11.4 | 8.8 |
+| Higher swing, Coulomb friction (now) | 19.7 | 19.3 | 17.7 | 11.4 |
+| Higher swing, force-capped friction | 16.1 | 19.2 | 19.1 | 14.4 |
+
+The last row is what a project saved before the switch gets, as it keeps force-capped
+friction (`physics-design.md`): better than before except forwards (16.1 against
+17.3). In speeds, Balance now stands after pushes up to 3.0 m/s forwards and to the
+left (with gaps between 2.0 and 2.3 to the left in some runs), 2.9 backwards, and up
+to about 2.0 to the right. Sideways is still the weakest way, see *Not yet*.
 
 So the test, `balance_steps_when_the_ankles_cannot_hold`, counts, in each set of pushes
 past what the ankles hold, how many Balance steps and stays up after: at least 4 of
 the 8 backwards from 1.4 to 2.1 m/s, 2 of the 22 sideways (left 1.9-2.8, right
-1.7-2.8) and 5 of the 12 forwards from 1.7 to 2.8. Over the nudged runs the counts
-were 5-8, 3-7 and 6-11. `balance_keeps_the_placeholder_upright_after_a_push`, what
-the ankle strategy held before stepping, is unchanged.
+1.7-2.8) and 5 of the 12 forwards from 1.7 to 2.8. Over 101 runs with the speeds
+nudged by up to ±1e-3 (`nudge_survey`) the counts are now 6-8, 8-12 and 9-12 (5-8,
+3-7 and 6-11 before the change, with force-capped friction; 3-7, 2-6 and 6-11 with
+Coulomb friction and the old swing, which fails the backwards count).
+`balance_keeps_the_placeholder_upright_after_a_push`, what the ankle strategy held
+before stepping, is unchanged.
 
 ### Not yet
 
 - **Sideways.** Pushed sideways, the body falls towards the foot on that side, which
   carries the weight: lifting it drops the hips onto it, and the other foot can't
   cross over to catch the body (the legs collide; a crossover target was tried, and
-  the foot jammed against the other leg). So sideways Balance is barely better than
-  before. It needs a weight shift onto the far foot before the near one lifts (tried
-  with the ankle strategy alone: far too slow against a fall already under way), or a
-  crossover step that goes around the other leg.
+  the foot jammed against the other leg). The higher swing helps (17.7 and 11.4 of 21
+  pushes held to the left and right, from 11.7 and 8.7), but to the right it still
+  falls from about 2.0 m/s. It needs a weight shift onto the far foot before the near
+  one lifts (tried with the ankle strategy alone: far too slow against a fall already
+  under way), or a crossover step that goes around the other leg.
+- **Other rigs.** Everything above is measured on the placeholder. On endorphin's own
+  character (Stagger Walk) stepping doesn't work at all; see *Stagger Walk* under
+  Stagger.
 - **Which pushes it survives is erratic** past what the ankles hold: 1.8 m/s
   backwards falls where 1.7 and 1.9 don't (in about two runs in three when nudged).
   A recovery near the limit depends on small differences in where a foot lands; the
@@ -214,31 +257,71 @@ different gait.
 
 - It steps as soon as the capture point leaves the planted feet (no 2 cm margin), so
   it gives way instead of standing its ground with the ankles.
-- Its steps go just where the capture point will be, not past it, so one step rarely
-  stops the body and it keeps stepping.
+- It aims its steps where the capture point will be only half as far ahead as
+  Balance does (0.125 s instead of 0.25, 5 cm past it as Balance does), so they fall
+  short of where the body is going and it keeps stepping.
+- It shuffles: its feet are carried at 10% of the leg's length and dropped over the
+  last 6 cm, as Balance's were before its swing was raised. With Balance's higher
+  swing and the short steps it recovered too well, and with Balance's look-ahead it
+  went no further than Balance after hard pushes once friction became Coulomb (below).
 - The trunk, head and arms are at 35% of the rig's `Normal` preset, so the upper body
   sways and lags behind the legs.
 
 Results (`push_sweep` with `NM_SWEEP=Stagger`, same pushes as above):
 
-| | forwards | backwards | to its left | to its right |
-|---|---|---|---|---|
-| Stagger | `#######.#....#..#....` | `#####.####.#.........` | `##########...........` | `#########............` |
+| | forwards | backwards | to its left | to its right | in all |
+|---|---|---|---|---|---|
+| Before, force-capped friction | `#######.#....#..#....` | `#####.####.#.........` | `##########...........` | `#########............` | 39 |
+| Before, Coulomb friction | `##############.##..#.` | `########.###.........` | `#########.#.#........` | `#######..............` | 46 |
+| Now (Coulomb) | `#######......#..#....` | `#########.##.........` | `#########.......#....` | `#########............` | 39 |
 
-39 of 84 stay up, fewer than with Balance, as meant. Pushed hard forwards (2.7 to
-3.0 m/s) it keeps stepping, 3 to 10 steps a push, and goes down, its feet going 4.5
-to 8.3 m over the four pushes, where Balance stops in a few steps and nearly always
-stands, its feet going 1.9 to 2.3 m (101 runs with the speeds nudged by up to ±1e-3,
-`nudge_survey`). The test, `stagger_keeps_stepping_after_a_hard_push`, checks those
-four pushes for at least 2 steps after each, 12 in all, and feet going more than 1.5
-times as far as Balance's. A single push can't be checked on its own: at 2.5 m/s it
-took 6 steps over 1.1 m here, 2 on every CI platform, and 2 to 6 over 9 nudged runs.
+39 of 84 stay up, far fewer than with Balance (68), as meant. Pushed hard forwards
+(2.7 to 3.0 m/s) it keeps stepping, 3 to 13 steps a push, and goes down, its feet
+going 4.2 to 9.5 m over the four pushes, where Balance stops in a few steps and
+nearly always stands, its feet going 1.7 to 2.5 m (101 runs with the speeds nudged by
+up to ±1e-3, `nudge_survey`). The old Stagger on Coulomb friction stood up after most
+of them: its feet went only 0.7 to 2.8 times as far as Balance's, and after one push
+it took only 2 steps in some runs. The test, `stagger_keeps_stepping_after_a_hard_push`,
+checks those four pushes for at least 2 steps after each, 12 in all, and feet going
+more than 1.5 times as far as Balance's; over the 101 runs the fewest steps after one
+push was 3, the total 25 to 41 and the ratio 1.9 to 4.5 (3, 17-31 and 2.3-4.2 before,
+on force-capped friction). A single push can't be checked on its own: how many steps
+it takes turns on small differences in where a foot lands.
 
-**Not yet.** Settings on the behaviour event aren't read, and nothing has been
-compared with endorphin. It inherits Balance's limits (above), sideways most of all.
-Stagger Walk,
-the sample scene that uses it, now runs this controller instead of going limp, but it
-couldn't be checked here (no endorphin install).
+### Stagger Walk
+
+Stagger Walk, the sample scene that uses it, pushes endorphin's own character back
+at about 0.5 m/s at its first frame. endorphin's takes about five steps (two
+backwards by frame 36, then strides), lowers its arms and never falls. NeuroMotion's
+doesn't step at all: its feet shuffle within 10 cm of where they stood while the
+pelvis tips back (12° by frame 16, 19° by frame 32), the knees fold to 140° and the
+body sinks and falls flat by frame 110, with Stagger, with Balance or with no
+behaviour. The placeholder's tests didn't show it.
+
+The cause is the engine's spring cap (lesson 4 in `physics-design.md`), not the
+controllers or friction: it caps a muscle at 30 Hz for the two bodies it joins, and
+endorphin's character has a light pelvis (4.5 kg) between its 9.3 kg thighs and its
+trunk, and feet made of three bodies (heel 2.4 kg, foot, toes). In this scene the cap
+cut the hips from the `Normal` preset's 3000 N·m/rad to 480-1070, the knees from 5000
+to about 1100-1400 and, whenever the heel wasn't the part touching the ground, the
+ankles from 1000 to 110-200, under the ~370 an ankle needs to hold a standing body
+(lesson 9 counts only the touching body as held). With the cap lifted (a test, not a
+fix), the same controller steps back twice, stops the body by frame 60 and stands
+until the walk takes over at frame 99, pelvis within 6° of upright.
+
+A fix was tried and not kept: estimating the cap from each side of a joint as a
+whole (the child's branch, and the rest), a side resting on the ground counting as
+immovable, as lesson 9 does for single bodies. Stagger Walk then steps back twice
+(the feet end 0.3 and 0.8 m back), stands with the pelvis within 5° of upright, and
+endorphin's sweep stays 16 of 16 clean. But the placeholder's stance muscles get
+stronger too, and Balance then holds only 3 of its 8 hard backward pushes (the test
+wants 4; 51 of 84 in `push_sweep`): the controllers were tuned on the capped
+muscles. That change needs Balance retuned with it, which is the next step.
+
+**Not yet.** Settings on the behaviour event (ArmsWindmill, MaxSteps, ArmsSpeed,
+ArmsStrength in Stagger Walk) aren't read, the arms don't windmill, and nothing but
+Stagger Walk's first second has been compared with endorphin. It inherits Balance's
+limits (above), sideways most of all.
 
 ## Catch fall
 
@@ -257,8 +340,9 @@ Each tick:
 
 Results on the placeholder (test `catch_fall_lands_on_the_hands_first`): shoved
 forwards at 3.5 or 5 m/s, diagonally, sideways or backwards, the hands touch first.
-The head and chest follow half a second or more later, or the arms hold them off the
-ground altogether. Shoved forwards limp, it lands on its face.
+The head and chest follow half a second or more later (with Coulomb friction, 0.5 to
+0.9 s; before, with force caps, 0.3 to 0.5 s, or the arms held them off the ground
+altogether shoved diagonally). Shoved forwards limp, it lands on its face.
 
 ## Body foetal
 
@@ -294,9 +378,11 @@ hips (±0.5, 0.35), the knees (±0.5) and the arms' directions. Each has its own
 randomness. The trunk's muscles are 0.6 × `Normal`, all the limbs' 0.3 ×, so the trunk
 leads and the limbs flail along.
 
-Results (test `writhe_keeps_moving_and_is_deterministic`): after 3 s, 14 of the
-placeholder's 17 bodies still move at over 0.1 m/s (mean 0.25 m/s), no NaN, joints
-stretched at most 1.4 mm, fastest body 5.8 m/s. Two runs give bit-identical bodies.
+Results (test `writhe_keeps_moving_and_is_deterministic`): after 3 s, 13 of the
+placeholder's 17 bodies still move at over 0.1 m/s (mean 0.24 m/s; 17 and 0.29 with
+force-capped friction, as a body lying on the ground grips it in proportion to its
+weight now), no NaN, joints stretched at most 1.8 mm, fastest body 5.6 m/s. Two runs
+give bit-identical bodies.
 
 ## Solver changes behind them
 
@@ -310,6 +396,10 @@ Stepping exposed another (lesson 16): friction gripped contacts that were only i
 the 2 cm speculative margin, not touching, at its full fixed force cap. A swinging
 foot within 2 cm of the floor was held in place, and its hip and knee muscles couldn't
 move it. Friction now only acts on contacts that touch or push.
+
+NeuroMotion's own projects now use Coulomb friction, as imported scenes do (lesson
+21). Balance and Stagger were made to work with it before the switch (*Swing height*,
+*Friction*, and Stagger above).
 
 ## Next
 

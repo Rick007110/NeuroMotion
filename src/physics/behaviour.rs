@@ -544,7 +544,7 @@ impl Drive<'_> {
         let edge = closest(stance, capture);
         let mut target = capture;
         for _ in 0..2 {
-            let eta = (STEP_TIME + from.distance(target) / FOOT_SPEED).min(MAX_AHEAD);
+            let eta = (STEP_TIME + from.distance(target) / FOOT_SPEED).min(gait.ahead);
             let ahead = edge + (capture - edge) * (eta / fall.max(0.05)).exp();
             target = ahead + (ahead - middle).normalize_or_zero() * gait.overshoot;
         }
@@ -617,9 +617,11 @@ impl Drive<'_> {
     }
 
     /// Swings leg `i` to put the middle of its foot (now at `sole`, flat) down at
-    /// `target` (flat), on the ground at height `floor`. The foot is lifted
-    /// `CLEARANCE` while it's away from the target and lowered as it gets there, kept
-    /// level. The hip aims the thigh with the pelvis `upright`.
+    /// `target` (flat), on the ground at height `floor`. The foot is carried at the
+    /// gait's clearance while it's far from the target and comes down along its glide
+    /// slope as it gets there, kept level. The hip aims the thigh with the pelvis
+    /// `upright`.
+    #[allow(clippy::too_many_arguments)]
     fn swing(
         &mut self,
         i: usize,
@@ -628,6 +630,7 @@ impl Drive<'_> {
         floor: f32,
         sole: Vec3,
         phase: Phase,
+        gait: &Gait,
     ) {
         let leg = self.layout.legs[i];
         if matches!(phase, Phase::Lift) {
@@ -644,7 +647,16 @@ impl Drive<'_> {
         // Where the ankle goes for the middle of the foot to be over the target.
         let mut goal = target - (sole - flat(ankle));
         let away = flat(ankle).distance(goal);
-        let mut lift = CLEARANCE * length * ((away - 0.02) / 0.06).clamp(0.0, 1.0);
+        // Carried lower when it swings forwards (see `Gait::clearance_forward`), and
+        // brought down along the glide slope so it reaches the ground as it reaches
+        // the target, 2 cm out.
+        let (forward, _) = self.facing(upright, i);
+        let ahead = (goal - flat(ankle))
+            .normalize_or_zero()
+            .dot(forward)
+            .max(0.0);
+        let clearance = gait.clearance + (gait.clearance_forward - gait.clearance) * ahead * ahead;
+        let mut lift = length * clearance.min(gait.glide * (away - 0.02).max(0.0));
         match phase {
             // Still on the ground: lift it first, straight up, rather than drag it.
             Phase::Lift => {
@@ -719,44 +731,66 @@ enum Phase {
 const STEP_TIME: f32 = 0.1;
 /// How fast a swinging foot travels, m/s, to estimate when it will land.
 const FOOT_SPEED: f32 = 2.0;
-/// Furthest ahead (s) a step looks for where the capture point will be. Looking
-/// further makes long steps that the body then sways back from.
-const MAX_AHEAD: f32 = 0.25;
 
 /// How a balancing behaviour steps.
 struct Gait {
     /// How far (m) the capture point may leave the planted feet before a step starts.
     margin: f32,
+    /// Furthest ahead (s) a step looks for where the capture point will be.
+    ahead: f32,
     /// How far past where the capture point will be the swing foot is aimed, m.
     overshoot: f32,
+    /// How high a swing foot is carried, as a fraction of the leg's length.
+    clearance: f32,
+    /// The same for a foot swinging straight forwards (in between for steps at an
+    /// angle).
+    clearance_forward: f32,
+    /// How steeply the swing foot comes down as it nears its target: its height, as a
+    /// fraction of the leg's length, per metre it still has to go.
+    glide: f32,
     /// Strength of the trunk, head and arms, as a fraction of the "Normal" preset.
     trunk: f32,
 }
 
 /// Balance stands its ground while the ankles can hold it, and steps a little past
-/// the capture point when they can't.
+/// the capture point when they can't. It looks 0.25 s ahead: looking further made
+/// long steps that the body then swayed back from.
+///
+/// Its feet are carried high, a quarter of the leg's length, and brought down along a
+/// gentle slope. Carried at a tenth and dropped over the last 6 cm, as they were, a
+/// swing foot often sagged back to within 2 cm of the ground, counted as planted and
+/// started lifting again, and the step came too late (docs/behaviours.md). Forward
+/// steps are carried at 15%: carried as high as the others, about 15 of the sweep's
+/// 21 forward pushes were held instead of 19, for a reason not yet pinned down.
 const BALANCE: Gait = Gait {
     margin: 0.02,
+    ahead: 0.25,
     overshoot: 0.05,
+    clearance: 0.25,
+    clearance_forward: 0.15,
+    glide: 0.9,
     trunk: 1.0,
 };
 
-/// Stagger steps as soon as the capture point leaves the feet, only as far as it, so
-/// it keeps stepping to keep up with a push, with a looser trunk.
+/// Stagger steps as soon as the capture point leaves the feet, aims where the capture
+/// point will be only half as far ahead as Balance does, so its steps fall short and
+/// it keeps stepping to keep up with a push, shuffles (feet carried low, as Balance's
+/// were before), and has a looser trunk.
 const STAGGER: Gait = Gait {
     margin: 0.0,
-    overshoot: 0.0,
+    ahead: 0.125,
+    overshoot: 0.05,
+    clearance: 0.1,
+    clearance_forward: 0.1,
+    glide: 0.1 / 0.06,
     trunk: 0.35,
 };
 
 /// A foot whose sole is within this height (m) of the lowest sole carries weight.
 const PLANTED: f32 = 0.02;
 
-/// How high a swing foot is carried, as a fraction of the leg's length.
-const CLEARANCE: f32 = 0.1;
-
-/// How high a foot still on the ground is asked to lift, as a fraction of the leg's
-/// length: higher than it is carried, so it comes off the ground quickly.
+/// How high a foot still on the ground is asked to lift, straight up, as a fraction of
+/// the leg's length, so it comes off the ground quickly.
 const LIFT_OFF: f32 = 0.15;
 
 /// A swinging foot whose step would leave the capture point more than this far (m)
@@ -770,8 +804,8 @@ fn balance(d: &mut Drive) {
 }
 
 /// Stagger: balance whose support moves. It steps whenever the capture point leaves
-/// the feet, puts the foot down just where the capture point will be, and lets the
-/// trunk sway.
+/// the feet, puts the foot down short of where the capture point is going, and lets
+/// the trunk sway.
 fn stagger(d: &mut Drive) {
     keep_balance(d, &STAGGER);
 }
@@ -832,7 +866,15 @@ fn keep_balance(d: &mut Drive, gait: &Gait) {
             upright,
         );
         let home = centre(stance) + out * 2.0;
-        d.swing(swing, upright, home, floor, centre(swing), Phase::Carry);
+        d.swing(
+            swing,
+            upright,
+            home,
+            floor,
+            centre(swing),
+            Phase::Carry,
+            gait,
+        );
         return;
     }
 
@@ -879,7 +921,7 @@ fn keep_balance(d: &mut Drive, gait: &Gait) {
         hip_shift(d, centre(stance)),
         upright,
     );
-    d.swing(swing, upright, to, floor, centre(swing), phase);
+    d.swing(swing, upright, to, floor, centre(swing), phase, gait);
 }
 
 /// How far a point (flat) lies outside the convex hull of some points (flat), m;
