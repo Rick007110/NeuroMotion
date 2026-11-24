@@ -1749,6 +1749,8 @@ pub struct CarCarry {
     pub body: (f32, String),
     /// The sweep over the rest of the scene, after the stop.
     pub after: Report,
+    /// `body` for the rest of the scene, after the stop, m, and where.
+    pub after_body: (f32, String),
 }
 
 /// Car carry measured, with the carrier driving at `speed` m/s.
@@ -1767,6 +1769,7 @@ pub fn car_carry_numbers(speed: f32) -> CarCarry {
         hit: frames(start, stop),
         body: joint_stretch(&project, &sim, "pedestrian", CAR_CARRY_HIT, |n| !hinge(n)),
         after: frames(stop + 1, end),
+        after_body: joint_stretch(&project, &sim, "pedestrian", stop + 1..=end, |n| !hinge(n)),
     }
 }
 
@@ -2282,20 +2285,22 @@ mod tests {
     /// at the hit (frames 15-21) over those runs, so they are held to 3.5 cm.
     ///
     /// After the stop the pedestrian slides off the bonnet and the left arm whips
-    /// round, nothing heavy on it, and the shoulder opens 0.7 to 7.0 cm over those
-    /// runs: more than the sweep's 5 cm in 11 of the 201. Only the sweep's checks
-    /// cover the whole scene, so a platform whose maths rounds differently could fail
-    /// them here; it is a known open item (docs/physics-design.md, lesson 15).
+    /// round against their own chest and neck. That opened the shoulder by up to 7 cm
+    /// (#23) until lesson 17; over the same runs no joint of the body now opens more
+    /// than 0.7 cm after the stop (2.1 cm here before), and none at all more than
+    /// 2.7 cm in the whole scene (the toes at the hit), so the whole scene is held to
+    /// 3.5 cm and the body after the stop to 1.5 cm.
     #[test]
     fn car_carry_keeps_joints_together() {
         let CarCarry {
             whole,
             hit,
             body: (body, place),
+            after_body: (after_body, after_place),
             ..
         } = car_carry_numbers(8.0);
         println!(
-            "Car carry: {whole}\n{}  hit and carry: max joint stretch {:.4} m at {}; {body:.4} m without the toes and fingers, at {place}",
+            "Car carry: {whole}\n{}  hit and carry: max joint stretch {:.4} m at {}; {body:.4} m without the toes and fingers, at {place}\n  after the stop, without the toes and fingers: {after_body:.4} m at {after_place}",
             whole.places(),
             hit.stretch,
             hit.places[1]
@@ -2315,6 +2320,16 @@ mod tests {
             "{} m in the hit and carry, at {}",
             hit.stretch,
             hit.places[1]
+        );
+        assert!(
+            whole.stretch < 0.035,
+            "{} m in the whole scene, at {}",
+            whole.stretch,
+            whole.places[1]
+        );
+        assert!(
+            after_body < 0.015,
+            "a joint opened {after_body} m after the stop, at {after_place}"
         );
     }
 }
@@ -2588,30 +2603,35 @@ mod behaviour_tests {
             nudges.iter().fold(0.0f32, |a, n| a.max(n.abs()))
         );
         if wanted("car") {
-            let [mut whole, mut hit, mut body, mut after] = [(); 4].map(|_| Vec::new());
+            let [mut whole, mut hit, mut body, mut after, mut after_body] =
+                [(); 5].map(|_| Vec::new());
             let mut over = 0;
             for &nudge in &nudges {
                 let c = car_carry_numbers(8.0 * (1.0 + nudge));
                 println!(
-                    "car carry {nudge:+.1e}: hit and carry {:.2} cm at {}, without toes and fingers {:.2} cm at {}; after the stop {:.2} cm at {}",
+                    "car carry {nudge:+.1e}: hit and carry {:.2} cm at {}, without toes and fingers {:.2} cm at {}; after the stop {:.2} cm at {}, without toes and fingers {:.2} cm at {}",
                     c.hit.stretch * 100.0,
                     c.hit.places[1],
                     c.body.0 * 100.0,
                     c.body.1,
                     c.after.stretch * 100.0,
                     c.after.places[1],
+                    c.after_body.0 * 100.0,
+                    c.after_body.1,
                 );
                 over += usize::from(!(c.whole.ok() && c.whole.buried <= 0.0));
                 whole.push(c.whole.stretch * 100.0);
                 hit.push(c.hit.stretch * 100.0);
                 body.push(c.body.0 * 100.0);
                 after.push(c.after.stretch * 100.0);
+                after_body.push(c.after_body.0 * 100.0);
             }
             println!(
-                "car carry, max joint stretch (cm): hit and carry {}, without toes and fingers {}; after the stop {}; whole scene {}, failing the sweep in {over} runs",
+                "car carry, max joint stretch (cm): hit and carry {}, without toes and fingers {}; after the stop {}, without toes and fingers {}; whole scene {}, failing the sweep in {over} runs",
                 range(&mut hit),
                 range(&mut body),
                 range(&mut after),
+                range(&mut after_body),
                 range(&mut whole),
             );
         }

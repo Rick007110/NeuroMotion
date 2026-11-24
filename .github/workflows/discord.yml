@@ -1,0 +1,77 @@
+# Posts to the Discord #changelog channel through the webhook in the
+# DISCORD_WEBHOOK secret. Three ways in:
+# - a release is published (by hand on GitHub, or by the Release workflow,
+#   which calls this one, since releases made by a workflow trigger nothing);
+# - Actions → Post to Discord → Run workflow, with a message (Markdown);
+# - the same with a release tag, to (re)announce that release.
+name: Post to Discord
+
+on:
+  release:
+    types: [published]
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      title:
+        description: "Title (leave empty when announcing a release)"
+        required: false
+      message:
+        description: "Message, Markdown (leave empty when announcing a release)"
+        required: false
+      release_tag:
+        description: "Or a release to announce, e.g. v0.1.0"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
+          TITLE: ${{ inputs.title }}
+          MESSAGE: ${{ inputs.message }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "The DISCORD_WEBHOOK secret isn't set (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+          # Discord's .../github endpoint only takes GitHub's own event payloads;
+          # this posts a Discord message, which needs the plain webhook URL.
+          WEBHOOK="${WEBHOOK%/}"
+          WEBHOOK="${WEBHOOK%/github}"
+          if [ -n "$TAG" ]; then
+            gh release view "$TAG" --json name,body,url,isPrerelease > release.json
+            TITLE=$(jq -r '.name' release.json)
+            URL=$(jq -r '.url' release.json)
+            MESSAGE="$(jq -r '.body' release.json)"
+            MESSAGE="${MESSAGE:0:3800}"$'\n\n'"**Download:** $URL"
+          elif [ -z "$MESSAGE" ]; then
+            echo "Give a message or a release tag."
+            exit 1
+          else
+            URL="https://github.com/$GH_REPO"
+          fi
+          # Discord embeds take 256 characters of title and 4096 of description.
+          jq -n --arg title "${TITLE:0:256}" --arg text "${MESSAGE:0:4096}" --arg url "$URL" '{
+            username: "NeuroMotion",
+            avatar_url: "https://raw.githubusercontent.com/Rick007110/NeuroMotion/main/assets/icon-256.png",
+            embeds: [{
+              title: (if $title == "" then null else $title end),
+              url: $url,
+              description: $text,
+              color: 2864035
+            }]
+          }' > payload.json
+          curl -fsS -H "Content-Type: application/json" -d @payload.json "$WEBHOOK"
+          echo "Posted."

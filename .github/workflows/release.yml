@@ -83,3 +83,11 @@ jobs:
           gh release view "$VERSION" > /dev/null 2>&1 \
             || gh release create "$VERSION" --target "$GITHUB_SHA" --title "NeuroMotion $VERSION (beta)" --generate-notes --prerelease
           gh release upload "$VERSION" dist/* --clobber
+
+  announce:
+    name: Announce on Discord
+    needs: release
+    uses: ./.github/workflows/discord.yml
+    with:
+      release_tag: ${{ inputs.version || github.ref_name }}
+    secrets: inherit

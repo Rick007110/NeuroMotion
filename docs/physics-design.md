@@ -38,7 +38,7 @@ Each tick (1/rate s) runs 4 substeps. Each substep:
    - locks (one 6-row block each, each row capped at its strength);
    - bodies that locks tie together, with the joints between them, solved directly as
      one system (lesson 12), and the same for characters something much heavier
-     presses on (lesson 15);
+     presses on (lesson 15) or with a joint open more than 1.5 cm (lesson 17);
    - contact normals, as *soft* constraints (frequency and damping ratio);
    - friction.
 5. Integrate positions.
@@ -284,17 +284,14 @@ Car Hit, the last sample scene failing the sweep, added one more.
     (`nudge_survey`) shows how much of this holds: up to the stop (frame 99) no joint
     of the body, shoulders and clavicles included, opens more than 0.5 cm (an ankle);
     the toes' and fingers' hinges, which the bonnet strikes directly, open 0.5 to
-    2.7 cm at the hit. After the stop is another matter, and still open. Friction no
-    longer holds the pedestrian on the bonnet (lesson 16), so they slide off, and the
-    arm whips round (fingers at 11-15 m/s) with nothing heavy on it: a light chain
-    moving fast, not a crush, so this lesson's direct solve doesn't apply. The
-    shoulder then opens by 1.3 cm in a typical run, over 2 cm in a third of them,
-    over 4.3 cm in a tenth and over the sweep's 5 cm in 11 of the 201 (7.0 cm worst),
-    always between frames 113 and 120. On CI it reached 3.9 cm (Linux), 4.6 (macOS)
-    and 3.8 (Windows), against 2.1 here. The test (`car_carry_keeps_joints_together`)
-    holds the hit and carry to lesson 15's bound (2 cm for the body, 3.5 for the toes
-    and fingers) and the whole scene only to the sweep's checks, which the whip could
-    fail on a platform that rounds differently.
+    2.7 cm at the hit. After the stop was another matter (#23). Friction no longer
+    holds the pedestrian on the bonnet (lesson 16), so they slide off, and the arm
+    whips round (fingers at 11-15 m/s) with nothing heavy on it, so this lesson's
+    direct solve doesn't apply. The shoulder then opened by 1.3 cm in a typical run,
+    over 2 cm in a third of them and over the sweep's 5 cm in 11 of the 201 (7.0 cm
+    worst), always between frames 113 and 120; on CI it reached 3.9 cm (Linux), 4.6
+    (macOS) and 3.8 (Windows), against 2.1 here. Lesson 17 found the cause and fixed
+    it.
 
 Teaching Balance to step (docs/behaviours.md) showed one more.
 
@@ -312,6 +309,60 @@ Teaching Balance to step (docs/behaviours.md) showed one more.
     instead of 329 and lands at 387 instead of 393; left alone, it falls off the
     front at 335 instead of 348. Car carry changed after its stop: its pedestrian now
     slides off the bonnet (lesson 15).
+
+An arm whipping round in Car carry after the car stops showed one more (#23).
+
+17. **A character with a joint come apart is solved directly too.** After Car carry's
+    stop, the shoulder opened by up to 7 cm. Tracing the solver substep by substep
+    showed why, and that it was worse than the sweep said:
+    - The stand-in's clavicles put a 0.4 kg body between chest and upper arm. That
+      makes the chest the upper arm's grandparent and the neck an unrelated body of the
+      same character, so by the placeholder's collision flags (limbs collide with their
+      ancestors; unrelated bodies always collide) the upper arm now collides with
+      both, right beside the shoulder. Without clavicles they were parent and sibling,
+      and didn't.
+    - By frame 111 the car no longer touches the pedestrian, so lesson 15's direct
+      solve ends. The left arm is jammed up against chest and neck, 0.2-0.44 rad past
+      its shoulder's swing stop, turning at 30-50 rad/s. Upper arm, clavicle and chest
+      form a loop of joints that those contacts close, and four iterations of
+      sequential impulses don't settle it: the contacts, solved last, win, and the
+      shoulder opened by 5 mm every substep (2.4 m/s) for 40 substeps, 14 cm in the
+      unnudged run, until the arm came off the chest. Then it closed again, slowly.
+    - The sweep measures how much a bone's length changes, and most of that gap was
+      across the clavicle, so it read 2.1 cm. Measured at the joint anchors, the
+      shoulder opened 9.7 cm in a typical nudged run and 22 cm in the worst.
+    Nothing else was involved: the arm touched neither the bonnet nor the ground in
+    those frames, and of the joints that opened, only a finger and a toe reached the
+    100 rad/s cap on angular speed.
+    Eight iterations instead of four also fix it (worst 1.1 cm) but make every scene
+    1.3-1.6 times slower; turning off collisions between a character's bodies that
+    aren't parent and child also fixes it (worst 2.5 cm), which confirms the cause but
+    would change what collides.
+    So any character with a joint open more than 1.5 cm at the start of a substep is
+    now solved directly for that substep, like lesson 15's crushed ones: all its joint
+    anchors as one system. The shoulder then holds within a substep or two. At 1 cm the
+    rule also caught Heli Leap's jumper landing at 12.5 m/s, whose ankles the ground's
+    contacts open within one substep, and there it made them open a little more (2.6
+    to 3.0 cm); at 2 cm the shoulder's anchors still opened 2.7 cm. Over the same 201
+    nudged runs, after the stop:
+
+    | | Before | After |
+    |---|---|---|
+    | Sweep (bone length), any joint | 1.3 cm typical, 7.0 worst; over 5 cm in 11 runs | 0.2 cm typical, 2.0 worst (a finger) |
+    | Sweep, body without toes and fingers | 1.3 cm typical, 7.0 worst | 0.7 cm worst |
+    | Joint anchors | 9.7 cm typical, 22 cm worst | 1.9 cm typical, 2.2 worst |
+
+    The hit and carry don't change (0.5-2.7 cm for the toes and fingers, 0.4-0.5 cm for
+    the body). Of the other stand-ins, Car Hit goes from 3.0 cm (its shoulder, at the
+    hit) to 1.4 cm and Turntable from 0.17 to 0.16 cm; every other stand-in's joints
+    stretch as much as before (Heli Leap's jumper lands a little differently, its
+    lowest body 2.5 cm above the ground instead of 2.2). Balance's stepping gives the same result in every run of the
+    survey, and Stagger the same step counts, with the feet moving a little
+    differently in 21 of 201 runs (2.3-4.2 times Balance's, as before). Timings don't
+    change beyond run-to-run noise: the rule only acts while a joint is open.
+    `car_carry_keeps_joints_together` now holds the whole scene to 3.5 cm and the body
+    after the stop to 1.5 cm (it failed that at 2.1 cm before the fix). The sweep's
+    bone-length measure still under-reports a joint that opens sideways.
 
 ## Status against endorphin's sample scenes
 
@@ -376,7 +427,7 @@ What each stand-in reproduces:
 | Rotating Floor | No ground; a thin collision-only slab spinning and rocking | sinks through | rides it |
 | Turntable | No ground; a flat cylinder spinning | floats 0.9 m above it | rests on it |
 | Hanging weight | A 20-80 kg weight on a rope locked at the top, hanging straight (lesson 10) | 0.36 m stretch, 63 m/s | 1.5 cm, 0.6 m/s |
-| Car carry | Car Hit: a 747 kg car joined (1e5) to a keyed carrier drives into a standing character with clavicles at 8 m/s, catches its arm against its ribs, carries it on the bonnet and stops dead at 1.65 s (lesson 15). The join gives way by 23 cm as the carrier stops, by design | 5.8 cm (shoulder) | 1.0 cm. Since lesson 16, up to the stop: 0.5 cm at most for the body (shoulder included), toes and fingers 0.5-2.7 cm at the hit (201 nudged runs). After the stop, as the pedestrian slides off and the arm whips round: the shoulder 1.3 cm typically, but up to 7.0 cm, over the sweep's 5 cm in 11 of 201 runs (open, lesson 15) |
+| Car carry | Car Hit: a 747 kg car joined (1e5) to a keyed carrier drives into a standing character with clavicles at 8 m/s, catches its arm against its ribs, carries it on the bonnet and stops dead at 1.65 s (lesson 15). The join gives way by 23 cm as the carrier stops, by design. After the stop the pedestrian slides off and the arm whips round against its own chest and neck | 5.8 cm (shoulder) at the hit; 7.0 cm after the stop (#23) | Over 201 nudged runs, up to the stop: 0.5 cm at most for the body (shoulder included), toes and fingers 0.5-2.7 cm at the hit. After the stop: 0.7 cm at most for the body, 2.0 cm for a finger (lesson 17) |
 | Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -73° at 297, leaves the box at 324, lands behind it at 387, -278° in all. Left alone: tips forwards and falls off the front at 335 (both changed by lesson 16) |
 
 Of endorphin's behaviours, Balance (which now steps), CatchFall and Stagger have
@@ -395,12 +446,14 @@ hasn't been re-run against endorphin's scene since.
 - Virtual-muscle reach springs.
 - Exact cylinders: long ones have rounded ends; flat ones a rounded rim, touching
   flat things at six rim points, the lowest rim point and the point nearest them.
-- An exact solve for joint anchors where no lock holds the chain and nothing heavy
-  presses on it (lessons 12 and 15 cover those). Keyed bodies pressing on a character
-  don't count as heavy yet: lesson 15 says what that cost. A light limb whipping round
-  fast is the case that shows: Car carry's shoulder opens up to 7 cm after the stop,
-  past the sweep's 5 cm in about one run in twenty when the car's speed is nudged
-  (lesson 15).
+- An exact solve for joint anchors where no lock holds the chain, nothing heavy
+  presses on it and no joint has opened 1.5 cm yet (lessons 12, 15 and 17 cover
+  those). Keyed bodies pressing on a character don't count as heavy yet: lesson 15
+  says what that cost. Joints, limits and contacts are still solved one after
+  another, contacts last, so a joint can open up to the 1.5 cm before the direct
+  solve steps in, and a hard landing opens ankles by 2-3 cm for a substep or two.
+- A sweep measure for joints that open sideways: it compares bone lengths, which
+  read Car carry's 14 cm shoulder gap as 2.1 cm (lesson 17).
 - Bit-identical results across platforms. Results are identical run to run with the
   same build on the same machine, but `sin`, `cos`, `atan2`, `acos` and `powf` come
   from the platform's maths library and can differ in the last bit, which a chaotic

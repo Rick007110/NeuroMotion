@@ -39,14 +39,15 @@ NeuroMotion, and we need numbers to prove it.
   "drive" strengths)
 - ✅ Scenery props, characters placed in the world, the scene's own keys
 - 🟡 All 16 sample scenes clean: Car Hit's cause is fixed in a stand-in (a heavy body
-  pressing on a character now gets an exact joint solve, lesson 15; after the car
-  stops, the arm whipping round still opens the shoulder past 5 cm in about one run
-  in twenty when the scene is nudged, [#23](https://github.com/Rick007110/NeuroMotion/issues/23)), and the real scene still
-  needs confirming on a machine with endorphin
+  pressing on a character now gets an exact joint solve, lesson 15, and so does a
+  character with a joint come apart, lesson 17, which stops the arm whipping round
+  after the car stops from opening the shoulder
+  ([#23](https://github.com/Rick007110/NeuroMotion/issues/23))), and the real scene
+  still needs confirming on a machine with endorphin
   ([#7](https://github.com/Rick007110/NeuroMotion/issues/7)); Bridge Escape is skipped
   for size
-- ✅ Heavy bodies pressing on a character, and friction only where surfaces touch
-  (lessons 15 and 16)
+- ✅ Heavy bodies pressing on a character, friction only where surfaces touch, and
+  characters with a joint come apart solved directly (lessons 15, 16 and 17)
 - 🟡 Back-Flip-To-Combo: the character tips forward before the flip
   ([#6](https://github.com/Rick007110/NeuroMotion/issues/6))
 - ⬜ **Reference measurements**: a set of scenes measured in endorphin (frames, angles,
