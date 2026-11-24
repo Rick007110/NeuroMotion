@@ -12,6 +12,10 @@ toward a modern physics engine that behaves like endorphin's and then goes furth
 > controllers; scenes that rely on the others (stagger, writhe, ...) behave like a limp
 > character instead.
 
+> **Want to help build it?** NeuroMotion is open to everyone: animators, programmers,
+> testers and writers. See [Contributing](#contributing) below, or go straight to
+> [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Not affiliated with NaturalMotion or endorphin
 
 NeuroMotion is an independent, from-scratch project. It is **not** affiliated with,
@@ -93,6 +97,9 @@ Force event at the same frame. Design and status:
    animation, visual feedback on muscle effort, re-simulating only from the edited
    frame.
 
+Every item is an [issue](https://github.com/Rick007110/NeuroMotion/issues) you can pick
+up; see [Contributing](#contributing).
+
 ## Download
 
 Builds for Windows, macOS and Linux are attached to each
@@ -149,14 +156,37 @@ Design notes: [docs/layout.md](docs/layout.md),
 
 ## Contributing
 
-NeuroMotion is meant to be built by its community, and help of every kind is welcome:
-bug reports, measurements of how endorphin behaves, documentation, test scenes and
-code. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and send a
-pull request, and the project's ground rules (clean-room work only, signed-off
-commits). [ARCHITECTURE.md](ARCHITECTURE.md) is a map of the code, and issues labelled
-[good first issue](https://github.com/Rick007110/NeuroMotion/labels/good%20first%20issue)
-are a good place to begin. Everyone taking part follows the
-[Code of Conduct](CODE_OF_CONDUCT.md).
+NeuroMotion is meant to be built by its community, not by one person. Help of every
+kind is welcome, and you don't need to write Rust to help.
+
+**How to contribute:**
+
+1. **Read [CONTRIBUTING.md](CONTRIBUTING.md).** It explains how to build and test,
+   how to send a pull request, and the ground rules every contribution follows:
+   - **Clean-room only:** no endorphin code, files or assets, and no decompiling.
+     Describing how endorphin *behaves* is welcome.
+   - **Signed-off commits** (`git commit -s`), certifying the
+     [Developer Certificate of Origin](https://developercertificate.org).
+   - Contributions are released under the project's licence, GPL-3.0-or-later.
+2. **Pick something to do:**
+   - **Report a bug** or suggest a feature through
+     [a new issue](https://github.com/Rick007110/NeuroMotion/issues/new/choose).
+   - **Measure endorphin.** If you have it, record how a scene behaves (frames, angles,
+     timings) with the *Reference measurement* issue template. These numbers become
+     tests that keep NeuroMotion's physics close to endorphin's.
+   - **Take an issue.** Those labelled
+     [good first issue](https://github.com/Rick007110/NeuroMotion/labels/good%20first%20issue)
+     are small and self-contained;
+     [help wanted](https://github.com/Rick007110/NeuroMotion/labels/help%20wanted) ones
+     are bigger. Comment on the issue first so two people don't do the same work.
+   - **Improve the docs** in [docs/](docs).
+3. **Find your way in the code** with [ARCHITECTURE.md](ARCHITECTURE.md), a map of
+   the modules and where to start for common changes.
+4. **Open a pull request.** CI checks formatting, clippy and the tests on Windows,
+   macOS and Linux, and a maintainer reviews it.
+
+Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md). Security
+problems go privately through [SECURITY.md](SECURITY.md), not in a public issue.
 
 ## License
 
