@@ -1,3 +1,5 @@
+<img src="assets/icon.svg" alt="NeuroMotion logo" width="96" align="right">
+
 # NeuroMotion
 
 A timeline-based motion editor for character animation, built to pick up where

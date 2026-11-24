@@ -25,7 +25,11 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_title("NeuroMotion")
             .with_inner_size([1440.0, 880.0])
-            .with_min_inner_size([960.0, 600.0]),
+            .with_min_inner_size([960.0, 600.0])
+            .with_icon(
+                eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon-256.png"))
+                    .expect("the bundled icon is a valid PNG"),
+            ),
         ..Default::default()
     };
     // A file given on the command line (or via "Open with") opens on startup.
@@ -35,4 +39,14 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| Ok(Box::new(ui::NeuroMotionApp::new(cc, startup)))),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn bundled_icon_is_a_square_png() {
+        let icon = eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon-256.png"))
+            .expect("valid PNG");
+        assert_eq!((icon.width, icon.height), (256, 256));
+    }
 }

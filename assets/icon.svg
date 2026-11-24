@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- NeuroMotion: an N and an M sharing one stroke, like a chain of bones, with a
+       joint where they meet. -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="#1E2127"/>
+  <path d="M216 152 L306 292 L396 152 V360" fill="none" stroke="#2BB3A3" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M116 360 V152 L216 360 V152" fill="none" stroke="#F2F4F7" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="216" cy="152" r="27" fill="#F28C4A"/>
+</svg>
