@@ -364,6 +364,52 @@ An arm whipping round in Car carry after the car stops showed one more (#23).
     after the stop to 1.5 cm (it failed that at 2.1 cm before the fix). The sweep's
     bone-length measure still under-reports a joint that opens sideways.
 
+The real Car Hit, swept with endorphin installed, still failed after lessons 15-17,
+and not where Car carry does.
+
+18. **A transition's blend reads each bone in its own pose's parent frame.** The
+    real Car Hit failed the sweep with a clavicle 7.9 cm out at frame 106, with the
+    car long stopped (it stops at frame 102). The trace put the stretch inside the
+    scene's 90-112 transition back to animation: it grew from frame 95, peaked at
+    106 and was gone by 112, smoothly, as a blend weight would. Recording the
+    simulated pose without the blend, nothing stretched more than 1 cm in those
+    frames, and the solver never sees the blended pose, so the bodies were whole and
+    only the drawn skeleton came apart. The blend slerps each joint's rotation, then
+    rebuilds positions down the hierarchy by lerping each bone's offset from its
+    parent between the simulated and the animated pose. It read the simulated offset
+    in the *blended* parent's frame instead of the simulated parent's. Both offsets
+    are the bone's rest offset in their own parent's frame; read in the wrong frame,
+    the simulated one is turned away from the animated one by however far the
+    blended parent is from the simulated one, and a lerp between two vectors at an
+    angle is shorter than either (cos(θ/2) at the half-way point). Car Hit's
+    character lies on the road after the car stops while its animation stands, so
+    the angles were large. The offset is now read in the simulated parent's frame.
+    The solver and the bodies are untouched: only the joints a transition records
+    change, and no other stand-in has a transition, so their numbers, the nudge
+    survey's and the timings are as before.
+
+    The Curl hand-back stand-in curls a character with clavicles up on the ground
+    with BodyFoetal and then transitions it back to standing over 0.75 s,
+    overlapping the curl's end as Car Hit's transition overlaps BodyFoetal's. Its
+    bones stretched 16.6 cm in the transition (a knee); now 0.09 cm, and
+    `transition_keeps_bones_whole` holds them to 2 cm.
+
+    | Sample scene | Before | After |
+    |---|---|---|
+    | Car Hit | 7.9 cm (clavicle, frame 106, mid-transition): failing | 0.93 cm (a foot, frame 53, while simulated): clean |
+    | Stagger Walk | 1.9 cm (ankle, frame 120, in its 106-144 transition) | 0.07 cm |
+    | The other 14 | | unchanged |
+
+    Imported behaviour names ("Bob2: BodyFoetal") don't match a controller yet, so
+    in these runs the real Car Hit's character goes limp where BodyFoetal should
+    curl it (frames 60-105). Matching the name locally, just to measure, BodyFoetal
+    runs and the scene still failed before this fix, the elbow 9.4 cm out at frame
+    106 before this fix, 0.93 cm (the same foot, frame 53) after.
+
+    Car Hit still reports 0.38 m of drift on the car's join to its 4 g carrier from
+    frame 5. The sweep doesn't check drift, and the carrier is lighter than the car
+    by a factor of about 180 000; that is a separate question.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates the first two seconds of
@@ -384,17 +430,21 @@ set-up (ground, rigs, events, constraint targets and settings).
 Each failure also gets a stand-in built in code (`src/physics/scenes.rs`) with the
 same pattern, so it can be worked on without endorphin's files.
 
-Last run, with lessons 1-12 and the import fixes below (before lesson 13) (16 scenes; Bridge Escape is
-skipped for size):
+Last run, with lessons 1-18 and imported behaviours actually running (until the
+behaviour names were matched, `docs/behaviours.md`, none of them ran in these
+scenes); 16 scenes, Bridge Escape is skipped for size:
 
 | Result | Scenes |
 |---|---|
-| Clean | Arrows, Balcony, Bendy Stick, Car Crash, Catch Rope, Catch Run, Gymnast Rings, Heli Leap, Multi Martial, Rotating Floor, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
-| Failing | Car Hit: a clavicle stretches 10 cm. The 747 kg car, joined to a keyed carrier, drives into the pedestrian at 8 m/s, carries them on the bonnet, and stops dead when the carrier's keys end at 1.65 s, with an arm under it |
+| Clean | All 16: Arrows, Balcony, Bendy Stick, Car Crash, Car Hit, Catch Rope, Catch Run, Gymnast Rings, Heli Leap, Multi Martial, Rotating Floor, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
+| Failing | None |
 
-Lesson 15 fixes Car Hit's stand-in (Car carry). Whether it fixes the scene itself still
-needs confirming with `cargo test --release -- --ignored` on a machine with endorphin
-installed.
+Max joint stretch per scene: Arrows 0.23 cm, Balcony 0.36, Bendy Stick 0.61, Car
+Crash 0.04, Car Hit 0.93, Catch Rope 0.15, Catch Run 1.41, Gymnast Rings 0.22, Heli
+Leap 0.29, Multi Martial 1.54, Rotating Floor 0.30, Stagger Walk 0.32, Sword Play
+0.46, Tackle 0.68, Trapeze 0.24, Walk With Gun 1.50. Car Hit was the last to fail: a
+clavicle 7.9 cm out, which lessons 15 and 17 (fixed in the Car carry stand-in) didn't
+cure because the real failure was in its transition back to animation (lesson 18).
 
 Four of the five scenes still failing after lesson 12 weren't solver problems at all:
 the importer set them up wrongly. Looking at Balcony in the app showed it: one
@@ -429,6 +479,7 @@ What each stand-in reproduces:
 | Hanging weight | A 20-80 kg weight on a rope locked at the top, hanging straight (lesson 10) | 0.36 m stretch, 63 m/s | 1.5 cm, 0.6 m/s |
 | Car carry | Car Hit: a 747 kg car joined (1e5) to a keyed carrier drives into a standing character with clavicles at 8 m/s, catches its arm against its ribs, carries it on the bonnet and stops dead at 1.65 s (lesson 15). The join gives way by 23 cm as the carrier stops, by design. After the stop the pedestrian slides off and the arm whips round against its own chest and neck | 5.8 cm (shoulder) at the hit; 7.0 cm after the stop (#23) | Over 201 nudged runs, up to the stop: 0.5 cm at most for the body (shoulder included), toes and fingers 0.5-2.7 cm at the hit. After the stop: 0.7 cm at most for the body, 2.0 cm for a finger (lesson 17) |
 | Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -73° at 297, leaves the box at 324, lands behind it at 387, -278° in all. Left alone: tips forwards and falls off the front at 335 (both changed by lesson 16) |
+| Curl hand-back | Car Hit's hand-back: a character with clavicles curls up on the ground (BodyFoetal), then a 0.75 s transition, overlapping the curl's end, blends it back onto its standing animation (lesson 18) | 16.6 cm (knee) mid-transition | 0.09 cm |
 
 Of endorphin's behaviours, Balance (which now steps), CatchFall and Stagger have
 controllers of their own (docs/behaviours.md). Scenes that depend on others simulate

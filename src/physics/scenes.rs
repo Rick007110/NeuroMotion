@@ -1835,6 +1835,33 @@ pub fn backflip(balance: bool) -> Project {
     p
 }
 
+/// Car Hit's hand-back: a character with clavicles drops limp, curls up on the ground
+/// (BodyFoetal from 1 s), and from 2.25 s a 0.75 s transition blends it back onto its
+/// standing animation, overlapping the end of the curl at 2.75 s as the scene's
+/// transition overlaps BodyFoetal's end. Curled on the ground and standing are far
+/// apart, so every joint's blended rotation is far from both poses' (lesson 18).
+pub fn curl_hand_back() -> Project {
+    let mut p = new_scene("Curl hand-back", 3.5);
+    let id = add_person(
+        &mut p,
+        "curler",
+        person_rig_with_clavicles(),
+        Vec3::ZERO,
+        0.0,
+        &[],
+    );
+    behave(&mut p, id, 60, 165, "BodyFoetal");
+    event(
+        &mut p,
+        id,
+        "Transition",
+        135,
+        45,
+        &[("requiredPhysicsLevel", "No Simulation")],
+    );
+    p
+}
+
 /// Prints, per frame and character, the lowest body, the most stretched joint and the
 /// fastest body, for finding where a scene goes wrong.
 pub fn trace(project: &Project) {
@@ -1939,6 +1966,7 @@ mod tests {
             "car_carry" => car_carry(),
             "backflip" => backflip(true),
             "backflip_passive" => backflip(false),
+            "curl_hand_back" => curl_hand_back(),
             "balance" => balance_push(1.5, Vec3::Z, true),
             "balance_step" => balance_push(1.5, -Vec3::Z, true),
             "balance_steps" => balance_push(HARD_PUSHES[1], Vec3::Z, true),
@@ -2837,6 +2865,20 @@ mod behaviour_tests {
         );
         assert!(b.1 < a.1 * 0.8, "head not closer to the knees: {a:?} {b:?}");
         assert!(b.2 < a.2 * 0.5, "hands not over the head: {a:?} {b:?}");
+    }
+
+    /// endorphin's Car Hit came apart by 7.9 cm at a clavicle mid-way through its
+    /// transition back to animation, while the simulated bodies themselves stayed
+    /// within 1 cm: the blend shortened the bones it drew (lesson 18).
+    #[test]
+    fn transition_keeps_bones_whole() {
+        let project = curl_hand_back();
+        let (sim, time) = simulate(&project);
+        let report = measure(&project, &sim, time);
+        let (blend, place) = joint_stretch(&project, &sim, "curler", 135..=180, |_| true);
+        println!("curl hand-back: {report}\n  in the transition: {blend:.4} m at {place}");
+        assert!(report.ok(), "{report}");
+        assert!(blend < 0.02, "{blend:.4} m at {place}");
     }
 
     #[test]

@@ -1110,14 +1110,18 @@ fn record(project: &Project, running: &Running, t: f32) -> Frame {
             {
                 let w = ((frame - start) as f32 / (end - start).max(1) as f32).clamp(0.0, 1.0);
                 // Blend orientations, then rebuild positions down the hierarchy so bones
-                // keep their length mid-blend.
+                // keep their length mid-blend. Each bone's offset is read in its own
+                // pose's parent frame (simulated in simulated, animated in animated):
+                // read in the blended parent's frame, the simulated offset turns away
+                // from the animated one and the lerp between them shortens the bone
+                // (lesson 18).
                 let anim = world_transforms(skeleton, &poses[ci]);
                 let mut blended: Vec<(Quat, Vec3)> = Vec::with_capacity(joints.len());
                 for (i, joint) in skeleton.joints.iter().enumerate() {
                     let rot = joints[i].0.slerp(anim[i].0, w).normalize();
                     let pos = match joint.parent.filter(|&p| p < i) {
                         Some(p) => {
-                            let offset = blended[p].0.inverse() * (joints[i].1 - joints[p].1);
+                            let offset = joints[p].0.inverse() * (joints[i].1 - joints[p].1);
                             let anim_offset = anim[p].0.inverse() * (anim[i].1 - anim[p].1);
                             blended[p].1 + blended[p].0 * offset.lerp(anim_offset, w)
                         }

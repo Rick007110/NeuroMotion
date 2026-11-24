@@ -18,7 +18,7 @@ each other, and [what's next](#next-up). Each open item is, or will become, a Gi
 | Area | endorphin 2.5 | NeuroMotion today |
 |---|---|---|
 | Open endorphin files | – | ✅ `.ens`, `.nmc`, `.nma` (160 of 163 bundled files) |
-| Physics engine | Karma, 120 Hz, stiff muscles | ✅ own engine, 120 Hz, deterministic on one machine; 15 of 16 sample scenes clean, Car Hit fixed in its stand-in |
+| Physics engine | Karma, 120 Hz, stiff muscles | ✅ own engine, 120 Hz, deterministic on one machine; all 16 sample scenes checked clean |
 | Event types | 9 | 🟡 7 of 9 (no motion transfer; behaviours partly) |
 | Behaviours | a library of them | 🟡 5 (Balance with stepping, Stagger, CatchFall, BodyFoetal, Writhe) |
 | Your own characters | yes (rigs, motion transfer) | ⬜ only endorphin's own `.nmc` characters |
@@ -38,14 +38,13 @@ NeuroMotion, and we need numbers to prove it.
   poses, active animations, constraints (lock and join, including negative
   "drive" strengths)
 - ✅ Scenery props, characters placed in the world, the scene's own keys
-- 🟡 All 16 sample scenes clean: Car Hit's cause is fixed in a stand-in (a heavy body
-  pressing on a character now gets an exact joint solve, lesson 15, and so does a
-  character with a joint come apart, lesson 17, which stops the arm whipping round
-  after the car stops from opening the shoulder
-  ([#23](https://github.com/Rick007110/NeuroMotion/issues/23))), and the real scene
-  still needs confirming on a machine with endorphin
-  ([#7](https://github.com/Rick007110/NeuroMotion/issues/7)); Bridge Escape is skipped
-  for size
+- ✅ All 16 sample scenes clean: the real Car Hit's clavicle came apart in its
+  transition back to animation, which shortened the bones it drew; transitions now
+  blend each bone in its own pose's frame (lesson 18,
+  [#7](https://github.com/Rick007110/NeuroMotion/issues/7)). Lessons 15 and 17 fixed
+  the car's hit and the arm whipping round after it stops
+  ([#23](https://github.com/Rick007110/NeuroMotion/issues/23)) in the Car carry
+  stand-in. Bridge Escape is skipped for size
 - ✅ Heavy bodies pressing on a character, friction only where surfaces touch, and
   characters with a joint come apart solved directly (lessons 15, 16 and 17)
 - 🟡 Back-Flip-To-Combo: the character tips forward before the flip
@@ -75,9 +74,12 @@ protected, so every one is an original design that shares only the name. Importe
 scenes then run something sensible.
 
 - ✅ Balance (ankle strategy), CatchFall
-- ⬜ **Inventory**: the list of behaviour names and settings that endorphin scenes use,
-  gathered from scenes (not from the protected `.nmb` files), to plan the rest
-  ([#24](https://github.com/Rick007110/NeuroMotion/issues/24))
+- ✅ **Inventory**: the behaviour names and settings that endorphin scenes use,
+  gathered from scenes (not from the protected `.nmb` files), to plan the rest:
+  [docs/behaviour-inventory.md](docs/behaviour-inventory.md)
+  ([#24](https://github.com/Rick007110/NeuroMotion/issues/24)). It found that
+  imported names like `Bob2: Balance 2.5` matched none of our controllers, so no
+  imported scene ran a behaviour; that is fixed
 - 🟡 **Stepping** when Balance can't hold ([#9](https://github.com/Rick007110/NeuroMotion/issues/9)):
   forwards and backwards it now stands after pushes up to about twice as hard
   (50 of 84 test pushes, from 29); sideways it barely helps yet, because the foot on
@@ -88,9 +90,10 @@ scenes then run something sensible.
   hasn't been compared with endorphin
 - ✅ **Writhe** and **Body foetal** ([#10](https://github.com/Rick007110/NeuroMotion/issues/10)):
   tested on the placeholder; not yet compared with endorphin
-- ⬜ The rest of the library: protective reactions (protect head, brace for impact),
-  reaching and grabbing, looking at a target, hit and shot reactions, and others the
-  inventory finds
+- ⬜ The rest of the library, in the inventory's order by scenes using them: Look and
+  Reach (11), Explosion (7), JumpDive, Jump and LandCrouch (5), Legs Kick and Arms
+  Windmill (4 each), Tackle and Fall Back and Twist (3 each), the arm poses (8 scenes
+  between them), then stiffness, leg straightening and velocity damping
 - ⬜ **Behaviour settings in the inspector**, so animators can tune them, as with other
   events
 - ⬜ A **guide to writing a behaviour**, so the community can add them in parallel
@@ -162,8 +165,8 @@ Planned once 1.0 is in sight:
 What moves NeuroMotion closest to endorphin quality now, in order:
 
 1. **Measure endorphin** (needs someone with endorphin installed): run
-   `cargo test --release -- --ignored` (every sample scene, including the real Car
-   Hit, [#7](https://github.com/Rick007110/NeuroMotion/issues/7)), the behaviour inventory ([#24](https://github.com/Rick007110/NeuroMotion/issues/24)), and record
+   `cargo test --release -- --ignored` (every sample scene; all 16 are clean since
+   [#7](https://github.com/Rick007110/NeuroMotion/issues/7)), the behaviour inventory ([#24](https://github.com/Rick007110/NeuroMotion/issues/24)), and record
    reference measurements of a few scenes. Every later physics and behaviour change
    can then be checked against real numbers.
 2. **Back-Flip-To-Combo** ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)): needs the scene file to trace.

@@ -32,7 +32,14 @@ pub enum Behaviour {
 impl Behaviour {
     /// The behaviour for an event's name (endorphin's `behaviourName`), ignoring case,
     /// spaces and punctuation; `None` if NeuroMotion has none of that name.
+    ///
+    /// endorphin's scenes name a behaviour after the set it comes from and its version,
+    /// e.g. `Bob2: Balance 2.5` or `Bob2: BodyWrithe`: the part before the last `:` and
+    /// a trailing version number are dropped before matching.
     pub fn from_name(name: &str) -> Option<Self> {
+        let name = name.rsplit(':').next().unwrap_or(name);
+        let name =
+            name.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.' || c.is_whitespace());
         let key: String = name
             .chars()
             .filter(|c| c.is_alphanumeric())
@@ -42,7 +49,7 @@ impl Behaviour {
             "balance" => Some(Behaviour::Balance),
             "catchfall" => Some(Behaviour::CatchFall),
             "bodyfoetal" | "bodyfetal" | "foetal" | "fetal" => Some(Behaviour::BodyFoetal),
-            "writhe" => Some(Behaviour::Writhe),
+            "writhe" | "bodywrithe" => Some(Behaviour::Writhe),
             "stagger" => Some(Behaviour::Stagger),
             _ => None,
         }
@@ -1248,6 +1255,29 @@ mod tests {
             assert_eq!(Behaviour::from_name(name), Some(Behaviour::BodyFoetal));
         }
         assert_eq!(Behaviour::from_name("Stagger"), Some(Behaviour::Stagger));
+        // As endorphin's scenes name them: the set's name, then the version.
+        assert_eq!(
+            Behaviour::from_name("Bob2: Balance 2.5"),
+            Some(Behaviour::Balance)
+        );
+        assert_eq!(
+            Behaviour::from_name("Bob2: CatchFall"),
+            Some(Behaviour::CatchFall)
+        );
+        assert_eq!(
+            Behaviour::from_name("Bob2: Stagger 2.0"),
+            Some(Behaviour::Stagger)
+        );
+        assert_eq!(
+            Behaviour::from_name("Bob2: BodyFoetal"),
+            Some(Behaviour::BodyFoetal)
+        );
+        assert_eq!(
+            Behaviour::from_name("Bob2: BodyWrithe"),
+            Some(Behaviour::Writhe)
+        );
+        assert_eq!(Behaviour::from_name("Bob2: Look and Reach 2.0"), None);
+        assert_eq!(Behaviour::from_name("Bob2: Explosion 2.0"), None);
     }
 
     /// A rig whose joints loop (only possible from a malformed file) must not hang.

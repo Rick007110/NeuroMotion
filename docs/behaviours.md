@@ -15,7 +15,11 @@ A behaviour runs for the span of an event clip of kind `Behaviour`, matched by i
 `behaviourName` setting, which imported endorphin events carry (the clip's own name
 when it's missing). Matching ignores case, spaces and punctuation, so `CatchFall`
 and `catch fall` both work. `BodyFoetal` also answers to `foetal`, `fetal` and
-`bodyfetal`. Where several overlap, the one that starts last wins.
+`bodyfetal`, and `BodyWrithe` to Writhe. endorphin's scenes name behaviours after the
+set they come from and add a version, as in `Bob2: Balance 2.5`: the part up to the
+last `:` and a trailing version number are dropped first. (Until this was added, no
+imported scene's behaviour ran at all.) Where several overlap, the one that starts
+last wins.
 Names with no controller yet are ignored: the
 character keeps doing what the timeline otherwise asks.
 
@@ -311,5 +315,7 @@ move it. Friction now only acts on contacts that touch or push.
 
 The rest of endorphin's library still needs designs: protective reactions (protect the
 head, brace for impact), reaching and grabbing, looking at a target, hit and shot
-reactions, and others found in imported scenes. See [ROADMAP.md](../ROADMAP.md),
-milestone 2.
+reactions, and others found in imported scenes. [behaviour-inventory.md](behaviour-inventory.md)
+lists what the sample scenes use and ranks the missing ones (Look and Reach, 11 scenes,
+comes first). Behaviour event settings (strengths, speeds, targets) aren't read yet;
+that comes before tuning any of them against endorphin. See [ROADMAP.md](../ROADMAP.md), milestone 2.
