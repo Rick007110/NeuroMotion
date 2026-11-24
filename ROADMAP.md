@@ -139,6 +139,13 @@ endorphin scenes.
 
 ## Milestone 4: An editor animators want to work in
 
+- 🟡 **Physics settings panel**: gravity, simulation rate and length, looping, the
+  material interactions (restitution, friction, adhesion, softness) and which pair
+  of surface materials uses which, all editable and undoable (in progress)
+- 🟡 **Scene tree**: characters, props and the environment with their bodies,
+  selectable, the inspector showing a body's mass, shapes and material (in progress)
+- ⬜ **Toolbar**: select, move and rotate, add shapes (box, sphere, cylinder, capsule)
+  and props, place constraints and forces; builds on the 3D viewport
 - ⬜ **3D viewport**: shaded bodies on the GPU, lighting and shadows, and front, side, top
   and perspective views ([#26](https://github.com/Rick007110/NeuroMotion/issues/26))
 - ⬜ **Work in the viewport**: click bodies to select them; drag to aim a force; place
@@ -148,7 +155,7 @@ endorphin scenes.
 - ⬜ **Timeline**: an undo history window, separate playback and export ranges, and the
   simulation rate in the settings
 - ⬜ **Preferences and keyboard profiles**, editable in the app
-- ⬜ **Playblast**: export the viewport as a video
+- ⬜ **Playblast**: export the viewport as a video or an image sequence
 - ✅ Window and app icon ([#17](https://github.com/Rick007110/NeuroMotion/issues/17))
 - ⬜ Recent files ([#16](https://github.com/Rick007110/NeuroMotion/issues/16))
 

@@ -13,12 +13,15 @@
 ### 🔨 In progress
 - Comparing **more scenes with endorphin, by numbers**, so every change is checked against endorphin's real results
 - Active poses applied the way endorphin does (Back-Flip-To-Combo)
+- New behaviours: **Look and Reach** and **Explosion**, designed from endorphin's own runs
 - Balance and Stagger tuned for the new friction, and stepping sideways
+- **Physics settings panel** (gravity, materials, friction) and a **scene tree**
 
 ### 📋 Planned
-- Next behaviours: **Look and Reach**, **Explosion**, **JumpDive**
+- More behaviours: **JumpDive**, **Legs Kick**, **Arms Windmill** and the rest of endorphin's library
 - Import your own **BVH/FBX** animation
 - A proper **3D viewport** with shaded bodies and several views
+- A **toolbar** to select, move and rotate, and to add shapes, props, constraints and forces
 - Behaviour settings in the inspector
 - Signed installers for Windows and macOS
 
