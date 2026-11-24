@@ -1,0 +1,70 @@
+# Builds the app for Windows, macOS and Linux and attaches it to a GitHub release.
+# Start one by pushing a version tag: git tag v0.2.0 && git push origin v0.2.0
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    strategy:
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            binary: neuromotion.exe
+          - name: macos-arm64
+            os: macos-latest
+            binary: neuromotion
+          - name: linux-x64
+            os: ubuntu-latest
+            binary: neuromotion
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked
+      - name: Package
+        shell: bash
+        run: |
+          dir="neuromotion-${GITHUB_REF_NAME}-${{ matrix.name }}"
+          mkdir "$dir"
+          cp "target/release/${{ matrix.binary }}" README.md LICENSE "$dir/"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "$dir.zip" "$dir" > /dev/null
+            echo "ASSET=$dir.zip" >> "$GITHUB_ENV"
+          else
+            tar czf "$dir.tar.gz" "$dir"
+            echo "ASSET=$dir.tar.gz" >> "$GITHUB_ENV"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ env.ASSET }}
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the release, or add the files to an existing one
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "NeuroMotion $GITHUB_REF_NAME" --generate-notes --prerelease
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
