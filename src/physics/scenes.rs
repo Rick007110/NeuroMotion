@@ -613,6 +613,93 @@ fn person_rig() -> (SkeletonRef, PhysicsRig) {
     (skeleton, rig)
 }
 
+/// `person_rig` with a clavicle between the chest and each upper arm, like endorphin's
+/// characters: a light body (0.4 kg) on a stiff ball joint at the sternum.
+fn person_rig_with_clavicles() -> (SkeletonRef, PhysicsRig) {
+    let (mut skeleton, mut rig) = person_rig();
+    for (side, x) in [("l", 1.0f32), ("r", -1.0)] {
+        let chest = skeleton.joint_index("chest").unwrap();
+        let shoulder = skeleton.joint_index(&format!("{side}_shoulder")).unwrap();
+        // Insert the clavicle joint just before the shoulder, so parents still come first.
+        let at = shoulder;
+        let bump = |i: usize| if i >= at { i + 1 } else { i };
+        for j in &mut skeleton.joints {
+            j.parent = j.parent.map(bump);
+        }
+        for b in &mut rig.bodies {
+            b.joint = bump(b.joint);
+        }
+        for j in &mut rig.joints {
+            j.joint = bump(j.joint);
+        }
+        let shoulder = shoulder + 1;
+        let to_shoulder = Vec3::from(skeleton.joints[shoulder - 1].offset);
+        let root = Vec3::new(0.04 * x, to_shoulder.y - 0.02, 0.0);
+        skeleton.joints.insert(
+            at,
+            Joint::new(&format!("{side}_clavicle"), Some(chest), root.to_array()),
+        );
+        skeleton.joints[shoulder].parent = Some(at);
+        skeleton.joints[shoulder].offset = (to_shoulder - root).to_array();
+
+        let piece = Piece::along(to_shoulder - root, 0.03, 0.4);
+        let chest_body = rig.body_index("chest").unwrap();
+        rig.bodies.push(BodyDef {
+            name: format!("{side}_clavicle"),
+            joint: at,
+            frame: Frame {
+                rotation: piece.frame.0.to_array(),
+                position: piece.frame.1.to_array(),
+            },
+            mass: piece.mass,
+            inertia: piece.geometry.inertia(piece.mass),
+            shapes: vec![ShapeDef {
+                geometry: piece.geometry,
+                frame: Frame::IDENTITY,
+                material: "skin".into(),
+                collides_with_parent: false,
+                collides_with_siblings: false,
+                collides_with_ancestors: false,
+            }],
+        });
+        let clavicle_body = rig.bodies.len() - 1;
+        let shoulder_body = rig.body_index(&format!("{side}_shoulder")).unwrap();
+        let twist = Quat::from_rotation_arc(Vec3::X, (to_shoulder - root).normalize()).to_array();
+        let hard = Limits {
+            twist_min: -0.2,
+            twist_max: 0.2,
+            swing1: 0.3,
+            swing2: 0.3,
+        };
+        let soft = Limits {
+            twist_min: -0.15,
+            twist_max: 0.15,
+            swing1: 0.25,
+            swing2: 0.25,
+        };
+        let shoulder_joint = rig
+            .joints
+            .iter_mut()
+            .find(|j| j.body == shoulder_body)
+            .unwrap();
+        shoulder_joint.parent_body = clavicle_body;
+        rig.joints.push(JointDef {
+            name: format!("{side}_clavicle"),
+            joint: at,
+            body: clavicle_body,
+            parent_body: chest_body,
+            primary: twist,
+            secondary: twist,
+            hard,
+            soft,
+            soft_stiffness: 10.0,
+            soft_damping: 10.0,
+            muscle: format!("{side}_clavicle"),
+        });
+    }
+    (skeleton, rig)
+}
+
 /// Adds the stand-in character with its feet at `at`, facing `yaw` degrees from +Z,
 /// held in a start pose (joint, property, value) for the whole scene.
 fn person(
@@ -1455,6 +1542,138 @@ pub fn car_hit() -> Project {
     p
 }
 
+/// Car Hit as endorphin's scene sets it up: a 747 kg car, simulated, joined by a strong
+/// JoinBodies to a keyed carrier hidden underground, which drives it into a standing
+/// character at 8 m/s. The bonnet's edge, 0.77 m up, catches the arm hanging at the
+/// character's side and drives it into their ribs; the car carries them on the bonnet
+/// and stops dead when the carrier's keys end at 1.65 s. The character has clavicles,
+/// as endorphin's do (the scene's failing joint was a clavicle).
+///
+/// The join gives way when the carrier stops: stopping 747 kg from 8 m/s at 1e5 N takes
+/// 60 ms and 24 cm, so the lock drifts by design.
+pub fn car_carry() -> Project {
+    let mut p = new_scene("Car carry", 2.0);
+    let mass = 747.0;
+    // Chassis 0.07-0.77 m above the ground, a cabin behind the bonnet.
+    let chassis = Geometry::Box {
+        size: [1.7, 0.7, 4.2],
+    };
+    let cabin = Geometry::Box {
+        size: [1.5, 0.55, 2.0],
+    };
+    let skeleton = SkeletonRef {
+        name: "Car".into(),
+        source: None,
+        joints: vec![Joint::new("body", None, [0.0, 0.42, 0.0])],
+    };
+    let shape = |geometry, position: Vec3| ShapeDef {
+        geometry,
+        frame: Frame {
+            rotation: Quat::IDENTITY.to_array(),
+            position: position.to_array(),
+        },
+        material: "default".into(),
+        collides_with_parent: false,
+        collides_with_siblings: false,
+        collides_with_ancestors: false,
+    };
+    let rig = PhysicsRig {
+        bodies: vec![BodyDef {
+            name: "body".into(),
+            joint: 0,
+            frame: Frame::IDENTITY,
+            mass,
+            inertia: chassis.inertia(mass),
+            shapes: vec![
+                shape(chassis, Vec3::ZERO),
+                shape(cabin, Vec3::new(0.0, 0.6, -0.7)),
+            ],
+        }],
+        joints: Vec::new(),
+        muscle_sets: Vec::new(),
+        isotropic_inertia: true,
+    };
+    let car = add_prop(
+        &mut p,
+        "car",
+        CharacterKind::Prop,
+        (skeleton, rig),
+        SimLevel::Simulated,
+    );
+    let block = Piece::at(
+        Geometry::Box {
+            size: [0.5, 0.5, 0.5],
+        },
+        100.0,
+        Quat::IDENTITY,
+        Vec3::ZERO,
+    );
+    let still = Limits {
+        twist_min: 0.0,
+        twist_max: 0.0,
+        swing1: 0.0,
+        swing2: 0.0,
+    };
+    let no_muscle = Gains {
+        stiffness: 0.0,
+        damping: 0.0,
+        force_limit: 0.0,
+    };
+    let carrier = add_prop(
+        &mut p,
+        "carrier",
+        CharacterKind::Prop,
+        prop_rig(
+            vec![("box", None, Vec3::new(0.0, -1.0, 0.0), block)],
+            still,
+            no_muscle,
+        ),
+        SimLevel::CollisionOnly,
+    );
+    // Both start 4 m behind the character; the carrier's keys end at 1.65 s.
+    motion(
+        &mut p,
+        car,
+        "Place",
+        0,
+        120,
+        false,
+        vec![held("body", Property::PosZ, -4.0)],
+    );
+    motion(
+        &mut p,
+        carrier,
+        "Drive",
+        0,
+        120,
+        false,
+        vec![channel(
+            "box",
+            Property::PosZ,
+            &[(0, -4.0), (99, -4.0 + 8.0 * 1.65)],
+        )],
+    );
+    constrain(
+        &mut p,
+        car,
+        0,
+        120,
+        "JoinBodies",
+        &["car.MetaBodies.body", "carrier.MetaBodies.box"],
+        (STRONG, STRONG),
+    );
+    // Side on to the car, its left arm towards it.
+    add_person(
+        &mut p,
+        "pedestrian",
+        person_rig_with_clavicles(),
+        Vec3::ZERO,
+        90.0,
+        &[],
+    );
+    p
+}
+
 /// Back-Flip-To-Combo (a user's scene, not one of endorphin's samples): a character
 /// stands on a 2.5 m box, weakly locked at the toes until frame 206 and held at the
 /// pelvis against sideways drift and against turning about Y and Z until 305. From frame
@@ -1600,6 +1819,7 @@ mod tests {
             "rotating_floor" => rotating_floor(),
             "turntable" => turntable(),
             "car_hit" => car_hit(),
+            "car_carry" => car_carry(),
             "backflip" => backflip(true),
             "backflip_passive" => backflip(false),
             "balance" => balance_push(1.5, Vec3::Z, true),
@@ -1930,6 +2150,30 @@ mod tests {
     #[test]
     fn car_hit_keeps_joints_together() {
         check(car_hit());
+    }
+
+    /// endorphin's Car Hit: a heavy car joined to a keyed carrier catches the
+    /// character's arm against their ribs, carries them on the bonnet and stops dead.
+    /// The shoulder comes apart by 5.8 cm. The join is meant to give way when
+    /// the carrier stops dead (1e5 N can't stop 747 kg at once), so its drift isn't
+    /// checked.
+    #[test]
+    #[ignore = "fails: the shoulder comes apart by 5.8 cm"]
+    fn car_carry_keeps_joints_together() {
+        let project = car_carry();
+        let report = sweep(&project);
+        println!(
+            "{:<16} {:>4} frames in {:>6.0?}  {report}",
+            project.settings.name,
+            project.settings.range.len() + 1,
+            report.elapsed
+        );
+        assert!(
+            report.ok() && report.buried <= 0.0 && report.stretch < 0.02,
+            "{report}\n{}{}",
+            report.places(),
+            describe(&project)
+        );
     }
 }
 
