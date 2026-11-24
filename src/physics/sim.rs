@@ -491,6 +491,22 @@ fn clip_vec3(clip: &Clip, key: &str) -> Vec3 {
         .unwrap_or(Vec3::ZERO)
 }
 
+/// Skeleton joints that sever events cut, as (character index, skeleton joint index,
+/// first frame cut), for the tests: a cut joint's bone comes apart on purpose.
+#[cfg(test)]
+pub(crate) fn cut_joints(project: &Project) -> Vec<(usize, usize, i32)> {
+    let mut out = Vec::new();
+    for (ci, character) in project.characters.iter().enumerate() {
+        let Some(rig) = &character.physics else {
+            continue;
+        };
+        for sever in plan(project, ci).severs.iter().filter(|s| s.cut) {
+            out.push((ci, rig.joints[sever.joint].joint, sever.start));
+        }
+    }
+    out
+}
+
 /// A lock as the tests see it: bodies as (character index, rig body index).
 #[cfg(test)]
 pub(crate) struct LockSpan {

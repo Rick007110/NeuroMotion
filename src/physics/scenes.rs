@@ -9,7 +9,11 @@
 //! - no non-finite values;
 //! - no simulated body more than 10 cm below the ground (fixed scenery, and bodies
 //!   without collision shapes, aside: those fall through everything, in endorphin too);
-//! - no joint stretched by 5 cm or more (free props have no joint to stretch);
+//!   in a scene without a ground plane, where things may fall as far as they like, no
+//!   body more than 10 cm under the underside of fixed scenery it is beneath (fallen
+//!   through the floor);
+//! - no joint stretched by 5 cm or more (free props have no joint to stretch, and
+//!   joints a sever event cuts none from the frame they are cut);
 //! - no simulated body faster than 40 m/s;
 //! - (stand-ins) no locked body drifting 5 cm or more from where its lock holds it;
 //! - (stand-ins) no body centre inside solid scenery.
@@ -18,7 +22,7 @@ use std::time::{Duration, Instant};
 
 use glam::{Quat, Vec3};
 
-use super::sim::{Simulation, lock_spans, rig_bodies};
+use super::sim::{Simulation, cut_joints, lock_spans, rig_bodies};
 use crate::document::physics::{
     BodyDef, Frame, Gains, Geometry, JointDef, Limits, MuscleGains, MuscleSet, PhysicsRig, ShapeDef,
 };
@@ -32,8 +36,14 @@ use crate::document::{
 #[derive(Debug)]
 pub struct Report {
     pub nan: bool,
-    /// Lowest body centre, m.
+    /// Lowest body centre above the ground plane, m (its height, when the scene has no
+    /// ground plane).
     pub lowest: f32,
+    /// Whether the scene has a ground plane to measure `lowest` against.
+    pub ground: bool,
+    /// Deepest a body centre got under the underside of fixed scenery it is beneath, m,
+    /// in a scene without a ground plane (0 with one).
+    pub under: f32,
     /// Largest change in a skeleton bone's length, m.
     pub stretch: f32,
     /// Fastest body while simulated, m/s.
@@ -43,15 +53,20 @@ pub struct Report {
     pub drift: f32,
     /// Deepest a character's or prop's body centre got inside fixed scenery, m.
     pub buried: f32,
-    /// Where each worst value happened ("character.body @ frame"), in the order above.
-    pub places: [String; 5],
+    /// Where each worst value happened ("character.body @ frame"): lowest, stretch,
+    /// fastest, drift, buried, under.
+    pub places: [String; 6],
     pub elapsed: Duration,
 }
 
 impl Report {
     /// The endorphin sweep's checks.
     pub fn ok(&self) -> bool {
-        !self.nan && self.lowest > -0.1 && self.stretch < 0.05 && self.fastest < 40.0
+        !self.nan
+            && (!self.ground || self.lowest > -0.1)
+            && self.under < 0.1
+            && self.stretch < 0.05
+            && self.fastest < 40.0
     }
 
     /// The sweep's checks, plus locks holding and nothing sinking into scenery.
@@ -69,6 +84,7 @@ impl Report {
             "fastest",
             "lock drift",
             "buried",
+            "under scenery",
         ];
         names
             .iter()
@@ -83,8 +99,10 @@ impl std::fmt::Display for Report {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "lowest body {:>6.3} m  max joint stretch {:.4} m  fastest {:>5.1} m/s  lock drift {:.3} m  buried {:.3} m{}",
+            "lowest body {:>6.3} m{}  under scenery {:.3} m  max joint stretch {:.4} m  fastest {:>5.1} m/s  lock drift {:.3} m  buried {:.3} m{}",
             self.lowest,
+            if self.ground { "" } else { " (no ground)" },
+            self.under,
             self.stretch,
             self.fastest,
             self.drift,
@@ -121,9 +139,13 @@ pub fn measure_frames(
     range: FrameRange,
 ) -> Report {
     let fps = project.settings.fps;
+    let ground = project.physics.ground.as_ref().map(|g| g.height);
+    let cut = cut_joints(project);
     let mut report = Report {
         nan: false,
         lowest: f32::MAX,
+        ground: ground.is_some(),
+        under: 0.0,
         stretch: 0.0,
         fastest: 0.0,
         drift: 0.0,
@@ -188,8 +210,9 @@ pub fn measure_frames(
                 if cf.level == SimLevel::Simulated
                     && body.is_none_or(|b| !fixed(ci, b) && !b.shapes.is_empty())
                 {
-                    if p.y < report.lowest {
-                        report.lowest = p.y;
+                    let height = p.y - ground.unwrap_or(0.0);
+                    if height < report.lowest {
+                        report.lowest = height;
                         report.places[0] = format!("{} @ frame {frame}", body_name(ci, bi));
                     }
                     for &(geometry, r, at) in &scenery {
@@ -197,6 +220,16 @@ pub fn measure_frames(
                         if depth > report.buried {
                             report.buried = depth;
                             report.places[4] = format!("{} @ frame {frame}", body_name(ci, bi));
+                        }
+                        // With a ground, things beneath scenery (a balcony, a beam) are
+                        // usually meant to be there; without one, they fell through it.
+                        let under = match ground {
+                            Some(_) => 0.0,
+                            None => depth_under(geometry, r, at, *p),
+                        };
+                        if under > report.under {
+                            report.under = under;
+                            report.places[5] = format!("{} @ frame {frame}", body_name(ci, bi));
                         }
                     }
                 }
@@ -210,8 +243,12 @@ pub fn measure_frames(
                         .any(|(bi, b)| b.joint == joint && !r.joints.iter().any(|jd| jd.body == bi))
                 })
             };
+            let severed = |joint: usize| {
+                cut.iter()
+                    .any(|&(c, j, start)| (c, j) == (ci, joint) && start <= frame)
+            };
             for (i, j) in skeleton.joints.iter().enumerate() {
-                if let Some(p) = j.parent.filter(|_| !free(i)) {
+                if let Some(p) = j.parent.filter(|_| !free(i) && !severed(i)) {
                     let stretch = bone_stretch(j, &cf.joints, i, p);
                     if stretch > report.stretch {
                         report.stretch = stretch;
@@ -424,6 +461,28 @@ fn depth_inside(geometry: Geometry, rotation: Quat, position: Vec3, point: Vec3)
         }
         Geometry::Box { size } => (Vec3::from(size) * 0.5 - local.abs()).min_element(),
     }
+}
+
+/// How far `point` is under the underside of a placed shape, within its outline seen
+/// from above (0 when it isn't beneath it). "Up" is whichever of the shape's own axes is
+/// closest to the world's, so a tilting floor keeps its top and underside.
+fn depth_under(geometry: Geometry, rotation: Quat, position: Vec3, point: Vec3) -> f32 {
+    let half = match geometry {
+        Geometry::Sphere { radius } => Vec3::splat(radius),
+        Geometry::Capsule { radius, length } => Vec3::new(radius, radius, radius + length * 0.5),
+        Geometry::Cylinder { radius, length } => Vec3::new(radius, radius, length * 0.5),
+        Geometry::Box { size } => Vec3::from(size) * 0.5,
+    };
+    let local = rotation.inverse() * (point - position);
+    let up = rotation.inverse() * Vec3::Y;
+    let axis = (0..3)
+        .max_by(|&a, &b| up[a].abs().total_cmp(&up[b].abs()))
+        .unwrap();
+    let beside = (0..3).any(|i| i != axis && local[i].abs() > half[i]);
+    if beside {
+        return 0.0;
+    }
+    (-half[axis] - local[axis] * up[axis].signum()).max(0.0)
 }
 
 // ---------------------------------------------------------------------------------
@@ -1537,6 +1596,74 @@ pub fn turntable() -> Project {
     p
 }
 
+/// Rotating Floor's last seconds: no ground plane; a long collision-only slab with a
+/// wall at one end tilts 20° about its middle, carrying a character standing near the
+/// low end about 1.7 m below where the ground would be, on the floor all the while.
+pub fn tilting_floor() -> Project {
+    let mut p = new_scene("Tilting floor", 2.0);
+    p.physics.ground = None;
+    let slab = Geometry::Box {
+        size: [4.0, 0.3, 12.0],
+    };
+    let wall = Geometry::Box {
+        size: [4.0, 2.0, 0.2],
+    };
+    let floor = add_prop(
+        &mut p,
+        "floor",
+        CharacterKind::Environment,
+        scenery(&[
+            (slab, Quat::IDENTITY, Vec3::new(0.0, -0.15, 0.0)),
+            (wall, Quat::IDENTITY, Vec3::new(0.0, 1.0, 5.9)),
+        ]),
+        SimLevel::CollisionOnly,
+    );
+    // Positive turns about X lower +Z: the walled end, where the character stands.
+    motion(
+        &mut p,
+        floor,
+        "Tilt",
+        0,
+        120,
+        false,
+        vec![channel("root", Property::RotX, &[(0, 0.0), (60, 20.0)])],
+    );
+    person(&mut p, "dancer", Vec3::new(0.0, 0.0, 5.0), 180.0, &[]);
+    p
+}
+
+/// Heli Leap's jumper: no ground plane; a character runs off the edge of a roof (its
+/// top at y = 0, the building under it) and falls past the building's side.
+pub fn roof_edge() -> Project {
+    let mut p = new_scene("Roof edge", 2.0);
+    p.physics.ground = None;
+    let roof = Geometry::Box {
+        size: [6.0, 1.0, 6.0],
+    };
+    let building = Geometry::Box {
+        size: [5.0, 8.0, 5.0],
+    };
+    add_prop(
+        &mut p,
+        "building",
+        CharacterKind::Environment,
+        scenery(&[
+            (roof, Quat::IDENTITY, Vec3::new(0.0, -0.5, -3.0)),
+            (building, Quat::IDENTITY, Vec3::new(0.0, -5.0, -3.0)),
+        ]),
+        SimLevel::CollisionOnly,
+    );
+    let jumper = person(&mut p, "jumper", Vec3::new(0.0, 0.0, -1.5), 0.0, &[]);
+    let run = vec![
+        channel("hips", Property::PosZ, &[(0, -1.5), (30, 0.5)]),
+        channel("hips", Property::PosY, &[(0, 0.0), (30, 0.1)]),
+    ];
+    motion(&mut p, jumper, "Run", 0, 30, true, run);
+    level(&mut p, jumper, 0, "CollisionOnlyWithInertia");
+    level(&mut p, jumper, 30, "FullPhysics");
+    p
+}
+
 /// Car Hit: a car (collision with momentum) drives through a standing character at
 /// 15 m/s, bumper first.
 pub fn car_hit() -> Project {
@@ -1954,6 +2081,8 @@ mod tests {
             "heli_leap" => heli_leap(),
             "rotating_floor" => rotating_floor(),
             "turntable" => turntable(),
+            "tilting_floor" => tilting_floor(),
+            "roof_edge" => roof_edge(),
             "car_hit" => car_hit(),
             "car_carry" => car_carry(),
             "backflip" => backflip(true),
@@ -2215,6 +2344,48 @@ mod tests {
         // Lying or standing on the disc, not floating above it.
         let height = resting_height(&project, &sim, "dancer");
         assert!(height < 0.1, "dancer rests {height} m above the turntable");
+    }
+
+    /// Without a ground plane, things may go as low as the scenery takes them: a floor
+    /// tilting below where the ground would be, or the void beside a roof.
+    #[test]
+    fn tilting_floor_carries_character_below_zero() {
+        let project = tilting_floor();
+        let sim = check(project.clone());
+        let height = resting_height(&project, &sim, "dancer");
+        assert!(height < -1.0, "the dancer only went down to {height} m");
+    }
+
+    #[test]
+    fn jumper_falls_past_the_roof_edge() {
+        let project = roof_edge();
+        let sim = check(project.clone());
+        let height = resting_height(&project, &sim, "jumper");
+        assert!(height < -5.0, "the jumper only fell to {height} m");
+    }
+
+    /// The check that replaces "below the ground" in scenes without one still sees a
+    /// body fall through the floor: Rotating Floor's dancer, started under the slab.
+    #[test]
+    fn sweep_sees_a_body_under_the_floor_without_ground() {
+        let mut project = rotating_floor();
+        let dancer = project.characters.last().unwrap().id;
+        let track = project.tracks_of(dancer).next().unwrap().id;
+        let start = project
+            .clips
+            .iter_mut()
+            .find(|c| c.props.track == track)
+            .unwrap();
+        for channel in &mut start.channels {
+            if channel.joint == "hips" && channel.property == Property::PosY {
+                channel.keys[0].value = -1.0;
+            }
+        }
+        let report = sweep(&project);
+        assert!(
+            !report.ok() && report.under > 0.5,
+            "a dancer under the floor passed: {report}"
+        );
     }
 
     /// A rope hanging straight down from a Lock with a heavy weight on the end stays
