@@ -21,6 +21,7 @@ pub const TRANSITION: &str = "Transition";
 pub const ACTIVE_POSE: &str = "Active pose";
 pub const CONSTRAINT: &str = "Constraint";
 pub const BEHAVIOUR: &str = "Behaviour";
+pub const SEVER: &str = "Sever";
 
 /// Setting keys, as imported from endorphin and read by the simulation.
 pub mod keys {
@@ -45,6 +46,9 @@ pub mod keys {
     pub const ANGULAR_STRENGTH: &str = "angularStrength";
     /// Behaviour: endorphin's behaviour name.
     pub const BEHAVIOUR_NAME: &str = "behaviourName";
+    /// Sever: `Cut` or `MuscleOff`. A best guess at endorphin's name; see
+    /// docs/endorphin-formats.md.
+    pub const SEVER_TYPE: &str = "severType";
 }
 
 /// The keys each event's typed controls cover; anything else is shown as-is.
@@ -61,6 +65,7 @@ pub fn edited_keys(event: &str) -> &'static [&'static str] {
             keys::ANGULAR_STRENGTH,
         ],
         BEHAVIOUR => &[keys::BEHAVIOUR_NAME],
+        SEVER => &[keys::SEVER_TYPE, keys::TARGETS],
         _ => &[],
     }
 }
@@ -74,16 +79,18 @@ pub enum NewClip {
     Transition,
     ActivePose,
     Constraint,
+    Sever,
 }
 
 impl NewClip {
-    pub const ALL: [NewClip; 6] = [
+    pub const ALL: [NewClip; 7] = [
         NewClip::Motion,
         NewClip::Simulation,
         NewClip::Force,
         NewClip::Transition,
         NewClip::ActivePose,
         NewClip::Constraint,
+        NewClip::Sever,
     ];
 
     pub fn label(self) -> &'static str {
@@ -94,6 +101,7 @@ impl NewClip {
             NewClip::Transition => "Transition",
             NewClip::ActivePose => "Active pose",
             NewClip::Constraint => "Constraint",
+            NewClip::Sever => "Sever",
         }
     }
 
@@ -107,6 +115,7 @@ impl NewClip {
             NewClip::Transition => "Blends the simulation back to the animation",
             NewClip::ActivePose => "Muscles pull towards the pose at the playhead",
             NewClip::Constraint => "Locks bodies in place or joins them together",
+            NewClip::Sever => "Cuts a joint, or switches its muscle off, for the rest of the scene",
         }
     }
 
@@ -123,6 +132,7 @@ impl NewClip {
             NewClip::Transition => TRANSITION,
             NewClip::ActivePose => ACTIVE_POSE,
             NewClip::Constraint => CONSTRAINT,
+            NewClip::Sever => SEVER,
         })
     }
 
@@ -135,6 +145,7 @@ impl NewClip {
             NewClip::Transition => "Transitions",
             NewClip::ActivePose => "Active poses",
             NewClip::Constraint => "Constraints",
+            NewClip::Sever => "Severs",
         }
     }
 }
@@ -228,6 +239,22 @@ pub fn template(
                 Vec3::splat(DEFAULT_LOCK_STRENGTH),
             );
             ("Lock", seconds(1.0), Vec::new())
+        }
+        NewClip::Sever => {
+            source.insert(
+                keys::SEVER_TYPE.to_owned(),
+                SeverType::Cut.name().to_owned(),
+            );
+            // A limb, so there is something to cut: the first body that hangs from a joint.
+            let target = character.physics.as_ref().and_then(|rig| {
+                let joint = rig.joints.first()?;
+                Some(BodyRef {
+                    character: character.name.clone(),
+                    body: rig.bodies.get(joint.body)?.name.clone(),
+                })
+            });
+            set_targets(&mut source, &target.into_iter().collect::<Vec<_>>());
+            ("Sever", 1, Vec::new())
         }
     };
     ClipTemplate {
@@ -418,5 +445,42 @@ impl LockType {
             "JoinBodies" | "LockWithParent" => LockType::Join,
             _ => return None,
         })
+    }
+}
+
+/// What a sever event does to its joint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SeverType {
+    /// The joint is removed: the two parts move on separately.
+    Cut,
+    /// The joint stays, but its muscle is switched off.
+    MuscleOff,
+}
+
+impl SeverType {
+    pub const ALL: [SeverType; 2] = [SeverType::Cut, SeverType::MuscleOff];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SeverType::Cut => "Cut the joint",
+            SeverType::MuscleOff => "Muscle off (joint stays)",
+        }
+    }
+
+    /// The value stored under [`keys::SEVER_TYPE`].
+    pub fn name(self) -> &'static str {
+        match self {
+            SeverType::Cut => "Cut",
+            SeverType::MuscleOff => "MuscleOff",
+        }
+    }
+
+    /// Anything but `MuscleOff` cuts, as the simulation reads it.
+    pub fn from_name(value: &str) -> Self {
+        if value.eq_ignore_ascii_case("MuscleOff") {
+            SeverType::MuscleOff
+        } else {
+            SeverType::Cut
+        }
     }
 }
