@@ -8,14 +8,20 @@ use glam::{Quat, Vec3};
 use super::bake::bake_channels;
 use super::edit::{Document, Edit};
 use super::events::{self, NewClip};
-use super::model::{CharacterId, Channel, Clip, ClipId, ClipKind, ClipProps, Interp, Keyframe, Track, TrackId};
+use super::model::{
+    Channel, CharacterId, Clip, ClipId, ClipKind, ClipProps, Interp, Keyframe, Track, TrackId,
+};
 use super::physics::SimLevel;
 
 impl Document {
     /// Keys a channel at a clip-local frame with the value its curve already has there.
     /// Returns false if the clip or channel doesn't exist.
     pub fn insert_key(&mut self, clip: ClipId, channel: usize, frame: i32) -> bool {
-        let Some(ch) = self.project.clip(clip).and_then(|c| c.channels.get(channel)) else {
+        let Some(ch) = self
+            .project
+            .clip(clip)
+            .and_then(|c| c.channels.get(channel))
+        else {
             return false;
         };
         let key = Keyframe {
@@ -36,7 +42,11 @@ impl Document {
     }
 
     pub fn remove_key(&mut self, clip: ClipId, channel: usize, frame: i32) -> bool {
-        let Some(ch) = self.project.clip(clip).and_then(|c| c.channels.get(channel)) else {
+        let Some(ch) = self
+            .project
+            .clip(clip)
+            .and_then(|c| c.channels.get(channel))
+        else {
             return false;
         };
         let mut updated = ch.clone();
@@ -64,7 +74,11 @@ impl Document {
         label: &str,
         continuous: bool,
     ) -> bool {
-        let Some(ch) = self.project.clip(clip).and_then(|c| c.channels.get(channel)) else {
+        let Some(ch) = self
+            .project
+            .clip(clip)
+            .and_then(|c| c.channels.get(channel))
+        else {
             return false;
         };
         if key.frame != frame && ch.key(key.frame).is_some() {
@@ -86,7 +100,12 @@ impl Document {
     }
 
     /// Adds a new clip (as one undo step) and returns its id.
-    pub fn insert_clip(&mut self, props: ClipProps, kind: ClipKind, channels: Vec<Channel>) -> ClipId {
+    pub fn insert_clip(
+        &mut self,
+        props: ClipProps,
+        kind: ClipKind,
+        channels: Vec<Channel>,
+    ) -> ClipId {
         let clip = Clip {
             id: self.project.alloc_id(),
             props,
@@ -109,7 +128,14 @@ impl Document {
         copy.props.start = copy.props.end();
         copy.props.name = format!("{} copy", copy.props.name);
         let id = copy.id;
-        self.apply("Duplicate clip", Edit::InsertClip { index: index + 1, clip: copy }, false);
+        self.apply(
+            "Duplicate clip",
+            Edit::InsertClip {
+                index: index + 1,
+                clip: copy,
+            },
+            false,
+        );
         Some(id)
     }
 
@@ -126,7 +152,9 @@ impl Document {
     /// layer), as one undo step. Returns its id.
     pub fn add_track(&mut self, character: CharacterId, name: &str) -> TrackId {
         let edit = self.insert_track_edit(character, name);
-        let Edit::InsertTrack { track, .. } = &edit else { unreachable!() };
+        let Edit::InsertTrack { track, .. } = &edit else {
+            unreachable!()
+        };
         let id = track.id;
         self.apply("Add track", edit, false);
         id
@@ -145,9 +173,15 @@ impl Document {
             .enumerate()
             .rev()
             .filter(|(_, c)| c.props.track == track)
-            .map(|(index, clip)| Edit::RemoveClip { index, clip: clip.clone() })
+            .map(|(index, clip)| Edit::RemoveClip {
+                index,
+                clip: clip.clone(),
+            })
             .collect();
-        edits.push(Edit::RemoveTrack { index, track: self.project.tracks[index].clone() });
+        edits.push(Edit::RemoveTrack {
+            index,
+            track: self.project.tracks[index].clone(),
+        });
         self.apply("Delete track", Edit::Batch(edits), false);
         true
     }
@@ -156,7 +190,11 @@ impl Document {
     /// range, usually from the simulation) into keys on a new top track named "Baked",
     /// then makes the character play its keys: it starts animated and its event clips
     /// (simulation switches, forces, ...) are disabled. One undo step.
-    pub fn bake_motion(&mut self, character: CharacterId, frames: &[Vec<(Quat, Vec3)>]) -> Option<(TrackId, ClipId)> {
+    pub fn bake_motion(
+        &mut self,
+        character: CharacterId,
+        frames: &[Vec<(Quat, Vec3)>],
+    ) -> Option<(TrackId, ClipId)> {
         let project = &self.project;
         let skeleton = &project.character(character)?.skeleton;
         if frames.is_empty() || frames.iter().any(|f| f.len() != skeleton.joints.len()) {
@@ -173,17 +211,36 @@ impl Document {
             .map(|c| Edit::ClipProps {
                 clip: c.id,
                 before: c.props.clone(),
-                after: ClipProps { enabled: false, ..c.props.clone() },
+                after: ClipProps {
+                    enabled: false,
+                    ..c.props.clone()
+                },
             })
             .collect();
-        edits.push(Edit::CharacterLevel { character, before: level, after: SimLevel::Animated });
+        edits.push(Edit::CharacterLevel {
+            character,
+            before: level,
+            after: SimLevel::Animated,
+        });
 
         let name = (1..)
-            .map(|n| if n == 1 { "Baked".to_owned() } else { format!("Baked {n}") })
+            .map(|n| {
+                if n == 1 {
+                    "Baked".to_owned()
+                } else {
+                    format!("Baked {n}")
+                }
+            })
             .find(|n| !project.tracks_of(character).any(|t| t.name == *n))
             .unwrap_or_default();
         let insert = self.insert_track_edit(character, &name);
-        let Edit::InsertTrack { track: Track { id: track, .. }, .. } = &insert else { unreachable!() };
+        let Edit::InsertTrack {
+            track: Track { id: track, .. },
+            ..
+        } = &insert
+        else {
+            unreachable!()
+        };
         let track = *track;
         let clip = Clip {
             id: self.project.alloc_id(),
@@ -203,7 +260,10 @@ impl Document {
         };
         let id = clip.id;
         edits.push(insert);
-        edits.push(Edit::InsertClip { index: self.project.clips.len(), clip });
+        edits.push(Edit::InsertClip {
+            index: self.project.clips.len(),
+            clip,
+        });
         self.apply("Bake simulation", Edit::Batch(edits), false);
         Some((track, id))
     }
@@ -224,19 +284,30 @@ impl Document {
         let owner = project.character(character)?;
         let template = events::template(kind, project, owner, pose);
         let mut edits = Vec::new();
-        let track = match track.filter(|t| project.track(*t).is_some_and(|t| t.character == character)) {
-            Some(track) => track,
-            None => match project.tracks_of(character).filter(|t| t.name == kind.track_name()).last() {
-                Some(existing) => existing.id,
-                None => {
-                    let insert = self.insert_track_edit(character, kind.track_name());
-                    let Edit::InsertTrack { track: Track { id, .. }, .. } = &insert else { unreachable!() };
-                    let id = *id;
-                    edits.push(insert);
-                    id
-                }
-            },
-        };
+        let track =
+            match track.filter(|t| project.track(*t).is_some_and(|t| t.character == character)) {
+                Some(track) => track,
+                None => match project
+                    .tracks_of(character)
+                    .filter(|t| t.name == kind.track_name())
+                    .last()
+                {
+                    Some(existing) => existing.id,
+                    None => {
+                        let insert = self.insert_track_edit(character, kind.track_name());
+                        let Edit::InsertTrack {
+                            track: Track { id, .. },
+                            ..
+                        } = &insert
+                        else {
+                            unreachable!()
+                        };
+                        let id = *id;
+                        edits.push(insert);
+                        id
+                    }
+                },
+            };
         let clip = Clip {
             id: self.project.alloc_id(),
             props: ClipProps {
@@ -254,8 +325,15 @@ impl Document {
             source: template.source,
         };
         let id = clip.id;
-        edits.push(Edit::InsertClip { index: self.project.clips.len(), clip });
-        self.apply(&format!("Add {}", kind.label().to_lowercase()), Edit::Batch(edits), false);
+        edits.push(Edit::InsertClip {
+            index: self.project.clips.len(),
+            clip,
+        });
+        self.apply(
+            &format!("Add {}", kind.label().to_lowercase()),
+            Edit::Batch(edits),
+            false,
+        );
         Some(id)
     }
 
@@ -267,7 +345,12 @@ impl Document {
             .iter()
             .rposition(|t| t.character == character)
             .map_or(project.tracks.len(), |i| i + 1);
-        let track = Track { id: self.project.alloc_id(), name: name.to_owned(), character, muted: false };
+        let track = Track {
+            id: self.project.alloc_id(),
+            name: name.to_owned(),
+            character,
+            muted: false,
+        };
         Edit::InsertTrack { index, track }
     }
 }

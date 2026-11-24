@@ -25,7 +25,11 @@ impl Behaviour {
     /// The behaviour for an event's name (endorphin's `behaviourName`), ignoring case,
     /// spaces and punctuation; `None` if NeuroMotion has none of that name.
     pub fn from_name(name: &str) -> Option<Self> {
-        let key: String = name.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect();
+        let key: String = name
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect();
         match key.as_str() {
             "balance" => Some(Behaviour::Balance),
             "catchfall" => Some(Behaviour::CatchFall),
@@ -78,7 +82,11 @@ impl Layout {
         let mut joint_of = vec![None; n];
         let mut children = vec![Vec::new(); n];
         for (j, jd) in rig.joints.iter().enumerate() {
-            if jd.body < n && jd.parent_body < n && jd.body != jd.parent_body && jd.joint < rest_joints.len() {
+            if jd.body < n
+                && jd.parent_body < n
+                && jd.body != jd.parent_body
+                && jd.joint < rest_joints.len()
+            {
                 joint_of[jd.body] = Some(j);
                 children[jd.parent_body].push(jd.body);
             }
@@ -89,15 +97,26 @@ impl Layout {
         let pivot = |b: usize| joint_of[b].map_or(at(b), |j| rest_joints[rig.joints[j].joint].1);
         // Extremes of a branch at rest, by some measure of body position. `depth` stops a
         // malformed rig whose joints loop from recursing forever.
-        fn extreme(children: &[Vec<usize>], b: usize, measure: &dyn Fn(usize) -> f32, depth: usize) -> f32 {
-            let below = children[b].iter().filter(|_| depth > 0).map(|&c| extreme(children, c, measure, depth - 1));
+        fn extreme(
+            children: &[Vec<usize>],
+            b: usize,
+            measure: &dyn Fn(usize) -> f32,
+            depth: usize,
+        ) -> f32 {
+            let below = children[b]
+                .iter()
+                .filter(|_| depth > 0)
+                .map(|&c| extreme(children, c, measure, depth - 1));
             below.fold(measure(b), f32::max)
         }
         let extreme = |b: usize, measure: &dyn Fn(usize) -> f32| extreme(&children, b, measure, n);
         // Follows a branch towards its extreme, one body at a time.
         let follow = |start: usize, measure: &dyn Fn(usize) -> f32| {
             let mut chain = vec![start];
-            while let Some(&next) = children[*chain.last().unwrap()].iter().max_by(|&&a, &&b| extreme(a, measure).total_cmp(&extreme(b, measure))) {
+            while let Some(&next) = children[*chain.last().unwrap()]
+                .iter()
+                .max_by(|&&a, &&b| extreme(a, measure).total_cmp(&extreme(b, measure)))
+            {
                 if chain.contains(&next) {
                     break;
                 }
@@ -114,11 +133,19 @@ impl Layout {
             .take(2)
             .filter_map(|&thigh| {
                 let chain = follow(thigh, &low);
-                (chain.len() >= 3).then(|| Limb { upper: chain[0], lower: chain[1], end: chain[2] })
+                (chain.len() >= 3).then(|| Limb {
+                    upper: chain[0],
+                    lower: chain[1],
+                    end: chain[2],
+                })
             })
             .collect();
 
-        let trunk = branches.iter().skip(2).copied().max_by(|&a, &b| extreme(a, &high).total_cmp(&extreme(b, &high)));
+        let trunk = branches
+            .iter()
+            .skip(2)
+            .copied()
+            .max_by(|&a, &b| extreme(a, &high).total_cmp(&extreme(b, &high)));
         let mut arms = Vec::new();
         let mut chest = None;
         if let Some(trunk) = trunk {
@@ -127,7 +154,12 @@ impl Layout {
             let side = |b: usize| (at(b) - axis).with_y(0.0).length();
             let mut off: Vec<(f32, usize, usize)> = spine
                 .iter()
-                .flat_map(|&s| children[s].iter().filter(|c| !spine.contains(c)).map(move |&c| (s, c)))
+                .flat_map(|&s| {
+                    children[s]
+                        .iter()
+                        .filter(|c| !spine.contains(c))
+                        .map(move |&c| (s, c))
+                })
                 .map(|(s, c)| (extreme(c, &side), s, c))
                 .collect();
             off.sort_by(|a, b| b.0.total_cmp(&a.0));
@@ -135,17 +167,35 @@ impl Layout {
                 let start = pivot(c);
                 let chain = follow(c, &|b| at(b).distance(start));
                 // Segment lengths, joint to next joint; pick the longest consecutive pair.
-                let length = |i: usize| chain.get(i + 1).map_or(0.0, |&next| pivot(chain[i]).distance(pivot(next)));
-                let best = (0..chain.len().saturating_sub(2)).max_by(|&a, &b| (length(a) + length(a + 1)).total_cmp(&(length(b) + length(b + 1))));
+                let length = |i: usize| {
+                    chain
+                        .get(i + 1)
+                        .map_or(0.0, |&next| pivot(chain[i]).distance(pivot(next)))
+                };
+                let best = (0..chain.len().saturating_sub(2)).max_by(|&a, &b| {
+                    (length(a) + length(a + 1)).total_cmp(&(length(b) + length(b + 1)))
+                });
                 if let Some(i) = best {
-                    arms.push(Limb { upper: chain[i], lower: chain[i + 1], end: chain[i + 2] });
+                    arms.push(Limb {
+                        upper: chain[i],
+                        lower: chain[i + 1],
+                        end: chain[i + 2],
+                    });
                     chest.get_or_insert(s);
                 }
             }
         }
         let pelvis_up = rest[pelvis].0.inverse() * Vec3::Y;
         let pelvis_side = rest[pelvis].0.inverse() * Vec3::X;
-        Some(Layout { pelvis, pelvis_up, pelvis_side, chest, legs, arms, joint_of })
+        Some(Layout {
+            pelvis,
+            pelvis_up,
+            pelvis_side,
+            chest,
+            legs,
+            arms,
+            joint_of,
+        })
     }
 }
 
@@ -175,30 +225,45 @@ impl Drive<'_> {
     /// Where the joint moving body `b` is.
     fn pivot(&self, b: usize) -> Vec3 {
         let body = self.body(b);
-        self.joint(b).map_or(body.position, |(_, j)| body.position + body.rotation * j.anchor_child)
+        self.joint(b).map_or(body.position, |(_, j)| {
+            body.position + body.rotation * j.anchor_child
+        })
     }
 
     /// Rotation of the body the joint moving `b` hangs from.
     fn parent_rotation(&self, b: usize) -> Quat {
-        self.layout.joint_of[b].map_or(Quat::IDENTITY, |j| self.body(self.rig.joints[j].parent_body).rotation)
+        self.layout.joint_of[b].map_or(Quat::IDENTITY, |j| {
+            self.body(self.rig.joints[j].parent_body).rotation
+        })
     }
 
     /// Sets the muscle moving `b` to bring its body and its parent to these world rotations.
     fn aim(&mut self, b: usize, parent: Quat, child: Quat) {
         if let Some((j, joint)) = self.joint(b) {
-            let target = ((parent * joint.drive_parent).inverse() * (child * joint.drive_child)).normalize();
+            let target =
+                ((parent * joint.drive_parent).inverse() * (child * joint.drive_child)).normalize();
             self.targets[j] = target;
         }
     }
 
     /// Gains from a named muscle preset (falling back to the rig's first), scaled.
     fn preset(&mut self, name: &str, scale: f32, bodies: impl Iterator<Item = usize>) {
-        let set = self.rig.muscle_set(name).or_else(|| self.rig.muscle_sets.first());
-        let scaled = |g: Gains| Gains { stiffness: g.stiffness * scale, damping: g.damping * scale, force_limit: g.force_limit * scale };
+        let set = self
+            .rig
+            .muscle_set(name)
+            .or_else(|| self.rig.muscle_sets.first());
+        let scaled = |g: Gains| Gains {
+            stiffness: g.stiffness * scale,
+            damping: g.damping * scale,
+            force_limit: g.force_limit * scale,
+        };
         for b in bodies {
             if let Some(j) = self.layout.joint_of[b] {
                 let g = set.map_or(STEADY, |s| s.gains(&self.rig.joints[j].muscle));
-                self.gains[j] = MuscleGains { twist: scaled(g.twist), swing: scaled(g.swing) };
+                self.gains[j] = MuscleGains {
+                    twist: scaled(g.twist),
+                    swing: scaled(g.swing),
+                };
             }
         }
     }
@@ -221,12 +286,20 @@ impl Drive<'_> {
         if legs.is_empty() {
             return flat(self.body(self.layout.pelvis).position);
         }
-        legs.iter().map(|l| flat(self.body(l.end).position)).sum::<Vec3>() / legs.len() as f32
+        legs.iter()
+            .map(|l| flat(self.body(l.end).position))
+            .sum::<Vec3>()
+            / legs.len() as f32
     }
 
     /// Ground height under the character: the ground plane, else its lowest foot.
     fn ground(&self) -> f32 {
-        let feet = self.layout.legs.iter().map(|l| self.body(l.end).position.y).fold(f32::MAX, f32::min);
+        let feet = self
+            .layout
+            .legs
+            .iter()
+            .map(|l| self.body(l.end).position.y)
+            .fold(f32::MAX, f32::min);
         self.world.ground.map_or(feet, |(h, _)| h)
     }
 
@@ -237,8 +310,16 @@ impl Drive<'_> {
 
 /// Used when a rig has no muscle presets.
 const STEADY: MuscleGains = MuscleGains {
-    twist: Gains { stiffness: 1000.0, damping: 500.0, force_limit: 1000.0 },
-    swing: Gains { stiffness: 1000.0, damping: 500.0, force_limit: 1000.0 },
+    twist: Gains {
+        stiffness: 1000.0,
+        damping: 500.0,
+        force_limit: 1000.0,
+    },
+    swing: Gains {
+        stiffness: 1000.0,
+        damping: 500.0,
+        force_limit: 1000.0,
+    },
 };
 
 fn flat(v: Vec3) -> Vec3 {
@@ -271,12 +352,15 @@ fn balance(d: &mut Drive) {
     let shift = (support - flat(com) - heading * 2.0).clamp_length_max(MAX_SHIFT);
 
     let pelvis = d.body(d.layout.pelvis).rotation;
-    let upright = Quat::from_rotation_arc((pelvis * d.layout.pelvis_up).normalize(), Vec3::Y) * pelvis;
+    let upright =
+        Quat::from_rotation_arc((pelvis * d.layout.pelvis_up).normalize(), Vec3::Y) * pelvis;
     let side = flat(upright * d.layout.pelvis_side).normalize_or_zero();
     let sideways = side * shift.dot(side);
     for leg in legs {
         let (hip, ankle) = (d.pivot(leg.upper), d.pivot(leg.end));
-        let lean = |by: Vec3| Quat::from_rotation_arc((hip - ankle).normalize(), (hip + by - ankle).normalize());
+        let lean = |by: Vec3| {
+            Quat::from_rotation_arc((hip - ankle).normalize(), (hip + by - ankle).normalize())
+        };
         let shin = lean(shift) * d.body(leg.lower).rotation;
         let thigh = lean(sideways) * d.body(leg.upper).rotation;
         let foot = d.body(leg.end).rotation;
@@ -298,9 +382,15 @@ const REACH: f32 = 1.5;
 fn catch_fall(d: &mut Drive) {
     let layout = d.layout;
     let (arms, legs) = (layout.arms.clone(), layout.legs.clone());
-    let Some(chest) = layout.chest.filter(|_| !arms.is_empty()) else { return };
+    let Some(chest) = layout.chest.filter(|_| !arms.is_empty()) else {
+        return;
+    };
     d.preset("Normal", 1.0, d.all_bodies());
-    d.preset("Normal", 0.2, legs.iter().flat_map(|l| [l.upper, l.lower, l.end]));
+    d.preset(
+        "Normal",
+        0.2,
+        legs.iter().flat_map(|l| [l.upper, l.lower, l.end]),
+    );
     d.preset("Strong", 1.0, arms.iter().flat_map(|a| [a.upper, a.lower]));
 
     let ground = d.ground();
@@ -308,8 +398,14 @@ fn catch_fall(d: &mut Drive) {
     let support = d.support();
     let chest_at = d.body(chest).position;
     let lean = flat(com) - support;
-    let heading = if flat(vel).length() > 0.3 { flat(vel) } else { lean };
-    let Some(dir) = heading.try_normalize() else { return };
+    let heading = if flat(vel).length() > 0.3 {
+        flat(vel)
+    } else {
+        lean
+    };
+    let Some(dir) = heading.try_normalize() else {
+        return;
+    };
     let landing = support + dir * (chest_at.y - ground).max(0.3) * REACH;
 
     for arm in arms {
@@ -320,8 +416,10 @@ fn catch_fall(d: &mut Drive) {
         let hand = (landing + side).with_y(ground + 0.05);
         let want = (hand - shoulder).normalize();
         let elbow = d.pivot(arm.lower);
-        let upper = Quat::from_rotation_arc((elbow - shoulder).normalize(), want) * d.body(arm.upper).rotation;
-        let lower = Quat::from_rotation_arc((d.pivot(arm.end) - elbow).normalize(), want) * d.body(arm.lower).rotation;
+        let upper = Quat::from_rotation_arc((elbow - shoulder).normalize(), want)
+            * d.body(arm.upper).rotation;
+        let lower = Quat::from_rotation_arc((d.pivot(arm.end) - elbow).normalize(), want)
+            * d.body(arm.lower).rotation;
         let parent = d.parent_rotation(arm.upper);
         d.aim(arm.upper, parent, upper);
         d.aim(arm.lower, upper, lower);
@@ -336,8 +434,14 @@ mod tests {
     #[test]
     fn names_match_endorphins() {
         assert_eq!(Behaviour::from_name("Balance"), Some(Behaviour::Balance));
-        assert_eq!(Behaviour::from_name("CatchFall"), Some(Behaviour::CatchFall));
-        assert_eq!(Behaviour::from_name("catch fall"), Some(Behaviour::CatchFall));
+        assert_eq!(
+            Behaviour::from_name("CatchFall"),
+            Some(Behaviour::CatchFall)
+        );
+        assert_eq!(
+            Behaviour::from_name("catch fall"),
+            Some(Behaviour::CatchFall)
+        );
         assert_eq!(Behaviour::from_name("Writhe"), None);
     }
 
@@ -346,7 +450,10 @@ mod tests {
     fn looping_rig_does_not_hang() {
         let skeleton = humanoid_skeleton();
         let mut rig = humanoid_rig(&skeleton);
-        let (knee, ankle) = (rig.body_index("l_knee").unwrap(), rig.body_index("l_ankle").unwrap());
+        let (knee, ankle) = (
+            rig.body_index("l_knee").unwrap(),
+            rig.body_index("l_ankle").unwrap(),
+        );
         let mut back = rig.joints.iter().find(|j| j.body == ankle).unwrap().clone();
         (back.body, back.parent_body) = (knee, ankle);
         rig.joints.push(back);
@@ -361,11 +468,31 @@ mod tests {
         let name = |b: usize| rig.bodies[b].name.as_str();
         assert_eq!(name(layout.pelvis), "hips");
         assert_eq!(layout.chest.map(name), Some("chest"));
-        let mut legs: Vec<_> = layout.legs.iter().map(|l| [name(l.upper), name(l.lower), name(l.end)]).collect();
+        let mut legs: Vec<_> = layout
+            .legs
+            .iter()
+            .map(|l| [name(l.upper), name(l.lower), name(l.end)])
+            .collect();
         legs.sort();
-        assert_eq!(legs, [["l_hip", "l_knee", "l_ankle"], ["r_hip", "r_knee", "r_ankle"]]);
-        let mut arms: Vec<_> = layout.arms.iter().map(|a| [name(a.upper), name(a.lower), name(a.end)]).collect();
+        assert_eq!(
+            legs,
+            [
+                ["l_hip", "l_knee", "l_ankle"],
+                ["r_hip", "r_knee", "r_ankle"]
+            ]
+        );
+        let mut arms: Vec<_> = layout
+            .arms
+            .iter()
+            .map(|a| [name(a.upper), name(a.lower), name(a.end)])
+            .collect();
         arms.sort();
-        assert_eq!(arms, [["l_shoulder", "l_elbow", "l_wrist"], ["r_shoulder", "r_elbow", "r_wrist"]]);
+        assert_eq!(
+            arms,
+            [
+                ["l_shoulder", "l_elbow", "l_wrist"],
+                ["r_shoulder", "r_elbow", "r_wrist"]
+            ]
+        );
     }
 }

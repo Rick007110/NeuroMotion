@@ -41,8 +41,12 @@ pub enum SimLevel {
 }
 
 impl SimLevel {
-    pub const ALL: [SimLevel; 4] =
-        [SimLevel::Animated, SimLevel::CollisionOnly, SimLevel::CollisionWithMomentum, SimLevel::Simulated];
+    pub const ALL: [SimLevel; 4] = [
+        SimLevel::Animated,
+        SimLevel::CollisionOnly,
+        SimLevel::CollisionWithMomentum,
+        SimLevel::Simulated,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -58,7 +62,9 @@ impl SimLevel {
         Some(match value {
             "NoPhysics" | "No Simulation" => SimLevel::Animated,
             "CollisionOnly" | "Collision Only" => SimLevel::CollisionOnly,
-            "CollisionOnlyWithInertia" | "Collision With Momentum" => SimLevel::CollisionWithMomentum,
+            "CollisionOnlyWithInertia" | "Collision With Momentum" => {
+                SimLevel::CollisionWithMomentum
+            }
             "FullPhysics" | "Full Simulation" => SimLevel::Simulated,
             _ => return None,
         })
@@ -132,7 +138,9 @@ impl Geometry {
         use std::f32::consts::PI;
         match *self {
             Geometry::Sphere { radius } => 4.0 / 3.0 * PI * radius.powi(3),
-            Geometry::Capsule { radius, length } => PI * radius * radius * (length + 4.0 / 3.0 * radius),
+            Geometry::Capsule { radius, length } => {
+                PI * radius * radius * (length + 4.0 / 3.0 * radius)
+            }
             Geometry::Cylinder { radius, length } => PI * radius * radius * length,
             Geometry::Box { size } => size[0] * size[1] * size[2],
         }
@@ -148,7 +156,11 @@ impl Geometry {
             }
             Geometry::Box { size: [x, y, z] } => {
                 let k = mass / 12.0;
-                [k * (y * y + z * z), k * (x * x + z * z), k * (x * x + y * y)]
+                [
+                    k * (y * y + z * z),
+                    k * (x * x + z * z),
+                    k * (x * x + y * y),
+                ]
             }
         }
     }

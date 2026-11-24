@@ -32,9 +32,15 @@ const KTIME_PER_SECOND: f64 = 46_186_158_000.0;
 /// Fixed creation time and the file id and footer bytes that go with it; FBX readers
 /// check that the three agree, and a fixed time keeps exports reproducible.
 const CREATION_TIME: &str = "1970-01-01 10:00:00:000";
-const FILE_ID: [u8; 16] = [0x28, 0xb3, 0x2a, 0xeb, 0xb6, 0x24, 0xcc, 0xc2, 0xbf, 0xc8, 0xb0, 0x2a, 0xa9, 0x2b, 0xfc, 0xf1];
-const FOOTER_ID: [u8; 16] = [0xfa, 0xbc, 0xab, 0x09, 0xd0, 0xc8, 0xd4, 0x66, 0xb1, 0x76, 0xfb, 0x83, 0x1c, 0xf7, 0x26, 0x7e];
-const FOOTER_MAGIC: [u8; 16] = [0xf8, 0x5a, 0x8c, 0x6a, 0xde, 0xf5, 0xd9, 0x7e, 0xec, 0xe9, 0x0c, 0xe3, 0x75, 0x8f, 0x29, 0x0b];
+const FILE_ID: [u8; 16] = [
+    0x28, 0xb3, 0x2a, 0xeb, 0xb6, 0x24, 0xcc, 0xc2, 0xbf, 0xc8, 0xb0, 0x2a, 0xa9, 0x2b, 0xfc, 0xf1,
+];
+const FOOTER_ID: [u8; 16] = [
+    0xfa, 0xbc, 0xab, 0x09, 0xd0, 0xc8, 0xd4, 0x66, 0xb1, 0x76, 0xfb, 0x83, 0x1c, 0xf7, 0x26, 0x7e,
+];
+const FOOTER_MAGIC: [u8; 16] = [
+    0xf8, 0x5a, 0x8c, 0x6a, 0xde, 0xf5, 0xd9, 0x7e, 0xec, 0xe9, 0x0c, 0xe3, 0x75, 0x8f, 0x29, 0x0b,
+];
 const TAKE: &str = "Take 001";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -57,12 +63,23 @@ impl Encoding {
     }
 }
 
-pub fn save(path: &Path, skeleton: &SkeletonRef, motion: &Motion, units: Units, encoding: Encoding) -> Result<(), IoError> {
+pub fn save(
+    path: &Path,
+    skeleton: &SkeletonRef,
+    motion: &Motion,
+    units: Units,
+    encoding: Encoding,
+) -> Result<(), IoError> {
     std::fs::write(path, to_bytes(skeleton, motion, units, encoding))?;
     Ok(())
 }
 
-pub fn to_bytes(skeleton: &SkeletonRef, motion: &Motion, units: Units, encoding: Encoding) -> Vec<u8> {
+pub fn to_bytes(
+    skeleton: &SkeletonRef,
+    motion: &Motion,
+    units: Units,
+    encoding: Encoding,
+) -> Vec<u8> {
     let nodes = scene(skeleton, motion, units);
     match encoding {
         Encoding::Binary => binary(&nodes),
@@ -97,7 +114,11 @@ pub(crate) enum Prop {
 }
 
 fn node(name: &'static str, props: Vec<Prop>, children: Vec<Node>) -> Node {
-    Node { name, props, children }
+    Node {
+        name,
+        props,
+        children,
+    }
 }
 
 fn leaf(name: &'static str, props: Vec<Prop>) -> Node {
@@ -126,9 +147,23 @@ fn ktime(frame: i32, fps: f32) -> i64 {
 
 /// FBX's `TimeMode` for a frame rate (14 = custom, using `CustomFrameRate`).
 fn time_mode(fps: f32) -> i32 {
-    const MODES: [(f32, i32); 11] =
-        [(120.0, 1), (100.0, 2), (60.0, 3), (50.0, 4), (48.0, 5), (30.0, 6), (25.0, 10), (24.0, 11), (96.0, 15), (72.0, 16), (1000.0, 12)];
-    MODES.iter().find(|(rate, _)| (rate - fps).abs() < 1e-4).map_or(14, |m| m.1)
+    const MODES: [(f32, i32); 11] = [
+        (120.0, 1),
+        (100.0, 2),
+        (60.0, 3),
+        (50.0, 4),
+        (48.0, 5),
+        (30.0, 6),
+        (25.0, 10),
+        (24.0, 11),
+        (96.0, 15),
+        (72.0, 16),
+        (1000.0, 12),
+    ];
+    MODES
+        .iter()
+        .find(|(rate, _)| (rate - fps).abs() < 1e-4)
+        .map_or(14, |m| m.1)
 }
 
 /// FBX rotation order and per-axis values for angles in glam's intrinsic `order`.
@@ -136,7 +171,10 @@ fn time_mode(fps: f32) -> i32 {
 fn fbx_rotation(order: EulerRot, angles: [f32; 3]) -> (i32, [f64; 3]) {
     let letters = ORDERS.iter().find(|o| o.0 == order).map_or("XYZ", |o| o.1);
     let reversed: String = letters.chars().rev().collect();
-    let enum_value = ["XYZ", "XZY", "YZX", "YXZ", "ZXY", "ZYX"].iter().position(|o| *o == reversed).unwrap_or(0) as i32;
+    let enum_value = ["XYZ", "XZY", "YZX", "YXZ", "ZXY", "ZYX"]
+        .iter()
+        .position(|o| *o == reversed)
+        .unwrap_or(0) as i32;
     let mut xyz = [0.0; 3];
     for (letter, angle) in letters.chars().zip(angles) {
         xyz[(letter as u8 - b'X') as usize] = angle as f64;
@@ -163,7 +201,11 @@ pub(crate) fn scene(skeleton: &SkeletonRef, motion: &Motion, units: Units) -> Ve
     let mut objects = Vec::new();
     let mut connections = Vec::new();
     let connect = |connections: &mut Vec<Node>, child: i64, parent: i64, property: Option<&str>| {
-        let mut props = vec![s(if property.is_some() { "OP" } else { "OO" }), Prop::I64(child), Prop::I64(parent)];
+        let mut props = vec![
+            s(if property.is_some() { "OP" } else { "OO" }),
+            Prop::I64(child),
+            Prop::I64(parent),
+        ];
         props.extend(property.map(s));
         connections.push(leaf("C", props));
     };
@@ -177,14 +219,39 @@ pub(crate) fn scene(skeleton: &SkeletonRef, motion: &Motion, units: Units) -> Ve
             "Properties70",
             vec![],
             vec![
-                property("LocalStart", "KTime", "Time", "", vec![Prop::I64(start_time)]),
+                property(
+                    "LocalStart",
+                    "KTime",
+                    "Time",
+                    "",
+                    vec![Prop::I64(start_time)],
+                ),
                 property("LocalStop", "KTime", "Time", "", vec![Prop::I64(stop_time)]),
-                property("ReferenceStart", "KTime", "Time", "", vec![Prop::I64(start_time)]),
-                property("ReferenceStop", "KTime", "Time", "", vec![Prop::I64(stop_time)]),
+                property(
+                    "ReferenceStart",
+                    "KTime",
+                    "Time",
+                    "",
+                    vec![Prop::I64(start_time)],
+                ),
+                property(
+                    "ReferenceStop",
+                    "KTime",
+                    "Time",
+                    "",
+                    vec![Prop::I64(stop_time)],
+                ),
             ],
         )],
     ));
-    objects.push(leaf("AnimationLayer", vec![Prop::I64(layer), object_name("BaseLayer", "AnimLayer"), s("")]));
+    objects.push(leaf(
+        "AnimationLayer",
+        vec![
+            Prop::I64(layer),
+            object_name("BaseLayer", "AnimLayer"),
+            s(""),
+        ],
+    ));
     connect(&mut connections, layer, stack, None);
 
     let mut models = Vec::new();
@@ -194,19 +261,38 @@ pub(crate) fn scene(skeleton: &SkeletonRef, motion: &Motion, units: Units) -> Ve
         let (attribute, model) = (id(), id());
         models.push(model);
         let rest = Quat::from_array(joint.rest_rotation).normalize();
-        let (order, rest_rotation) = fbx_rotation(c.order, euler_near(rest, c.order, c.rotation[0]));
+        let (order, rest_rotation) =
+            fbx_rotation(c.order, euler_near(rest, c.order, c.rotation[0]));
         let offset = joint.offset.map(|v| v as f64 * scale);
         objects.push(node(
             "NodeAttribute",
-            vec![Prop::I64(attribute), object_name(&names[j], "NodeAttribute"), s("LimbNode")],
             vec![
-                node("Properties70", vec![], vec![property("Size", "double", "Number", "", vec![Prop::F64(scale * 0.05)])]),
+                Prop::I64(attribute),
+                object_name(&names[j], "NodeAttribute"),
+                s("LimbNode"),
+            ],
+            vec![
+                node(
+                    "Properties70",
+                    vec![],
+                    vec![property(
+                        "Size",
+                        "double",
+                        "Number",
+                        "",
+                        vec![Prop::F64(scale * 0.05)],
+                    )],
+                ),
                 leaf("TypeFlags", vec![s("Skeleton")]),
             ],
         ));
         objects.push(node(
             "Model",
-            vec![Prop::I64(model), object_name(&names[j], "Model"), s("LimbNode")],
+            vec![
+                Prop::I64(model),
+                object_name(&names[j], "Model"),
+                s("LimbNode"),
+            ],
             vec![
                 leaf("Version", vec![Prop::I32(232)]),
                 node(
@@ -216,10 +302,34 @@ pub(crate) fn scene(skeleton: &SkeletonRef, motion: &Motion, units: Units) -> Ve
                         property("RotationActive", "bool", "", "", vec![Prop::I32(1)]),
                         property("RotationOrder", "enum", "", "", vec![Prop::I32(order)]),
                         property("InheritType", "enum", "", "", vec![Prop::I32(1)]),
-                        property("DefaultAttributeIndex", "int", "Integer", "", vec![Prop::I32(0)]),
-                        property("Lcl Translation", "Lcl Translation", "", "A", offset.map(Prop::F64).to_vec()),
-                        property("Lcl Rotation", "Lcl Rotation", "", "A", rest_rotation.map(Prop::F64).to_vec()),
-                        property("Lcl Scaling", "Lcl Scaling", "", "A", vec![Prop::F64(1.0); 3]),
+                        property(
+                            "DefaultAttributeIndex",
+                            "int",
+                            "Integer",
+                            "",
+                            vec![Prop::I32(0)],
+                        ),
+                        property(
+                            "Lcl Translation",
+                            "Lcl Translation",
+                            "",
+                            "A",
+                            offset.map(Prop::F64).to_vec(),
+                        ),
+                        property(
+                            "Lcl Rotation",
+                            "Lcl Rotation",
+                            "",
+                            "A",
+                            rest_rotation.map(Prop::F64).to_vec(),
+                        ),
+                        property(
+                            "Lcl Scaling",
+                            "Lcl Scaling",
+                            "",
+                            "A",
+                            vec![Prop::F64(1.0); 3],
+                        ),
                     ],
                 ),
                 leaf("Culling", vec![s("CullingOff")]),
@@ -230,10 +340,20 @@ pub(crate) fn scene(skeleton: &SkeletonRef, motion: &Motion, units: Units) -> Ve
         connect(&mut connections, model, parent, None);
 
         // Curves: rotation always, translation where the joint moves.
-        let rotation: Vec<[f64; 3]> = c.rotation.iter().map(|r| fbx_rotation(c.order, *r).1).collect();
-        let translation: Option<Vec<[f64; 3]>> =
-            c.translation.as_ref().map(|t| t.iter().map(|v| v.to_array().map(|x| x as f64 * scale)).collect());
-        for (label, property_name, values) in [("R", "Lcl Rotation", Some(rotation)), ("T", "Lcl Translation", translation)] {
+        let rotation: Vec<[f64; 3]> = c
+            .rotation
+            .iter()
+            .map(|r| fbx_rotation(c.order, *r).1)
+            .collect();
+        let translation: Option<Vec<[f64; 3]>> = c.translation.as_ref().map(|t| {
+            t.iter()
+                .map(|v| v.to_array().map(|x| x as f64 * scale))
+                .collect()
+        });
+        for (label, property_name, values) in [
+            ("R", "Lcl Rotation", Some(rotation)),
+            ("T", "Lcl Translation", translation),
+        ] {
             let Some(values) = values else { continue };
             let curve_node = id();
             curve_nodes += 1;
@@ -244,7 +364,11 @@ pub(crate) fn scene(skeleton: &SkeletonRef, motion: &Motion, units: Units) -> Ve
                 .collect();
             objects.push(node(
                 "AnimationCurveNode",
-                vec![Prop::I64(curve_node), object_name(label, "AnimCurveNode"), s("")],
+                vec![
+                    Prop::I64(curve_node),
+                    object_name(label, "AnimCurveNode"),
+                    s(""),
+                ],
                 vec![node("Properties70", vec![], defaults)],
             ));
             connect(&mut connections, curve_node, layer, None);
@@ -263,8 +387,14 @@ pub(crate) fn scene(skeleton: &SkeletonRef, motion: &Motion, units: Units) -> Ve
                         leaf("KeyValueFloat", vec![Prop::F32s(keys)]),
                         // Linear keys with automatic tangents, as other exporters write them.
                         leaf("KeyAttrFlags", vec![Prop::I32s(vec![24836])]),
-                        leaf("KeyAttrDataFloat", vec![Prop::F32Bits(vec![0, 0, 255_790_911, 0])]),
-                        leaf("KeyAttrRefCount", vec![Prop::I32s(vec![times.len() as i32])]),
+                        leaf(
+                            "KeyAttrDataFloat",
+                            vec![Prop::F32Bits(vec![0, 0, 255_790_911, 0])],
+                        ),
+                        leaf(
+                            "KeyAttrRefCount",
+                            vec![Prop::I32s(vec![times.len() as i32])],
+                        ),
                     ],
                 ));
                 connect(&mut connections, curve, curve_node, Some(channel));
@@ -273,7 +403,13 @@ pub(crate) fn scene(skeleton: &SkeletonRef, motion: &Motion, units: Units) -> Ve
     }
 
     let joints = skeleton.joints.len() as i32;
-    let definition = |kind: &str, count: i32| node("ObjectType", vec![s(kind)], vec![leaf("Count", vec![Prop::I32(count)])]);
+    let definition = |kind: &str, count: i32| {
+        node(
+            "ObjectType",
+            vec![s(kind)],
+            vec![leaf("Count", vec![Prop::I32(count)])],
+        )
+    };
     let definitions = vec![
         ("GlobalSettings", 1),
         ("NodeAttribute", joints),
@@ -284,12 +420,28 @@ pub(crate) fn scene(skeleton: &SkeletonRef, motion: &Motion, units: Units) -> Ve
         ("AnimationCurve", curve_count),
     ];
     let total: i32 = definitions.iter().map(|d| d.1).sum();
-    let mut definition_nodes = vec![leaf("Version", vec![Prop::I32(100)]), leaf("Count", vec![Prop::I32(total)])];
-    definition_nodes.extend(definitions.iter().map(|(kind, count)| definition(kind, *count)));
+    let mut definition_nodes = vec![
+        leaf("Version", vec![Prop::I32(100)]),
+        leaf("Count", vec![Prop::I32(total)]),
+    ];
+    definition_nodes.extend(
+        definitions
+            .iter()
+            .map(|(kind, count)| definition(kind, *count)),
+    );
 
     let creator = format!("NeuroMotion {}", env!("CARGO_PKG_VERSION"));
     let int = |v: i32| vec![Prop::I32(v)];
-    let stamp = [("Version", 1000), ("Year", 1970), ("Month", 1), ("Day", 1), ("Hour", 10), ("Minute", 0), ("Second", 0), ("Millisecond", 0)];
+    let stamp = [
+        ("Version", 1000),
+        ("Year", 1970),
+        ("Month", 1),
+        ("Day", 1),
+        ("Hour", 10),
+        ("Minute", 0),
+        ("Second", 0),
+        ("Millisecond", 0),
+    ];
     vec![
         node(
             "FBXHeaderExtension",
@@ -298,7 +450,11 @@ pub(crate) fn scene(skeleton: &SkeletonRef, motion: &Motion, units: Units) -> Ve
                 leaf("FBXHeaderVersion", int(1003)),
                 leaf("FBXVersion", int(VERSION as i32)),
                 leaf("EncryptionType", int(0)),
-                node("CreationTimeStamp", vec![], stamp.iter().map(|(name, v)| leaf(name, int(*v))).collect()),
+                node(
+                    "CreationTimeStamp",
+                    vec![],
+                    stamp.iter().map(|(name, v)| leaf(name, int(*v))).collect(),
+                ),
                 leaf("Creator", vec![s(&creator)]),
             ],
         ),
@@ -323,12 +479,42 @@ pub(crate) fn scene(skeleton: &SkeletonRef, motion: &Motion, units: Units) -> Ve
                         property("OriginalUpAxis", "int", "Integer", "", int(1)),
                         property("OriginalUpAxisSign", "int", "Integer", "", int(1)),
                         // Centimetres per file unit.
-                        property("UnitScaleFactor", "double", "Number", "", vec![Prop::F64(100.0 / scale)]),
-                        property("OriginalUnitScaleFactor", "double", "Number", "", vec![Prop::F64(100.0 / scale)]),
+                        property(
+                            "UnitScaleFactor",
+                            "double",
+                            "Number",
+                            "",
+                            vec![Prop::F64(100.0 / scale)],
+                        ),
+                        property(
+                            "OriginalUnitScaleFactor",
+                            "double",
+                            "Number",
+                            "",
+                            vec![Prop::F64(100.0 / scale)],
+                        ),
                         property("TimeMode", "enum", "", "", int(time_mode(fps))),
-                        property("TimeSpanStart", "KTime", "Time", "", vec![Prop::I64(start_time)]),
-                        property("TimeSpanStop", "KTime", "Time", "", vec![Prop::I64(stop_time)]),
-                        property("CustomFrameRate", "double", "Number", "", vec![Prop::F64(fps as f64)]),
+                        property(
+                            "TimeSpanStart",
+                            "KTime",
+                            "Time",
+                            "",
+                            vec![Prop::I64(start_time)],
+                        ),
+                        property(
+                            "TimeSpanStop",
+                            "KTime",
+                            "Time",
+                            "",
+                            vec![Prop::I64(stop_time)],
+                        ),
+                        property(
+                            "CustomFrameRate",
+                            "double",
+                            "Number",
+                            "",
+                            vec![Prop::F64(fps as f64)],
+                        ),
                     ],
                 ),
             ],
@@ -369,8 +555,14 @@ pub(crate) fn scene(skeleton: &SkeletonRef, motion: &Motion, units: Units) -> Ve
                     vec![s(TAKE)],
                     vec![
                         leaf("FileName", vec![s("Take_001.tak")]),
-                        leaf("LocalTime", vec![Prop::I64(start_time), Prop::I64(stop_time)]),
-                        leaf("ReferenceTime", vec![Prop::I64(start_time), Prop::I64(stop_time)]),
+                        leaf(
+                            "LocalTime",
+                            vec![Prop::I64(start_time), Prop::I64(stop_time)],
+                        ),
+                        leaf(
+                            "ReferenceTime",
+                            vec![Prop::I64(start_time), Prop::I64(stop_time)],
+                        ),
                     ],
                 ),
             ],
@@ -475,8 +667,13 @@ fn write_prop(out: &mut Vec<u8>, prop: &Prop) {
 // ASCII
 
 fn ascii(nodes: &[Node]) -> String {
-    let mut out = String::from("; FBX 7.4.0 project file\n; Created by NeuroMotion\n; ----------------------------------------------------\n\n");
-    for node in nodes.iter().filter(|n| !n.props.iter().any(|p| matches!(p, Prop::Raw(_)))) {
+    let mut out = String::from(
+        "; FBX 7.4.0 project file\n; Created by NeuroMotion\n; ----------------------------------------------------\n\n",
+    );
+    for node in nodes
+        .iter()
+        .filter(|n| !n.props.iter().any(|p| matches!(p, Prop::Raw(_))))
+    {
         write_ascii(&mut out, node, 0);
         out.push('\n');
     }
@@ -495,7 +692,8 @@ fn write_ascii(out: &mut String, node: &Node, depth: usize) {
     }
     let props: Vec<String> = node.props.iter().map(ascii_value).collect();
     out.push_str(&props.join(", "));
-    let block = !node.children.is_empty() || node.props.is_empty() || ALWAYS_BLOCK.contains(&node.name);
+    let block =
+        !node.children.is_empty() || node.props.is_empty() || ALWAYS_BLOCK.contains(&node.name);
     if block {
         out.push_str(" {\n");
         for child in &node.children {
@@ -519,14 +717,19 @@ fn ascii_value(prop: &Prop) -> String {
             format!("\"{}\"", text.replace('"', "&quot;"))
         }
         Prop::Raw(_) | Prop::F32s(_) | Prop::F32Bits(_) | Prop::I32s(_) | Prop::I64s(_) => {
-            ascii_array(prop).map_or_else(String::new, |(count, values)| format!("*{count} {{ a: {values} }}"))
+            ascii_array(prop).map_or_else(String::new, |(count, values)| {
+                format!("*{count} {{ a: {values} }}")
+            })
         }
     }
 }
 
 fn ascii_array(prop: &Prop) -> Option<(usize, String)> {
     fn join<T>(values: &[T], f: impl Fn(&T) -> String) -> (usize, String) {
-        (values.len(), values.iter().map(f).collect::<Vec<_>>().join(","))
+        (
+            values.len(),
+            values.iter().map(f).collect::<Vec<_>>().join(","),
+        )
     }
     Some(match prop {
         Prop::F32s(v) => join(v, |x| format_f64(*x as f64)),
@@ -540,7 +743,11 @@ fn ascii_array(prop: &Prop) -> Option<(usize, String)> {
 /// Shortest text that reads back as the same value, always with a decimal point.
 fn format_f64(v: f64) -> String {
     let text = format!("{v}");
-    if text.contains(['.', 'e', 'E', 'N', 'i']) { text } else { format!("{text}.0") }
+    if text.contains(['.', 'e', 'E', 'N', 'i']) {
+        text
+    } else {
+        format!("{text}.0")
+    }
 }
 
 #[cfg(test)]
@@ -575,7 +782,10 @@ mod tests {
 
     impl Parsed {
         fn child(&self, name: &str) -> &Parsed {
-            self.children.iter().find(|c| c.name == name).unwrap_or_else(|| panic!("no {name} in {}", self.name))
+            self.children
+                .iter()
+                .find(|c| c.name == name)
+                .unwrap_or_else(|| panic!("no {name} in {}", self.name))
         }
 
         fn all<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a Parsed> {
@@ -606,7 +816,10 @@ mod tests {
         /// A `Properties70` entry's values (after its four descriptive strings).
         fn property(&self, name: &str) -> Option<&[Value]> {
             let props = self.children.iter().find(|c| c.name == "Properties70")?;
-            props.all("P").find(|p| p.text(0) == name).map(|p| &p.values[4..])
+            props
+                .all("P")
+                .find(|p| p.text(0) == name)
+                .map(|p| &p.values[4..])
         }
     }
 
@@ -640,7 +853,10 @@ mod tests {
         loop {
             let end = u32_at(bytes, *pos) as usize;
             if end == 0 {
-                assert!(bytes[*pos..*pos + 13].iter().all(|b| *b == 0), "malformed null record");
+                assert!(
+                    bytes[*pos..*pos + 13].iter().all(|b| *b == 0),
+                    "malformed null record"
+                );
                 *pos += 13;
                 return nodes;
             }
@@ -652,9 +868,17 @@ mod tests {
             let props_end = *pos + props_len;
             let values: Vec<Value> = (0..count).map(|_| read_value(bytes, pos)).collect();
             assert_eq!(*pos, props_end, "{name}: property bytes don't add up");
-            let children = if *pos < end { read_list(bytes, pos) } else { Vec::new() };
+            let children = if *pos < end {
+                read_list(bytes, pos)
+            } else {
+                Vec::new()
+            };
             assert_eq!(*pos, end, "{name}: end offset is wrong");
-            nodes.push(Parsed { name, values, children });
+            nodes.push(Parsed {
+                name,
+                values,
+                children,
+            });
             // The last element of a list may end without a null record after it.
             if bytes[*pos..].len() >= 13 && u32_at(bytes, *pos) == 0 {
                 *pos += 13;
@@ -689,7 +913,11 @@ mod tests {
                 })
             }
             b'f' | b'i' | b'l' => {
-                let (count, encoding, len) = (u32_at(bytes, *pos) as usize, u32_at(bytes, *pos + 4), u32_at(bytes, *pos + 8) as usize);
+                let (count, encoding, len) = (
+                    u32_at(bytes, *pos) as usize,
+                    u32_at(bytes, *pos + 4),
+                    u32_at(bytes, *pos + 8) as usize,
+                );
                 *pos += 12;
                 assert_eq!(encoding, 0);
                 let data = take(pos, len);
@@ -697,9 +925,21 @@ mod tests {
                 assert_eq!(len, count * size);
                 let chunks = data.chunks(size);
                 match kind {
-                    b'f' => Value::Floats(chunks.map(|c| f32::from_le_bytes(c.try_into().unwrap()) as f64).collect()),
-                    b'i' => Value::Ints(chunks.map(|c| i32::from_le_bytes(c.try_into().unwrap()) as i64).collect()),
-                    _ => Value::Ints(chunks.map(|c| i64::from_le_bytes(c.try_into().unwrap())).collect()),
+                    b'f' => Value::Floats(
+                        chunks
+                            .map(|c| f32::from_le_bytes(c.try_into().unwrap()) as f64)
+                            .collect(),
+                    ),
+                    b'i' => Value::Ints(
+                        chunks
+                            .map(|c| i32::from_le_bytes(c.try_into().unwrap()) as i64)
+                            .collect(),
+                    ),
+                    _ => Value::Ints(
+                        chunks
+                            .map(|c| i64::from_le_bytes(c.try_into().unwrap()))
+                            .collect(),
+                    ),
                 }
             }
             other => panic!("unexpected property type {}", other as char),
@@ -725,9 +965,7 @@ mod tests {
                 _ if c.is_whitespace() => {
                     chars.next();
                 }
-                ';' => {
-                    while chars.next().is_some_and(|c| c != '\n') {}
-                }
+                ';' => while chars.next().is_some_and(|c| c != '\n') {},
                 '"' => {
                     chars.next();
                     let text: String = chars.by_ref().take_while(|&c| c != '"').collect();
@@ -750,7 +988,10 @@ mod tests {
                 }
                 _ => {
                     let mut word = String::new();
-                    while let Some(&c) = chars.peek().filter(|c| !c.is_whitespace() && !matches!(c, ',' | '{' | '}')) {
+                    while let Some(&c) = chars
+                        .peek()
+                        .filter(|c| !c.is_whitespace() && !matches!(c, ',' | '{' | '}'))
+                    {
                         word.push(c);
                         chars.next();
                     }
@@ -812,7 +1053,11 @@ mod tests {
                         *i += 1;
                     }
                 }
-                nodes.push(Parsed { name: name.clone(), values, children });
+                nodes.push(Parsed {
+                    name: name.clone(),
+                    values,
+                    children,
+                });
             }
             nodes
         }
@@ -829,7 +1074,10 @@ mod tests {
     }
 
     fn top<'a>(nodes: &'a [Parsed], name: &str) -> &'a Parsed {
-        nodes.iter().find(|n| n.name == name).unwrap_or_else(|| panic!("no {name}"))
+        nodes
+            .iter()
+            .find(|n| n.name == name)
+            .unwrap_or_else(|| panic!("no {name}"))
     }
 
     /// Rebuilds every joint's world position at every frame from the models, connections
@@ -837,7 +1085,12 @@ mod tests {
     fn evaluate(nodes: &[Parsed], frames: usize) -> HashMap<String, Vec<Vec3>> {
         let objects = top(nodes, "Objects");
         let connections: Vec<&Parsed> = top(nodes, "Connections").all("C").collect();
-        let parent_of = |child: i64| connections.iter().find(|c| c.text(0) == "OO" && c.int(1) == child).map(|c| c.int(2));
+        let parent_of = |child: i64| {
+            connections
+                .iter()
+                .find(|c| c.text(0) == "OO" && c.int(1) == child)
+                .map(|c| c.int(2))
+        };
         let models: Vec<&Parsed> = objects.all("Model").collect();
         let vec3 = |model: &Parsed, name: &str| {
             let v = model.property(name).unwrap();
@@ -845,10 +1098,22 @@ mod tests {
         };
         // Per model and property, the X/Y/Z key values.
         let curves_of = |model: i64, property: &str| -> Option<[Vec<f64>; 3]> {
-            let node = connections.iter().find(|c| c.text(0) == "OP" && c.int(2) == model && c.text(3) == property)?.int(1);
+            let node = connections
+                .iter()
+                .find(|c| c.text(0) == "OP" && c.int(2) == model && c.text(3) == property)?
+                .int(1);
             let curve = |axis: &str| {
-                let id = connections.iter().find(|c| c.text(0) == "OP" && c.int(2) == node && c.text(3) == axis).unwrap().int(1);
-                objects.all("AnimationCurve").find(|c| c.int(0) == id).unwrap().child("KeyValueFloat").floats()
+                let id = connections
+                    .iter()
+                    .find(|c| c.text(0) == "OP" && c.int(2) == node && c.text(3) == axis)
+                    .unwrap()
+                    .int(1);
+                objects
+                    .all("AnimationCurve")
+                    .find(|c| c.int(0) == id)
+                    .unwrap()
+                    .child("KeyValueFloat")
+                    .floats()
             };
             Some([curve("d|X"), curve("d|Y"), curve("d|Z")])
         };
@@ -857,9 +1122,15 @@ mod tests {
         // Parents are written before children.
         for model in &models {
             let id = model.int(0);
-            let order = ["XYZ", "XZY", "YZX", "YXZ", "ZXY", "ZYX"][model.property("RotationOrder").map_or(0, |v| number(&v[0]) as usize)];
-            let (rotation_curves, translation_curves) = (curves_of(id, "Lcl Rotation"), curves_of(id, "Lcl Translation"));
-            let (static_rotation, static_translation) = (vec3(model, "Lcl Rotation"), vec3(model, "Lcl Translation"));
+            let order = ["XYZ", "XZY", "YZX", "YXZ", "ZXY", "ZYX"][model
+                .property("RotationOrder")
+                .map_or(0, |v| number(&v[0]) as usize)];
+            let (rotation_curves, translation_curves) = (
+                curves_of(id, "Lcl Rotation"),
+                curves_of(id, "Lcl Translation"),
+            );
+            let (static_rotation, static_translation) =
+                (vec3(model, "Lcl Rotation"), vec3(model, "Lcl Translation"));
             let parent = parent_of(id).filter(|p| *p != 0);
             let transforms: Vec<(Quat, Vec3)> = (0..frames)
                 .map(|f| {
@@ -903,7 +1174,12 @@ mod tests {
             for (j, (_, expected)) in joints.iter().enumerate() {
                 let error = positions[&names[j]][frame].distance(*expected);
                 worst = worst.max(error);
-                assert!(error < tolerance, "{} is {error} m off at frame {}", names[j], motion.start + frame as i32);
+                assert!(
+                    error < tolerance,
+                    "{} is {error} m off at frame {}",
+                    names[j],
+                    motion.start + frame as i32
+                );
             }
         }
         eprintln!("worst joint error {worst} m");
@@ -917,12 +1193,34 @@ mod tests {
         let names: Vec<&str> = nodes.iter().map(|n| n.name.as_str()).collect();
         assert_eq!(
             names,
-            ["FBXHeaderExtension", "FileId", "CreationTime", "Creator", "GlobalSettings", "Documents", "References", "Definitions", "Objects", "Connections", "Takes"]
+            [
+                "FBXHeaderExtension",
+                "FileId",
+                "CreationTime",
+                "Creator",
+                "GlobalSettings",
+                "Documents",
+                "References",
+                "Definitions",
+                "Objects",
+                "Connections",
+                "Takes"
+            ]
         );
         let settings = top(&nodes, "GlobalSettings");
-        assert_eq!(settings.property("UpAxis").map(|v| number(&v[0])), Some(1.0));
-        assert_eq!(settings.property("UnitScaleFactor").map(|v| number(&v[0])), Some(100.0));
-        assert_eq!(settings.property("TimeMode").map(|v| number(&v[0])), Some(6.0), "30 fps");
+        assert_eq!(
+            settings.property("UpAxis").map(|v| number(&v[0])),
+            Some(1.0)
+        );
+        assert_eq!(
+            settings.property("UnitScaleFactor").map(|v| number(&v[0])),
+            Some(100.0)
+        );
+        assert_eq!(
+            settings.property("TimeMode").map(|v| number(&v[0])),
+            Some(6.0),
+            "30 fps"
+        );
 
         let skeleton = &project.characters[0].skeleton;
         let objects = top(&nodes, "Objects");
@@ -935,28 +1233,51 @@ mod tests {
 
         // The hierarchy mirrors the skeleton.
         let connections: Vec<&Parsed> = top(&nodes, "Connections").all("C").collect();
-        let id_of = |name: &str| models.iter().find(|m| m.text(1) == format!("Model::{name}")).unwrap().int(0);
+        let id_of = |name: &str| {
+            models
+                .iter()
+                .find(|m| m.text(1) == format!("Model::{name}"))
+                .unwrap()
+                .int(0)
+        };
         for joint in &skeleton.joints {
-            let parent = connections.iter().find(|c| c.text(0) == "OO" && c.int(1) == id_of(&joint.name)).unwrap().int(2);
-            assert_eq!(parent, joint.parent.map_or(0, |p| id_of(&skeleton.joints[p].name)), "{}", joint.name);
+            let parent = connections
+                .iter()
+                .find(|c| c.text(0) == "OO" && c.int(1) == id_of(&joint.name))
+                .unwrap()
+                .int(2);
+            assert_eq!(
+                parent,
+                joint.parent.map_or(0, |p| id_of(&skeleton.joints[p].name)),
+                "{}",
+                joint.name
+            );
         }
         // One key per frame, at the frame's time.
         let curves: Vec<&Parsed> = objects.all("AnimationCurve").collect();
         let joints = skeleton.joints.len();
-        assert_eq!(curves.len(), joints * 3 + 3, "rotation for every joint, translation for the root");
+        assert_eq!(
+            curves.len(),
+            joints * 3 + 3,
+            "rotation for every joint, translation for the root"
+        );
         let times = match &curves[0].child("KeyTime").values[0] {
             Value::Ints(t) => t.clone(),
             other => panic!("{other:?}"),
         };
         assert_eq!(times.len(), motion.frames.len());
-        assert_eq!(times[30], 46_186_158_000, "frame 30 at 30 fps is one second");
+        assert_eq!(
+            times[30], 46_186_158_000,
+            "frame 30 at 30 fps is one second"
+        );
     }
 
     #[test]
     fn ascii_and_binary_say_the_same() {
         let project = rotated_rest_project();
         let binary = parse_binary(&export(&project, Units::Centimetres, Encoding::Binary).1);
-        let text = String::from_utf8(export(&project, Units::Centimetres, Encoding::Ascii).1).unwrap();
+        let text =
+            String::from_utf8(export(&project, Units::Centimetres, Encoding::Ascii).1).unwrap();
         assert!(text.starts_with("; FBX 7.4.0 project file"));
         let ascii = parse_ascii(&text);
         // ASCII files carry no file id, and write the curve attribute floats as bit patterns.
@@ -964,7 +1285,8 @@ mod tests {
         fn bits_as_ints(node: &mut Parsed) {
             if node.name == "KeyAttrDataFloat" {
                 if let Value::Floats(v) = &node.values[0] {
-                    node.values[0] = Value::Ints(v.iter().map(|x| (*x as f32).to_bits() as i64).collect());
+                    node.values[0] =
+                        Value::Ints(v.iter().map(|x| (*x as f32).to_bits() as i64).collect());
                 }
             }
             node.children.iter_mut().for_each(bits_as_ints);
@@ -972,8 +1294,16 @@ mod tests {
         expected.iter_mut().for_each(bits_as_ints);
         assert_eq!(ascii, expected);
         let settings = top(&ascii, "GlobalSettings");
-        assert_eq!(settings.property("UnitScaleFactor").map(|v| number(&v[0])), Some(1.0), "centimetres");
-        assert_eq!(settings.property("TimeMode").map(|v| number(&v[0])), Some(11.0), "24 fps");
+        assert_eq!(
+            settings.property("UnitScaleFactor").map(|v| number(&v[0])),
+            Some(1.0),
+            "centimetres"
+        );
+        assert_eq!(
+            settings.property("TimeMode").map(|v| number(&v[0])),
+            Some(11.0),
+            "24 fps"
+        );
     }
 
     #[test]
@@ -995,7 +1325,10 @@ mod tests {
         let (_, bytes) = export(&project, Units::Metres, Encoding::Binary);
         let nodes = parse_binary(&bytes);
         let skeleton = &project.characters[0].skeleton;
-        let expected = crate::document::world_transforms(skeleton, &crate::document::Pose::rest(skeleton.joints.len()));
+        let expected = crate::document::world_transforms(
+            skeleton,
+            &crate::document::Pose::rest(skeleton.joints.len()),
+        );
         let without_curves: Vec<Parsed> = nodes
             .iter()
             .map(|n| {
@@ -1009,7 +1342,11 @@ mod tests {
         let rest = evaluate(&without_curves, 1);
         let names = export_names(skeleton);
         for (j, (_, position)) in expected.iter().enumerate() {
-            assert!(rest[&names[j]][0].distance(*position) < 1e-5, "{} rest position", names[j]);
+            assert!(
+                rest[&names[j]][0].distance(*position) < 1e-5,
+                "{} rest position",
+                names[j]
+            );
         }
     }
 }

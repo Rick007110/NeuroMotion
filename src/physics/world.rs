@@ -67,7 +67,9 @@ pub enum Motion {
     /// Moved by the caller (its velocity says how); collides. `momentum` scales the
     /// velocity it hands to what it hits: at 0 it pushes and carries things without
     /// setting them moving.
-    Kinematic { momentum: f32 },
+    Kinematic {
+        momentum: f32,
+    },
     /// Moved by the caller and ignored by collisions.
     Ghost,
 }
@@ -284,7 +286,11 @@ fn soft(hertz: f32, damping_ratio: f32, h: f32) -> Softness {
     let a1 = 2.0 * damping_ratio + h * omega;
     let a2 = h * omega * a1;
     let a3 = 1.0 / (1.0 + a2);
-    Softness { bias_rate: omega / a1, mass_scale: a2 * a3, impulse_scale: a3 }
+    Softness {
+        bias_rate: omega / a1,
+        mass_scale: a2 * a3,
+        impulse_scale: a3,
+    }
 }
 
 /// One angular row: a one-sided limit (rigid) or a spring (soft limit zone / muscle).
@@ -421,12 +427,22 @@ struct ContactRow {
 }
 
 fn skew(v: Vec3) -> Mat3 {
-    Mat3::from_cols(Vec3::new(0.0, v.z, -v.y), Vec3::new(-v.z, 0.0, v.x), Vec3::new(v.y, -v.x, 0.0))
+    Mat3::from_cols(
+        Vec3::new(0.0, v.z, -v.y),
+        Vec3::new(-v.z, 0.0, v.x),
+        Vec3::new(v.y, -v.x, 0.0),
+    )
 }
 
 fn get(sb: &[SolverBody], i: usize) -> SolverBody {
     if i == STATIC {
-        SolverBody { v: Vec3::ZERO, w: Vec3::ZERO, inv_mass: 0.0, inv_i: Mat3::ZERO, carry: 0.0 }
+        SolverBody {
+            v: Vec3::ZERO,
+            w: Vec3::ZERO,
+            inv_mass: 0.0,
+            inv_i: Mat3::ZERO,
+            carry: 0.0,
+        }
     } else {
         sb[i]
     }
@@ -468,7 +484,11 @@ fn apply_angular(sb: &mut [SolverBody], a: usize, b: usize, l: Vec3) {
 }
 
 fn perpendicular(n: Vec3) -> Vec3 {
-    let t = if n.x.abs() > 0.57 { Vec3::new(n.y, -n.x, 0.0) } else { Vec3::new(0.0, n.z, -n.y) };
+    let t = if n.x.abs() > 0.57 {
+        Vec3::new(n.y, -n.x, 0.0)
+    } else {
+        Vec3::new(0.0, n.z, -n.y)
+    };
     t.normalize()
 }
 
@@ -481,7 +501,8 @@ pub fn swing_twist(q: Quat) -> (f32, Vec3) {
     }
     let twist = Quat::from_xyzw(q.x / twist_len, 0.0, 0.0, q.w / twist_len);
     let angle = 2.0 * q.x.atan2(q.w);
-    let angle = (angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+    let angle =
+        (angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
     let swing = (q * twist.inverse()).normalize();
     (angle, swing.to_scaled_axis())
 }
@@ -515,12 +536,15 @@ impl World {
 
     fn interaction(&self, a: usize, b: usize) -> Interaction {
         let n = self.material_count;
-        self.interactions.get(a.min(n - 1) * n + b.min(n - 1)).copied().unwrap_or(Interaction {
-            restitution: 0.2,
-            friction: 100.0,
-            adhesion: 0.0,
-            softness: 0.0,
-        })
+        self.interactions
+            .get(a.min(n - 1) * n + b.min(n - 1))
+            .copied()
+            .unwrap_or(Interaction {
+                restitution: 0.2,
+                friction: 100.0,
+                adhesion: 0.0,
+                softness: 0.0,
+            })
     }
 
     /// Advances the world by `dt` seconds.
@@ -549,7 +573,13 @@ impl World {
                     Motion::Kinematic { momentum } => (0.0, Mat3::ZERO, momentum),
                     Motion::Ghost => (0.0, Mat3::ZERO, 0.0),
                 };
-                SolverBody { v: b.linear_velocity, w: b.angular_velocity, inv_mass, inv_i, carry }
+                SolverBody {
+                    v: b.linear_velocity,
+                    w: b.angular_velocity,
+                    inv_mass,
+                    inv_i,
+                    carry,
+                }
             })
             .collect();
 
@@ -569,7 +599,9 @@ impl World {
 
         // Warm start.
         for c in &contacts {
-            let p = c.normal * c.impulse[0] + c.tangents[0] * c.impulse[1] + c.tangents[1] * c.impulse[2];
+            let p = c.normal * c.impulse[0]
+                + c.tangents[0] * c.impulse[1]
+                + c.tangents[1] * c.impulse[2];
             apply_impulse(&mut sb, c.a, c.b, c.ra, c.rb, p);
         }
         for j in &joints {
@@ -583,7 +615,11 @@ impl World {
         }
 
         let contact_soft = soft(CONTACT_HERTZ.min(0.25 / h), CONTACT_DAMPING_RATIO, h);
-        let joint_soft = Softness { bias_rate: JOINT_CORRECTION / h, mass_scale: 1.0, impulse_scale: 0.0 };
+        let joint_soft = Softness {
+            bias_rate: JOINT_CORRECTION / h,
+            mass_scale: 1.0,
+            impulse_scale: 0.0,
+        };
         let mut groups = self.prepare_groups(&sb, &joints, &locks, joint_soft.bias_rate);
         for _ in 0..ITERATIONS {
             self.solve_joints(&mut sb, &mut joints, joint_soft, h, true);
@@ -631,7 +667,10 @@ impl World {
         for j in &joints {
             let joint = &mut self.joints[j.joint];
             joint.warm_point = j.point_impulse;
-            joint.warm_muscle = j.muscle.as_ref().map_or([0.0; 3], |m| (m.frame.transpose() * m.impulse).to_array());
+            joint.warm_muscle = j
+                .muscle
+                .as_ref()
+                .map_or([0.0; 3], |m| (m.frame.transpose() * m.impulse).to_array());
         }
         self.lock_cache.clear();
         for l in &locks {
@@ -648,11 +687,16 @@ impl World {
             if lock.linear.min_element() >= 0.0 && lock.angular.min_element() >= 0.0 {
                 continue;
             }
-            let frame = lock.anchor.map_or(Mat3::IDENTITY, |a| Mat3::from_quat(self.bodies[a].rotation));
+            let frame = lock
+                .anchor
+                .map_or(Mat3::IDENTITY, |a| Mat3::from_quat(self.bodies[a].rotation));
             let force = frame * lock.linear.min(Vec3::ZERO) * h;
             let torque = frame * lock.angular.min(Vec3::ZERO) * h;
             for (body, sign) in [(Some(lock.body), 1.0), (lock.anchor, -1.0)] {
-                let Some(body) = body.map(|b| &mut self.bodies[b]).filter(|b| b.is_dynamic()) else { continue };
+                let Some(body) = body.map(|b| &mut self.bodies[b]).filter(|b| b.is_dynamic())
+                else {
+                    continue;
+                };
                 body.linear_velocity += force * (sign * body.inv_mass);
                 body.angular_velocity += body.inv_inertia_world() * (torque * sign);
             }
@@ -664,13 +708,26 @@ impl World {
     /// light body like a hammer once it is simulated.
     fn forget_switched_bodies(&mut self) {
         let dynamic: Vec<bool> = self.bodies.iter().map(Body::is_dynamic).collect();
-        let switched: Vec<bool> = (0..dynamic.len()).map(|i| self.was_dynamic.get(i).is_some_and(|&d| d != dynamic[i])).collect();
+        let switched: Vec<bool> = (0..dynamic.len())
+            .map(|i| self.was_dynamic.get(i).is_some_and(|&d| d != dynamic[i]))
+            .collect();
         if switched.contains(&true) {
             let shapes = &self.shapes;
-            let switched_shape = |s: u32| shapes.get(s as usize).and_then(|s| s.body).is_some_and(|b| switched[b]);
-            self.contact_cache.retain(|&(a, b, _), _| !switched_shape(a) && !switched_shape(b));
-            self.lock_cache.retain(|&(a, b, _), _| !(a != STATIC && switched[a]) && !switched[b]);
-            for joint in self.joints.iter_mut().filter(|j| switched[j.parent] || switched[j.child]) {
+            let switched_shape = |s: u32| {
+                shapes
+                    .get(s as usize)
+                    .and_then(|s| s.body)
+                    .is_some_and(|b| switched[b])
+            };
+            self.contact_cache
+                .retain(|&(a, b, _), _| !switched_shape(a) && !switched_shape(b));
+            self.lock_cache
+                .retain(|&(a, b, _), _| !(a != STATIC && switched[a]) && !switched[b]);
+            for joint in self
+                .joints
+                .iter_mut()
+                .filter(|j| switched[j.parent] || switched[j.child])
+            {
                 joint.warm_point = Vec3::ZERO;
                 joint.warm_muscle = [0.0; 3];
             }
@@ -696,11 +753,20 @@ impl World {
             let k = Mat3::from_diagonal(Vec3::splat(sa.inv_mass + sbb.inv_mass))
                 - skew(ra) * sa.inv_i * skew(ra)
                 - skew(rb) * sbb.inv_i * skew(rb);
-            let point_mass = if k.determinant().abs() > 1e-12 { k.inverse() } else { Mat3::ZERO };
+            let point_mass = if k.determinant().abs() > 1e-12 {
+                k.inverse()
+            } else {
+                Mat3::ZERO
+            };
             let (sra, srb) = (skew(ra), skew(rb));
             let k_pa = -(sra * sa.inv_i + srb * sbb.inv_i);
             let k_ap = sa.inv_i * sra + sbb.inv_i * srb;
-            (point_mass, k_pa, k_ap, sa.inv_i + sbb.inv_i - k_ap * point_mass * k_pa)
+            (
+                point_mass,
+                k_pa,
+                k_ap,
+                sa.inv_i + sbb.inv_i - k_ap * point_mass * k_pa,
+            )
         };
         let mut out = Vec::new();
         for (index, joint) in self.joints.iter().enumerate() {
@@ -715,7 +781,11 @@ impl World {
             let (point_mass, k_pa, k_ap, angular_schur) = blocks(sa, sbb, ra, rb);
             // Only when one side is grounded: a foot and toe both on the ground are still
             // just a foot and a toe.
-            let still = |s: SolverBody| SolverBody { inv_mass: 0.0, inv_i: Mat3::ZERO, ..s };
+            let still = |s: SolverBody| SolverBody {
+                inv_mass: 0.0,
+                inv_i: Mat3::ZERO,
+                ..s
+            };
             let cap_schur = match (grounded[a], grounded[b]) {
                 (true, false) => blocks(still(sa), sbb, ra, rb).3,
                 (false, true) => blocks(sa, still(sbb), ra, rb).3,
@@ -764,7 +834,11 @@ impl World {
             impulse: 0.0,
         };
         let spring = |axis: Vec3, error: f32| -> Option<AngularRow> {
-            let (k, c) = cap_spring(joint.soft_stiffness, joint.soft_damping, coupled_inv_mass(axis));
+            let (k, c) = cap_spring(
+                joint.soft_stiffness,
+                joint.soft_damping,
+                coupled_inv_mass(axis),
+            );
             (k + c > 0.0).then(|| {
                 let denom = c + h * k;
                 let gamma = 1.0 / (h * denom);
@@ -790,10 +864,12 @@ impl World {
             rows.limits.push(rigid(-twist_axis, hard.twist_max - twist));
         }
         if twist < soft_l.twist_min {
-            rows.limits.extend(spring(twist_axis, twist - soft_l.twist_min));
+            rows.limits
+                .extend(spring(twist_axis, twist - soft_l.twist_min));
         }
         if twist > soft_l.twist_max {
-            rows.limits.extend(spring(-twist_axis, soft_l.twist_max - twist));
+            rows.limits
+                .extend(spring(-twist_axis, soft_l.twist_max - twist));
         }
 
         // Swing: elliptical cone in the primary frame's YZ plane.
@@ -803,7 +879,11 @@ impl World {
             let dir = s / radius;
             let boundary = |l: &Limits| {
                 let (y, z) = (l.swing1.max(1e-3), l.swing2.max(1e-3));
-                (1.0 / ((dir.x / y).powi(2) + (dir.y / z).powi(2)).sqrt(), y, z)
+                (
+                    1.0 / ((dir.x / y).powi(2) + (dir.y / z).powi(2)).sqrt(),
+                    y,
+                    z,
+                )
             };
             let (hard_r, y, z) = boundary(&hard);
             let n = glam::Vec2::new(s.x / (y * y), s.y / (z * z)).normalize_or_zero();
@@ -841,7 +921,11 @@ impl World {
                 continue;
             }
             let axis = frame.col(k);
-            let (stiffness, damping) = cap_spring(gains.stiffness, gains.damping, axis.dot(rows.cap_schur * axis));
+            let (stiffness, damping) = cap_spring(
+                gains.stiffness,
+                gains.damping,
+                axis.dot(rows.cap_schur * axis),
+            );
             let denom = damping + h * stiffness;
             gamma[k] = 1.0 / (h * denom);
             bias[k] = -(stiffness / denom) * error_world.dot(axis);
@@ -863,7 +947,14 @@ impl World {
         })
     }
 
-    fn solve_joints(&self, sb: &mut [SolverBody], joints: &mut [JointRows], soft_params: Softness, h: f32, use_bias: bool) {
+    fn solve_joints(
+        &self,
+        sb: &mut [SolverBody],
+        joints: &mut [JointRows],
+        soft_params: Softness,
+        h: f32,
+        use_bias: bool,
+    ) {
         for j in joints.iter_mut() {
             let (a, b) = (j.a, j.b);
             let point_bias = if use_bias {
@@ -916,7 +1007,9 @@ impl World {
             let nth = seen.entry((a, b)).or_default();
             let key = (a, b, *nth);
             *nth += 1;
-            if !self.bodies[b].is_dynamic() && lock.anchor.is_none_or(|a| !self.bodies[a].is_dynamic()) {
+            if !self.bodies[b].is_dynamic()
+                && lock.anchor.is_none_or(|a| !self.bodies[a].is_dynamic())
+            {
                 continue;
             }
             let (anchor_rot, anchor_pos) = match lock.anchor {
@@ -933,18 +1026,26 @@ impl World {
             if turn.w < 0.0 {
                 turn = -turn;
             }
-            let position_error = frame.transpose() * (body.position - (anchor_pos + anchor_rot * lock.target.1));
+            let position_error =
+                frame.transpose() * (body.position - (anchor_pos + anchor_rot * lock.target.1));
             let rotation_error = frame.transpose() * turn.to_scaled_axis();
 
             // Effective mass in lock axes: [linear; angular] rows, B's centre held.
             let (ia, ib) = (get(sb, a), get(sb, b));
             let sra = skew(ra);
-            let k_ll = Mat3::from_diagonal(Vec3::splat(ia.inv_mass + ib.inv_mass)) - sra * ia.inv_i * sra;
+            let k_ll =
+                Mat3::from_diagonal(Vec3::splat(ia.inv_mass + ib.inv_mass)) - sra * ia.inv_i * sra;
             let k_la = -(sra * ia.inv_i);
             let k_aa = ia.inv_i + ib.inv_i;
             let blocks = [
-                [frame.transpose() * k_ll * frame, frame.transpose() * k_la * frame],
-                [frame.transpose() * k_la.transpose() * frame, frame.transpose() * k_aa * frame],
+                [
+                    frame.transpose() * k_ll * frame,
+                    frame.transpose() * k_la * frame,
+                ],
+                [
+                    frame.transpose() * k_la.transpose() * frame,
+                    frame.transpose() * k_aa * frame,
+                ],
             ];
             let strength = [lock.linear.to_array(), lock.angular.to_array()].concat();
             let mut k = [[0.0f32; 6]; 6];
@@ -974,14 +1075,30 @@ impl World {
             let mut error = [0.0f32; 6];
             error[..3].copy_from_slice(&position_error.to_array());
             error[3..].copy_from_slice(&rotation_error.to_array());
-            out.push(LockBlock { a, b, ra, frame, error, inv_k, bound, impulse, key });
+            out.push(LockBlock {
+                a,
+                b,
+                ra,
+                frame,
+                error,
+                inv_k,
+                bound,
+                impulse,
+                key,
+            });
         }
         out
     }
 
     /// Groups of moving bodies that locks tie together (with the joints between them),
     /// and the rows each group solves directly. Nothing without a lock is grouped.
-    fn prepare_groups(&self, sb: &[SolverBody], joints: &[JointRows], locks: &[LockBlock], bias_rate: f32) -> Vec<LockGroup> {
+    fn prepare_groups(
+        &self,
+        sb: &[SolverBody],
+        joints: &[JointRows],
+        locks: &[LockBlock],
+        bias_rate: f32,
+    ) -> Vec<LockGroup> {
         if locks.is_empty() {
             return Vec::new();
         }
@@ -994,7 +1111,10 @@ impl World {
             }
             i
         }
-        let pairs = joints.iter().map(|j| (j.a, j.b)).chain(locks.iter().map(|l| (l.a, l.b)));
+        let pairs = joints
+            .iter()
+            .map(|j| (j.a, j.b))
+            .chain(locks.iter().map(|l| (l.a, l.b)));
         for (a, b) in pairs.filter(|&(a, b)| moves(a) && moves(b)) {
             let (ra, rb) = (find(&mut root, a), find(&mut root, b));
             root[ra] = rb;
@@ -1010,7 +1130,9 @@ impl World {
         let mut rows: Vec<Vec<GroupRow>> = locked.iter().map(|_| Vec::new()).collect();
 
         for (ji, j) in joints.iter().enumerate() {
-            let Some(g) = group_of(j.a, j.b).and_then(|g| locked.binary_search(&g).ok()) else { continue };
+            let Some(g) = group_of(j.a, j.b).and_then(|g| locked.binary_search(&g).ok()) else {
+                continue;
+            };
             let bias = (j.point_error * bias_rate).clamp_length_max(MAX_PUSH_SPEED);
             for (axis, e) in [Vec3::X, Vec3::Y, Vec3::Z].into_iter().enumerate() {
                 rows[g].push(GroupRow {
@@ -1024,14 +1146,29 @@ impl World {
             }
         }
         for (li, l) in locks.iter().enumerate() {
-            let Some(g) = group_of(l.a, l.b).and_then(|g| locked.binary_search(&g).ok()) else { continue };
-            let push = (Vec3::from_slice(&l.error[..3]) * bias_rate).clamp_length_max(MAX_PUSH_SPEED);
-            let turn = (Vec3::from_slice(&l.error[3..]) * bias_rate).clamp_length_max(MAX_PUSH_SPEED * 4.0);
+            let Some(g) = group_of(l.a, l.b).and_then(|g| locked.binary_search(&g).ok()) else {
+                continue;
+            };
+            let push =
+                (Vec3::from_slice(&l.error[..3]) * bias_rate).clamp_length_max(MAX_PUSH_SPEED);
+            let turn = (Vec3::from_slice(&l.error[3..]) * bias_rate)
+                .clamp_length_max(MAX_PUSH_SPEED * 4.0);
             for axis in (0..6).filter(|&r| l.bound[r] > 0.0) {
                 let f = l.frame.col(axis % 3);
-                let jacobian = if axis < 3 { [-f, -l.ra.cross(f), f, Vec3::ZERO] } else { [Vec3::ZERO, -f, Vec3::ZERO, f] };
+                let jacobian = if axis < 3 {
+                    [-f, -l.ra.cross(f), f, Vec3::ZERO]
+                } else {
+                    [Vec3::ZERO, -f, Vec3::ZERO, f]
+                };
                 let bias = if axis < 3 { push[axis] } else { turn[axis - 3] };
-                rows[g].push(GroupRow { a: l.a, b: l.b, jacobian, bias, bound: l.bound[axis], source: RowSource::Lock(li, axis) });
+                rows[g].push(GroupRow {
+                    a: l.a,
+                    b: l.b,
+                    jacobian,
+                    bias,
+                    bound: l.bound[axis],
+                    source: RowSource::Lock(li, axis),
+                });
             }
         }
         // Joints leaf first (deepest child body first), then locks.
@@ -1049,7 +1186,9 @@ impl World {
                 RowSource::Lock(..) => (1, std::cmp::Reverse(0)),
             });
         }
-        rows.into_iter().filter_map(|rows| LockGroup::new(sb, rows, locks)).collect()
+        rows.into_iter()
+            .filter_map(|rows| LockGroup::new(sb, rows, locks))
+            .collect()
     }
 
     /// Body pairs held together by locks, which don't collide with each other: each
@@ -1057,7 +1196,11 @@ impl World {
     /// clasped around someone).
     fn locked_pairs(&self) -> Vec<(usize, usize)> {
         let pair = |a: usize, b: usize| (a.min(b), a.max(b));
-        let mut out: Vec<(usize, usize)> = self.locks.iter().filter_map(|l| Some(pair(l.anchor?, l.body))).collect();
+        let mut out: Vec<(usize, usize)> = self
+            .locks
+            .iter()
+            .filter_map(|l| Some(pair(l.anchor?, l.body)))
+            .collect();
         for (i, l) in self.locks.iter().enumerate() {
             let Some(anchor) = l.anchor else { continue };
             for m in &self.locks[i + 1..] {
@@ -1077,7 +1220,11 @@ impl World {
             .shapes
             .iter()
             .map(|s| match s.body {
-                None => Some(Placed { geometry: s.geometry, rotation: s.rotation, position: s.position }),
+                None => Some(Placed {
+                    geometry: s.geometry,
+                    rotation: s.rotation,
+                    position: s.position,
+                }),
                 Some(b) => {
                     let body = &self.bodies[b];
                     (body.motion != Motion::Ghost).then(|| Placed {
@@ -1088,7 +1235,11 @@ impl World {
                 }
             })
             .collect();
-        let radius: Vec<f32> = self.shapes.iter().map(|s| collide::bounding_radius(&s.geometry)).collect();
+        let radius: Vec<f32> = self
+            .shapes
+            .iter()
+            .map(|s| collide::bounding_radius(&s.geometry))
+            .collect();
         let dynamic = |s: &Shape| s.body.is_some_and(|b| self.bodies[b].is_dynamic());
         let locked = self.locked_pairs();
         let held_together = |a: Option<usize>, b: Option<usize>| match (a, b) {
@@ -1107,7 +1258,15 @@ impl World {
                 found.clear();
                 collide::with_ground(p, height, MARGIN, &mut found);
                 for c in &found {
-                    out.push(self.contact_row(sb, h, None, Some(i), ground_material, shape.material, c));
+                    out.push(self.contact_row(
+                        sb,
+                        h,
+                        None,
+                        Some(i),
+                        ground_material,
+                        shape.material,
+                        c,
+                    ));
                 }
             }
         }
@@ -1116,17 +1275,30 @@ impl World {
             for j in (i + 1)..self.shapes.len() {
                 let Some(pj) = &placed[j] else { continue };
                 let (si, sj) = (&self.shapes[i], &self.shapes[j]);
-                if !(dynamic(si) || dynamic(sj)) || si.body == sj.body || held_together(si.body, sj.body) {
+                if !(dynamic(si) || dynamic(sj))
+                    || si.body == sj.body
+                    || held_together(si.body, sj.body)
+                {
                     continue;
                 }
                 let reach = radius[i] + radius[j] + MARGIN;
-                if pi.position.distance_squared(pj.position) > reach * reach || !self.may_collide(i, j) {
+                if pi.position.distance_squared(pj.position) > reach * reach
+                    || !self.may_collide(i, j)
+                {
                     continue;
                 }
                 found.clear();
                 collide::between(pi, pj, MARGIN, &mut found);
                 for c in &found {
-                    out.push(self.contact_row(sb, h, Some(i), Some(j), si.material, sj.material, c));
+                    out.push(self.contact_row(
+                        sb,
+                        h,
+                        Some(i),
+                        Some(j),
+                        si.material,
+                        sj.material,
+                        c,
+                    ));
                 }
             }
         }
@@ -1136,7 +1308,9 @@ impl World {
     /// Self-collision rules within one character, following each shape's flags.
     fn may_collide(&self, i: usize, j: usize) -> bool {
         let (si, sj) = (&self.shapes[i], &self.shapes[j]);
-        let (Some(bi), Some(bj)) = (si.body, sj.body) else { return true };
+        let (Some(bi), Some(bj)) = (si.body, sj.body) else {
+            return true;
+        };
         let (a, b) = (&self.bodies[bi], &self.bodies[bj]);
         if a.group != b.group {
             return true;
@@ -1182,17 +1356,30 @@ impl World {
     ) -> ContactRow {
         let body_of = |s: Option<usize>| s.and_then(|i| self.shapes[i].body).unwrap_or(STATIC);
         let (a, b) = (body_of(shape_a), body_of(shape_b));
-        let origin = |i: usize| if i == STATIC { c.point } else { self.bodies[i].position };
+        let origin = |i: usize| {
+            if i == STATIC {
+                c.point
+            } else {
+                self.bodies[i].position
+            }
+        };
         let (ra, rb) = (c.point - origin(a), c.point - origin(b));
         let interaction = self.interaction(material_a, material_b);
         let row_mass = |dir: Vec3, softness: f32| {
             let (ba, bb) = (get(sb, a), get(sb, b));
-            let k = ba.inv_mass + bb.inv_mass + ra.cross(dir).dot(ba.inv_i * ra.cross(dir)) + rb.cross(dir).dot(bb.inv_i * rb.cross(dir));
+            let k = ba.inv_mass
+                + bb.inv_mass
+                + ra.cross(dir).dot(ba.inv_i * ra.cross(dir))
+                + rb.cross(dir).dot(bb.inv_i * rb.cross(dir));
             inverse(k + softness)
         };
         let t1 = perpendicular(c.normal);
         let tangents = [t1, c.normal.cross(t1)];
-        let key = (shape_a.map_or(u32::MAX, |s| s as u32), shape_b.map_or(u32::MAX, |s| s as u32), c.feature);
+        let key = (
+            shape_a.map_or(u32::MAX, |s| s as u32),
+            shape_b.map_or(u32::MAX, |s| s as u32),
+            c.feature,
+        );
         let cached = self.contact_cache.get(&key).copied();
         ContactRow {
             a,
@@ -1211,10 +1398,21 @@ impl World {
         }
     }
 
-    fn solve_contacts(&self, sb: &mut [SolverBody], contacts: &mut [ContactRow], soft_params: Softness, h: f32, use_bias: bool) {
+    fn solve_contacts(
+        &self,
+        sb: &mut [SolverBody],
+        contacts: &mut [ContactRow],
+        soft_params: Softness,
+        h: f32,
+        use_bias: bool,
+    ) {
         // While correcting positions, moved bodies push with their full velocity; after,
         // only with what they hand on.
-        let velocity = if use_bias { relative_velocity } else { handed_velocity };
+        let velocity = if use_bias {
+            relative_velocity
+        } else {
+            handed_velocity
+        };
         for c in contacts.iter_mut() {
             // Friction first, limited by the current normal impulse or a fixed force cap.
             let limit = match self.contact_model {
@@ -1233,7 +1431,11 @@ impl World {
             let (bias, mass_scale, impulse_scale) = if c.separation > 0.0 {
                 (c.separation / h, 1.0, 0.0)
             } else if use_bias {
-                ((soft_params.bias_rate * c.separation).max(-MAX_PUSH_SPEED), soft_params.mass_scale, soft_params.impulse_scale)
+                (
+                    (soft_params.bias_rate * c.separation).max(-MAX_PUSH_SPEED),
+                    soft_params.mass_scale,
+                    soft_params.impulse_scale,
+                )
             } else {
                 (0.0, 1.0, 0.0)
             };
@@ -1249,9 +1451,12 @@ impl World {
 impl LockBlock {
     /// Velocity along the lock's rows.
     fn velocity(&self, sb: &[SolverBody]) -> [f32; 6] {
-        let linear = self.frame.transpose() * relative_velocity(sb, self.a, self.b, self.ra, Vec3::ZERO);
+        let linear =
+            self.frame.transpose() * relative_velocity(sb, self.a, self.b, self.ra, Vec3::ZERO);
         let angular = self.frame.transpose() * (get(sb, self.b).w - get(sb, self.a).w);
-        [linear.x, linear.y, linear.z, angular.x, angular.y, angular.z]
+        [
+            linear.x, linear.y, linear.z, angular.x, angular.y, angular.z,
+        ]
     }
 
     fn apply(&self, sb: &mut [SolverBody], impulse: [f32; 6]) {
@@ -1268,7 +1473,11 @@ fn solve_locks(sb: &mut [SolverBody], locks: &mut [LockBlock], bias_rate: f32) {
         let mut rhs = l.velocity(sb);
         let push = Vec3::from_slice(&l.error[..3]) * bias_rate;
         let turn = Vec3::from_slice(&l.error[3..]) * bias_rate;
-        let bias = [push.clamp_length_max(MAX_PUSH_SPEED).to_array(), turn.clamp_length_max(MAX_PUSH_SPEED * 4.0).to_array()].concat();
+        let bias = [
+            push.clamp_length_max(MAX_PUSH_SPEED).to_array(),
+            turn.clamp_length_max(MAX_PUSH_SPEED * 4.0).to_array(),
+        ]
+        .concat();
         for (r, b) in rhs.iter_mut().zip(bias) {
             *r = -(*r + b);
         }
@@ -1286,24 +1495,35 @@ fn solve_locks(sb: &mut [SolverBody], locks: &mut [LockBlock], bias_rate: f32) {
 impl LockGroup {
     /// Builds the rows' effective mass matrix. Rows neither body can move along drop out.
     fn new(sb: &[SolverBody], rows: Vec<GroupRow>, locks: &[LockBlock]) -> Option<LockGroup> {
-        let moves = |body: usize| body != STATIC && (sb[body].inv_mass > 0.0 || sb[body].inv_i != Mat3::ZERO);
+        let moves = |body: usize| {
+            body != STATIC && (sb[body].inv_mass > 0.0 || sb[body].inv_i != Mat3::ZERO)
+        };
         // M⁻¹ Jᵀ per row: change in A's and B's velocities per unit impulse.
         let response = |r: &GroupRow| {
             let (sa, sbb) = (get(sb, r.a), get(sb, r.b));
-            [r.jacobian[0] * sa.inv_mass, sa.inv_i * r.jacobian[1], r.jacobian[2] * sbb.inv_mass, sbb.inv_i * r.jacobian[3]]
+            [
+                r.jacobian[0] * sa.inv_mass,
+                sa.inv_i * r.jacobian[1],
+                r.jacobian[2] * sbb.inv_mass,
+                sbb.inv_i * r.jacobian[3],
+            ]
         };
         let entry = |ri: &GroupRow, rj: &GroupRow, mj: &[Vec3; 4]| {
             let mut k = 0.0;
             for (si, bi) in [ri.a, ri.b].into_iter().enumerate() {
                 for (sj, bj) in [rj.a, rj.b].into_iter().enumerate() {
                     if bi == bj && bi != STATIC {
-                        k += ri.jacobian[2 * si].dot(mj[2 * sj]) + ri.jacobian[2 * si + 1].dot(mj[2 * sj + 1]);
+                        k += ri.jacobian[2 * si].dot(mj[2 * sj])
+                            + ri.jacobian[2 * si + 1].dot(mj[2 * sj + 1]);
                     }
                 }
             }
             k as f64
         };
-        let rows: Vec<GroupRow> = rows.into_iter().filter(|r| entry(r, r, &response(r)) > 1e-9).collect();
+        let rows: Vec<GroupRow> = rows
+            .into_iter()
+            .filter(|r| entry(r, r, &response(r)) > 1e-9)
+            .collect();
         let n = rows.len();
         if n == 0 {
             return None;
@@ -1319,7 +1539,12 @@ impl LockGroup {
         let mut k = vec![0.0f64; n * n];
         let mut k_pattern = vec![Vec::new(); n];
         for (i, r) in rows.iter().enumerate() {
-            let mut near: Vec<usize> = [r.a, r.b].into_iter().filter(|&b| moves(b)).flat_map(|b| on_body[&b].iter().copied()).filter(|&j| j < i).collect();
+            let mut near: Vec<usize> = [r.a, r.b]
+                .into_iter()
+                .filter(|&b| moves(b))
+                .flat_map(|b| on_body[&b].iter().copied())
+                .filter(|&j| j < i)
+                .collect();
             near.sort_unstable();
             near.dedup();
             for &j in &near {
@@ -1336,7 +1561,15 @@ impl LockGroup {
                 RowSource::Anchor(..) => false,
             })
             .collect();
-        let mut group = LockGroup { rows, k, k_pattern, pattern: Vec::new(), velocity_factor: Vec::new(), push_factor: Vec::new(), out };
+        let mut group = LockGroup {
+            rows,
+            k,
+            k_pattern,
+            pattern: Vec::new(),
+            velocity_factor: Vec::new(),
+            push_factor: Vec::new(),
+            out,
+        };
         group.factorize();
         Some(group)
     }
@@ -1406,7 +1639,13 @@ impl LockGroup {
 
     /// Impulses that make `velocity_scale` × every solved row's relative velocity plus
     /// `bias_scale` × its bias zero, with factor `l`.
-    fn solve(&self, l: &[f64], sb: &[SolverBody], velocity_scale: f64, bias_scale: f64) -> Vec<f64> {
+    fn solve(
+        &self,
+        l: &[f64],
+        sb: &[SolverBody],
+        velocity_scale: f64,
+        bias_scale: f64,
+    ) -> Vec<f64> {
         let n = self.rows.len();
         let mut x: Vec<f64> = self
             .rows
@@ -1417,7 +1656,10 @@ impl LockGroup {
                     return 0.0;
                 }
                 let (sa, sbb) = (get(sb, r.a), get(sb, r.b));
-                let v = r.jacobian[0].dot(sa.v) + r.jacobian[1].dot(sa.w) + r.jacobian[2].dot(sbb.v) + r.jacobian[3].dot(sbb.w);
+                let v = r.jacobian[0].dot(sa.v)
+                    + r.jacobian[1].dot(sa.w)
+                    + r.jacobian[2].dot(sbb.v)
+                    + r.jacobian[3].dot(sbb.w);
                 -(v as f64 * velocity_scale + r.bias as f64 * bias_scale)
             })
             .collect();
@@ -1447,14 +1689,25 @@ impl LockGroup {
             let push = self.solve(&self.push_factor, sb, 0.0, 1.0);
             let mut moved = vec![(Vec3::ZERO, Vec3::ZERO); sb.len()];
             for (r, &d) in self.rows.iter().zip(&push) {
-                for (side, body) in [r.a, r.b].into_iter().enumerate().filter(|&(_, b)| b != STATIC) {
+                for (side, body) in [r.a, r.b]
+                    .into_iter()
+                    .enumerate()
+                    .filter(|&(_, b)| b != STATIC)
+                {
                     let s = sb[body];
                     moved[body].0 += r.jacobian[2 * side] * (s.inv_mass * d as f32);
                     moved[body].1 += s.inv_i * (r.jacobian[2 * side + 1] * d as f32);
                 }
             }
-            let fastest = moved.iter().fold(0.0f32, |m, (v, w)| m.max(v.length() / MAX_PUSH_SPEED).max(w.length() / MAX_ANGULAR_SPEED));
-            let scale = if fastest > 1.0 { 1.0 / fastest as f64 } else { 1.0 };
+            let fastest = moved.iter().fold(0.0f32, |m, (v, w)| {
+                m.max(v.length() / MAX_PUSH_SPEED)
+                    .max(w.length() / MAX_ANGULAR_SPEED)
+            });
+            let scale = if fastest > 1.0 {
+                1.0 / fastest as f64
+            } else {
+                1.0
+            };
             for (x, p) in x.iter_mut().zip(push) {
                 *x += p * scale;
             }
@@ -1480,17 +1733,31 @@ impl LockGroup {
 /// Solves each lock group directly, adding the impulses to the joints' and locks' own so
 /// they warm start. A lock axis that would pass its strength is held at it and the rest
 /// solved again without it.
-fn solve_groups(sb: &mut [SolverBody], groups: &mut [LockGroup], joints: &mut [JointRows], locks: &mut [LockBlock], use_bias: bool) {
+fn solve_groups(
+    sb: &mut [SolverBody],
+    groups: &mut [LockGroup],
+    joints: &mut [JointRows],
+    locks: &mut [LockBlock],
+    use_bias: bool,
+) {
     for group in groups.iter_mut() {
         loop {
             let x = group.impulses(sb, use_bias);
-            let over = group.rows.iter().zip(&x).position(|(r, &dx)| match r.source {
-                RowSource::Lock(l, axis) => (locks[l].impulse[axis] + dx as f32).abs() > r.bound,
-                RowSource::Anchor(..) => false,
-            });
+            let over = group
+                .rows
+                .iter()
+                .zip(&x)
+                .position(|(r, &dx)| match r.source {
+                    RowSource::Lock(l, axis) => {
+                        (locks[l].impulse[axis] + dx as f32).abs() > r.bound
+                    }
+                    RowSource::Anchor(..) => false,
+                });
             if let Some(i) = over {
                 let r = &group.rows[i];
-                let RowSource::Lock(l, axis) = r.source else { unreachable!() };
+                let RowSource::Lock(l, axis) = r.source else {
+                    unreachable!()
+                };
                 let held = (locks[l].impulse[axis] + x[i] as f32).clamp(-r.bound, r.bound);
                 LockGroup::apply(r, sb, held - locks[l].impulse[axis]);
                 locks[l].impulse[axis] = held;
@@ -1562,7 +1829,16 @@ fn apply_restitution(sb: &mut [SolverBody], contacts: &mut [ContactRow]) {
 /// Solves one angular row and returns the impulse it applied. `coupling` removes the
 /// part of the row's velocity the joint anchor is about to correct anyway.
 #[allow(clippy::too_many_arguments)]
-fn solve_angular(sb: &mut [SolverBody], a: usize, b: usize, row: &mut AngularRow, soft_params: Softness, h: f32, use_bias: bool, coupling: f32) -> f32 {
+fn solve_angular(
+    sb: &mut [SolverBody],
+    a: usize,
+    b: usize,
+    row: &mut AngularRow,
+    soft_params: Softness,
+    h: f32,
+    use_bias: bool,
+    coupling: f32,
+) -> f32 {
     let (ba, bb) = (get(sb, a), get(sb, b));
     let jv = row.axis.dot(bb.w - ba.w) - coupling;
     let old = row.impulse;
@@ -1572,7 +1848,11 @@ fn solve_angular(sb: &mut [SolverBody], a: usize, b: usize, row: &mut AngularRow
         let (bias, mass_scale, impulse_scale) = if row.value > 0.0 {
             (row.value / h, 1.0, 0.0)
         } else if use_bias {
-            ((soft_params.bias_rate * row.value).max(-MAX_PUSH_SPEED * 4.0), soft_params.mass_scale, soft_params.impulse_scale)
+            (
+                (soft_params.bias_rate * row.value).max(-MAX_PUSH_SPEED * 4.0),
+                soft_params.mass_scale,
+                soft_params.impulse_scale,
+            )
         } else {
             (0.0, 1.0, 0.0)
         };
@@ -1595,7 +1875,12 @@ mod tests {
 
     fn world() -> World {
         let mut w = World::new(Vec3::new(0.0, -9.81, 0.0), ContactModel::ForceCapped);
-        w.set_materials(1, |_, _| Interaction { restitution: 0.0, friction: 100.0, adhesion: 0.0, softness: 0.0 });
+        w.set_materials(1, |_, _| Interaction {
+            restitution: 0.0,
+            friction: 100.0,
+            adhesion: 0.0,
+            softness: 0.0,
+        });
         w.ground = Some((0.0, 0));
         w
     }
@@ -1647,14 +1932,23 @@ mod tests {
         let b = ball(&mut w, Vec3::new(0.0, 1.0, 0.0), 0.1, 2.0);
         run(&mut w, 3.0);
         let body = &w.bodies[b];
-        assert!((body.position.y - 0.1).abs() < 0.01, "rests at {}", body.position.y);
+        assert!(
+            (body.position.y - 0.1).abs() < 0.01,
+            "rests at {}",
+            body.position.y
+        );
         assert!(body.linear_velocity.length() < 0.05);
     }
 
     #[test]
     fn restitution_bounces() {
         let mut w = world();
-        w.set_materials(1, |_, _| Interaction { restitution: 0.8, friction: 100.0, adhesion: 0.0, softness: 0.0 });
+        w.set_materials(1, |_, _| Interaction {
+            restitution: 0.8,
+            friction: 100.0,
+            adhesion: 0.0,
+            softness: 0.0,
+        });
         let b = ball(&mut w, Vec3::new(0.0, 1.0, 0.0), 0.1, 1.0);
         let mut peak_after_bounce = 0.0f32;
         let mut bounced = false;
@@ -1681,14 +1975,36 @@ mod tests {
         let b = ball(&mut w, Vec3::new(0.5, 0.0, 0.0), 0.05, 1.0);
         w.bodies[a].motion = Motion::Kinematic { momentum: 1.0 };
         w.bodies[b].parent = Some(a);
-        let wide = Limits { twist_min: -3.0, twist_max: 3.0, swing1: 3.0, swing2: 3.0 };
+        let wide = Limits {
+            twist_min: -3.0,
+            twist_max: 3.0,
+            swing1: 3.0,
+            swing2: 3.0,
+        };
         let mut joint = Joint::new(
-            a, b, Vec3::ZERO, Vec3::new(-0.5, 0.0, 0.0),
-            Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY,
-            wide, wide, 0.0, 0.0,
+            a,
+            b,
+            Vec3::ZERO,
+            Vec3::new(-0.5, 0.0, 0.0),
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            wide,
+            wide,
+            0.0,
+            0.0,
         );
-        let gains = Gains { stiffness: 2000.0, damping: 50.0, force_limit: 500.0 };
-        joint.muscle = Some(Muscle { target: Quat::IDENTITY, twist: gains, swing: gains });
+        let gains = Gains {
+            stiffness: 2000.0,
+            damping: 50.0,
+            force_limit: 500.0,
+        };
+        joint.muscle = Some(Muscle {
+            target: Quat::IDENTITY,
+            twist: gains,
+            swing: gains,
+        });
         w.joints.push(joint);
         run(&mut w, 2.0);
         let tip = w.bodies[b].position;
@@ -1713,15 +2029,37 @@ mod tests {
         let a = ball(&mut w, Vec3::ZERO, 0.05, 5.0);
         let b = ball(&mut w, Vec3::new(0.5, 0.0, 0.0), 0.05, 1.0);
         w.bodies[a].motion = Motion::Kinematic { momentum: 1.0 };
-        let wide = Limits { twist_min: -3.0, twist_max: 3.0, swing1: 3.0, swing2: 3.0 };
+        let wide = Limits {
+            twist_min: -3.0,
+            twist_max: 3.0,
+            swing1: 3.0,
+            swing2: 3.0,
+        };
         let mut joint = Joint::new(
-            a, b, Vec3::ZERO, Vec3::new(-0.5, 0.0, 0.0),
-            Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY,
-            wide, wide, 0.0, 0.0,
+            a,
+            b,
+            Vec3::ZERO,
+            Vec3::new(-0.5, 0.0, 0.0),
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            wide,
+            wide,
+            0.0,
+            0.0,
         );
         // Very stiff but only 1 N·m: can't hold up a 4.9 N·m load.
-        let gains = Gains { stiffness: 1e5, damping: 100.0, force_limit: 1.0 };
-        joint.muscle = Some(Muscle { target: Quat::IDENTITY, twist: gains, swing: gains });
+        let gains = Gains {
+            stiffness: 1e5,
+            damping: 100.0,
+            force_limit: 1.0,
+        };
+        joint.muscle = Some(Muscle {
+            target: Quat::IDENTITY,
+            twist: gains,
+            swing: gains,
+        });
         w.joints.push(joint);
         let mut lowest = f32::MAX;
         for _ in 0..180 {
@@ -1739,11 +2077,25 @@ mod tests {
         let a = ball(&mut w, Vec3::ZERO, 0.05, 5.0);
         let b = ball(&mut w, Vec3::new(0.5, 0.0, 0.0), 0.05, 1.0);
         w.bodies[a].motion = Motion::Kinematic { momentum: 1.0 };
-        let limits = Limits { twist_min: -0.5, twist_max: 0.5, swing1: 1.0, swing2: 1.0 };
+        let limits = Limits {
+            twist_min: -0.5,
+            twist_max: 0.5,
+            swing1: 1.0,
+            swing2: 1.0,
+        };
         w.joints.push(Joint::new(
-            a, b, Vec3::ZERO, Vec3::new(-0.5, 0.0, 0.0),
-            Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY,
-            limits, limits, 0.0, 0.0,
+            a,
+            b,
+            Vec3::ZERO,
+            Vec3::new(-0.5, 0.0, 0.0),
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            limits,
+            limits,
+            0.0,
+            0.0,
         ));
         w.bodies[b].angular_velocity = Vec3::new(5.0, 0.0, 0.0);
         run(&mut w, 1.0);
@@ -1760,11 +2112,25 @@ mod tests {
         let b = ball(&mut w, Vec3::new(0.5, 0.0, 0.0), 0.05, 1.0);
         w.bodies[a].motion = Motion::Kinematic { momentum: 1.0 };
         // Gravity bends the arm about Z; the cone allows 0.3 rad.
-        let limits = Limits { twist_min: -1.0, twist_max: 1.0, swing1: 0.3, swing2: 0.3 };
+        let limits = Limits {
+            twist_min: -1.0,
+            twist_max: 1.0,
+            swing1: 0.3,
+            swing2: 0.3,
+        };
         w.joints.push(Joint::new(
-            a, b, Vec3::ZERO, Vec3::new(-0.5, 0.0, 0.0),
-            Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY,
-            limits, limits, 0.0, 0.0,
+            a,
+            b,
+            Vec3::ZERO,
+            Vec3::new(-0.5, 0.0, 0.0),
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            limits,
+            limits,
+            0.0,
+            0.0,
         ));
         run(&mut w, 2.0);
         let (_, swing) = swing_twist(w.bodies[b].rotation);
@@ -1773,11 +2139,25 @@ mod tests {
 
     #[test]
     fn muscle_targets_are_clamped_into_limits() {
-        let limits = Limits { twist_min: -0.5, twist_max: 0.5, swing1: 0.3, swing2: 0.3 };
+        let limits = Limits {
+            twist_min: -0.5,
+            twist_max: 0.5,
+            swing1: 0.3,
+            swing2: 0.3,
+        };
         let joint = Joint::new(
-            0, 1, Vec3::ZERO, Vec3::ZERO,
-            Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY,
-            limits, limits, 0.0, 0.0,
+            0,
+            1,
+            Vec3::ZERO,
+            Vec3::ZERO,
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            limits,
+            limits,
+            0.0,
+            0.0,
         );
         let inside = Quat::from_rotation_x(0.2);
         assert_eq!(joint.clamp_to_limits(inside), inside);
@@ -1793,7 +2173,13 @@ mod tests {
         w.ground = None;
         let b = ball(&mut w, Vec3::new(0.0, 2.0, 0.0), 0.1, 3.0);
         // Held in Y only: it should stay up but drift sideways when pushed.
-        w.locks.push(Lock { anchor: None, body: b, target: (Quat::IDENTITY, Vec3::new(0.0, 2.0, 0.0)), linear: Vec3::new(0.0, 1e5, 0.0), angular: Vec3::ZERO });
+        w.locks.push(Lock {
+            anchor: None,
+            body: b,
+            target: (Quat::IDENTITY, Vec3::new(0.0, 2.0, 0.0)),
+            linear: Vec3::new(0.0, 1e5, 0.0),
+            angular: Vec3::ZERO,
+        });
         w.bodies[b].linear_velocity = Vec3::new(1.0, 0.0, 0.0);
         run(&mut w, 1.0);
         let p = w.bodies[b].position;
@@ -1807,7 +2193,13 @@ mod tests {
         let mut w = world();
         w.ground = None;
         let b = ball(&mut w, Vec3::new(0.0, 2.0, 0.0), 0.1, 10.0);
-        w.locks.push(Lock { anchor: None, body: b, target: (Quat::IDENTITY, Vec3::new(0.0, 2.0, 0.0)), linear: Vec3::new(0.0, 50.0, 0.0), angular: Vec3::ZERO });
+        w.locks.push(Lock {
+            anchor: None,
+            body: b,
+            target: (Quat::IDENTITY, Vec3::new(0.0, 2.0, 0.0)),
+            linear: Vec3::new(0.0, 50.0, 0.0),
+            angular: Vec3::ZERO,
+        });
         run(&mut w, 1.0);
         // Net acceleration (98.1 - 50) N / 10 kg ≈ 4.8 m/s², so ≈ 2.4 m in a second.
         let fallen = 2.0 - w.bodies[b].position.y;
@@ -1821,11 +2213,20 @@ mod tests {
         let mut w = world();
         w.ground = None;
         let b = ball(&mut w, Vec3::new(0.0, 10.0, 0.0), 0.1, 2.0);
-        w.locks.push(Lock { anchor: None, body: b, target: (Quat::IDENTITY, Vec3::new(0.0, 10.0, 0.0)), linear: Vec3::new(0.0, -10.0, 0.0), angular: Vec3::ZERO });
+        w.locks.push(Lock {
+            anchor: None,
+            body: b,
+            target: (Quat::IDENTITY, Vec3::new(0.0, 10.0, 0.0)),
+            linear: Vec3::new(0.0, -10.0, 0.0),
+            angular: Vec3::ZERO,
+        });
         run(&mut w, 1.0);
         let v = w.bodies[b].linear_velocity;
         let expected = -9.81 - 10.0 / 2.0;
-        assert!((v.y - expected).abs() < 1e-3, "{v}, expected {expected} m/s down");
+        assert!(
+            (v.y - expected).abs() < 1e-3,
+            "{v}, expected {expected} m/s down"
+        );
         assert!(v.x.abs() < 1e-6 && v.z.abs() < 1e-6, "{v}");
     }
 
@@ -1837,14 +2238,25 @@ mod tests {
         w.ground = None;
         let b = ball(&mut w, Vec3::new(0.0, 10.0, 0.0), 0.5, 10.0);
         let inertia = 0.4 * 10.0 * 0.5 * 0.5;
-        w.locks.push(Lock { anchor: None, body: b, target: (Quat::IDENTITY, Vec3::new(0.0, 10.0, 0.0)), linear: Vec3::ZERO, angular: Vec3::new(-100.0, 0.0, 0.0) });
+        w.locks.push(Lock {
+            anchor: None,
+            body: b,
+            target: (Quat::IDENTITY, Vec3::new(0.0, 10.0, 0.0)),
+            linear: Vec3::ZERO,
+            angular: Vec3::new(-100.0, 0.0, 0.0),
+        });
         run(&mut w, 0.2);
         let spin = w.bodies[b].angular_velocity;
         let expected = -100.0 * 0.2 / inertia;
-        assert!((spin.x - expected).abs() < 1e-3, "{spin}, expected {expected} rad/s about X");
+        assert!(
+            (spin.x - expected).abs() < 1e-3,
+            "{spin}, expected {expected} rad/s about X"
+        );
         assert!(spin.y.abs() < 1e-5 && spin.z.abs() < 1e-5, "{spin}");
         // Half of -100 rad/s² times (0.2 s)²: -2 rad about X.
-        let off = w.bodies[b].rotation.angle_between(Quat::from_rotation_x(-2.0));
+        let off = w.bodies[b]
+            .rotation
+            .angle_between(Quat::from_rotation_x(-2.0));
         assert!(off < 0.05, "{off} rad away from a -2 rad turn about X");
     }
 
@@ -1867,10 +2279,26 @@ mod tests {
         });
         run(&mut w, 0.5);
         let body = &w.bodies[b];
-        assert!(body.position.x.abs() < 0.01, "held axis drifted: {}", body.position);
-        assert!((body.linear_velocity.y - (-9.81 - 2.0) * 0.5).abs() < 1e-2, "{}", body.linear_velocity);
-        assert!(body.angular_velocity.y.abs() < 0.05, "held rotation still turning: {}", body.angular_velocity);
-        assert!((body.angular_velocity.x + 50.0).abs() < 0.5, "{}", body.angular_velocity);
+        assert!(
+            body.position.x.abs() < 0.01,
+            "held axis drifted: {}",
+            body.position
+        );
+        assert!(
+            (body.linear_velocity.y - (-9.81 - 2.0) * 0.5).abs() < 1e-2,
+            "{}",
+            body.linear_velocity
+        );
+        assert!(
+            body.angular_velocity.y.abs() < 0.05,
+            "held rotation still turning: {}",
+            body.angular_velocity
+        );
+        assert!(
+            (body.angular_velocity.x + 50.0).abs() < 0.5,
+            "{}",
+            body.angular_velocity
+        );
     }
 
     /// A join's negative axis pushes the body and its anchor apart with equal and
@@ -1887,9 +2315,18 @@ mod tests {
         w.bodies[anchor].rotation = turn;
         // The anchor's X is world Y: the push on the body is down, away from the anchor.
         let offset = turn.inverse() * (w.bodies[body].position - w.bodies[anchor].position);
-        w.locks.push(Lock { anchor: Some(anchor), body, target: (Quat::IDENTITY, offset), linear: Vec3::new(-10.0, 1e5, 1e5), angular: Vec3::ZERO });
+        w.locks.push(Lock {
+            anchor: Some(anchor),
+            body,
+            target: (Quat::IDENTITY, offset),
+            linear: Vec3::new(-10.0, 1e5, 1e5),
+            angular: Vec3::ZERO,
+        });
         run(&mut w, 0.5);
-        let (va, vb) = (w.bodies[anchor].linear_velocity, w.bodies[body].linear_velocity);
+        let (va, vb) = (
+            w.bodies[anchor].linear_velocity,
+            w.bodies[body].linear_velocity,
+        );
         assert!((vb.y - (-10.0 * 0.5 / 5.0)).abs() < 1e-3, "body {vb}");
         assert!((va.y - (10.0 * 0.5 / 2.0)).abs() < 1e-3, "anchor {va}");
         let momentum = va * 2.0 + vb * 5.0;
@@ -1903,9 +2340,15 @@ mod tests {
         run(&mut w, 0.5);
         let (a, b) = (&w.bodies[anchor], &w.bodies[body]);
         let after = a.linear_velocity * 2.0 + b.linear_velocity * 5.0;
-        assert!((after - before).length() < 1e-3, "momentum {before} -> {after}");
+        assert!(
+            (after - before).length() < 1e-3,
+            "momentum {before} -> {after}"
+        );
         let gap = a.rotation.inverse() * (b.position - a.position) - offset;
-        assert!(gap.y.abs() < 0.01 && gap.z.abs() < 0.01, "held axes opened {gap}");
+        assert!(
+            gap.y.abs() < 0.01 && gap.z.abs() < 0.01,
+            "held axes opened {gap}"
+        );
         assert!(gap.x < -0.5, "drive axis didn't push apart: {gap}");
     }
 
@@ -1920,15 +2363,36 @@ mod tests {
         w.bodies[anchor].linear_velocity = Vec3::new(1.0, 0.0, 0.0);
         let handle = ball(&mut w, Vec3::new(0.0, 1.9, 0.0), 0.02, 0.05);
         let load = ball(&mut w, Vec3::new(0.0, 1.4, 0.0), 0.2, 50.0);
-        let free = Limits { twist_min: -3.0, twist_max: 3.0, swing1: 3.0, swing2: 3.0 };
+        let free = Limits {
+            twist_min: -3.0,
+            twist_max: 3.0,
+            swing1: 3.0,
+            swing2: 3.0,
+        };
         w.joints.push(Joint::new(
-            handle, load, Vec3::ZERO, Vec3::new(0.0, 0.5, 0.0),
-            Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY,
-            free, free, 0.0, 0.0,
+            handle,
+            load,
+            Vec3::ZERO,
+            Vec3::new(0.0, 0.5, 0.0),
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            free,
+            free,
+            0.0,
+            0.0,
         ));
-        w.locks.push(Lock { anchor: Some(anchor), body: handle, target: (Quat::IDENTITY, Vec3::new(0.0, -0.1, 0.0)), linear: Vec3::splat(1e5), angular: Vec3::splat(1e5) });
+        w.locks.push(Lock {
+            anchor: Some(anchor),
+            body: handle,
+            target: (Quat::IDENTITY, Vec3::new(0.0, -0.1, 0.0)),
+            linear: Vec3::splat(1e5),
+            angular: Vec3::splat(1e5),
+        });
         run(&mut w, 1.0);
-        let gap = w.bodies[handle].position - (w.bodies[anchor].position + Vec3::new(0.0, -0.1, 0.0));
+        let gap =
+            w.bodies[handle].position - (w.bodies[anchor].position + Vec3::new(0.0, -0.1, 0.0));
         assert!(gap.length() < 0.01, "handle drifted {gap}");
         assert!((w.bodies[anchor].position.x - 1.0).abs() < 1e-3);
     }
@@ -1943,20 +2407,48 @@ mod tests {
         let (length, angle) = (6.0f32, 1.0f32);
         let pivot = Vec3::new(0.0, 10.0, 0.0);
         let top = ball(&mut w, pivot, 0.03, 2.7);
-        let bar = ball(&mut w, pivot + Vec3::new(0.0, -angle.cos(), angle.sin()) * length, 0.03, 2.7);
+        let bar = ball(
+            &mut w,
+            pivot + Vec3::new(0.0, -angle.cos(), angle.sin()) * length,
+            0.03,
+            2.7,
+        );
         // As the scene lists them: the join, then the hinge.
         let offset = w.bodies[top].position - w.bodies[bar].position;
-        w.locks.push(Lock { anchor: Some(bar), body: top, target: (Quat::IDENTITY, offset), linear: Vec3::splat(1e5), angular: Vec3::splat(1e5) });
-        w.locks.push(Lock { anchor: None, body: top, target: (Quat::IDENTITY, pivot), linear: Vec3::splat(1e5), angular: Vec3::new(0.0, 1e5, 1e5) });
+        w.locks.push(Lock {
+            anchor: Some(bar),
+            body: top,
+            target: (Quat::IDENTITY, offset),
+            linear: Vec3::splat(1e5),
+            angular: Vec3::splat(1e5),
+        });
+        w.locks.push(Lock {
+            anchor: None,
+            body: top,
+            target: (Quat::IDENTITY, pivot),
+            linear: Vec3::splat(1e5),
+            angular: Vec3::new(0.0, 1e5, 1e5),
+        });
         let mut fastest = 0.0f32;
         for _ in 0..240 {
             w.step(1.0 / 120.0);
             fastest = fastest.max(w.bodies[bar].linear_velocity.length());
         }
         let expected = (2.0 * 9.81 * length * (1.0 - angle.cos())).sqrt();
-        assert!((fastest - expected).abs() < 0.05 * expected, "fastest {fastest}, a pendulum reaches {expected}");
-        assert!(w.bodies[top].position.distance(pivot) < 0.01, "hinge moved to {}", w.bodies[top].position);
-        assert!((w.bodies[bar].position.distance(pivot) - length).abs() < 0.01, "bar at {}", w.bodies[bar].position.distance(pivot));
+        assert!(
+            (fastest - expected).abs() < 0.05 * expected,
+            "fastest {fastest}, a pendulum reaches {expected}"
+        );
+        assert!(
+            w.bodies[top].position.distance(pivot) < 0.01,
+            "hinge moved to {}",
+            w.bodies[top].position
+        );
+        assert!(
+            (w.bodies[bar].position.distance(pivot) - length).abs() < 0.01,
+            "bar at {}",
+            w.bodies[bar].position.distance(pivot)
+        );
     }
 
     /// endorphin's Walk With Gun: a 550 kg prop joined to both hands closes a loop
@@ -1966,22 +2458,58 @@ mod tests {
     fn heavy_prop_held_in_both_hands_keeps_the_arms_together() {
         let mut w = world();
         w.ground = None;
-        let free = Limits { twist_min: -3.0, twist_max: 3.0, swing1: 3.0, swing2: 3.0 };
+        let free = Limits {
+            twist_min: -3.0,
+            twist_max: 3.0,
+            swing1: 3.0,
+            swing2: 3.0,
+        };
         let torso = ball(&mut w, Vec3::new(0.0, 1.5, 0.0), 0.1, 30.0);
         w.bodies[torso].motion = Motion::Kinematic { momentum: 0.0 };
         let joint = |w: &mut World, parent: usize, at_parent: Vec3, at: Vec3, mass: f32| {
             let child = ball(w, at, 0.04, mass);
             w.bodies[child].group = child;
             let anchor = w.bodies[parent].position + at_parent;
-            w.joints.push(Joint::new(parent, child, at_parent, anchor - at, Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY, free, free, 0.0, 0.0));
+            w.joints.push(Joint::new(
+                parent,
+                child,
+                at_parent,
+                anchor - at,
+                Quat::IDENTITY,
+                Quat::IDENTITY,
+                Quat::IDENTITY,
+                Quat::IDENTITY,
+                free,
+                free,
+                0.0,
+                0.0,
+            ));
             child
         };
         let mut hands = Vec::new();
         for side in [-1.0f32, 1.0] {
             let x = 0.2 * side;
-            let upper = joint(&mut w, torso, Vec3::new(x, 0.0, 0.0), Vec3::new(x, 1.5, 0.15), 2.0);
-            let fore = joint(&mut w, upper, Vec3::new(0.0, 0.0, 0.15), Vec3::new(x, 1.5, 0.45), 1.5);
-            hands.push(joint(&mut w, fore, Vec3::new(0.0, 0.0, 0.15), Vec3::new(x, 1.5, 0.65), 0.5));
+            let upper = joint(
+                &mut w,
+                torso,
+                Vec3::new(x, 0.0, 0.0),
+                Vec3::new(x, 1.5, 0.15),
+                2.0,
+            );
+            let fore = joint(
+                &mut w,
+                upper,
+                Vec3::new(0.0, 0.0, 0.15),
+                Vec3::new(x, 1.5, 0.45),
+                1.5,
+            );
+            hands.push(joint(
+                &mut w,
+                fore,
+                Vec3::new(0.0, 0.0, 0.15),
+                Vec3::new(x, 1.5, 0.65),
+                0.5,
+            ));
         }
         let gun = ball(&mut w, Vec3::new(0.0, 1.5, 0.8), 0.15, 550.0);
         w.bodies[gun].group = gun;
@@ -1989,14 +2517,23 @@ mod tests {
         let left = hands[0];
         for body in [gun, hands[1]] {
             let offset = w.bodies[body].position - w.bodies[left].position;
-            w.locks.push(Lock { anchor: Some(left), body, target: (Quat::IDENTITY, offset), linear: Vec3::splat(1e5), angular: Vec3::splat(1e4) });
+            w.locks.push(Lock {
+                anchor: Some(left),
+                body,
+                target: (Quat::IDENTITY, offset),
+                linear: Vec3::splat(1e5),
+                angular: Vec3::splat(1e4),
+            });
         }
         let gap = |w: &World| {
-            w.joints.iter().map(|j| {
-                let (a, b) = (&w.bodies[j.parent], &w.bodies[j.child]);
-                (a.position + a.rotation * j.anchor_parent).distance(b.position + b.rotation * j.anchor_child)
-            })
-            .fold(0.0f32, f32::max)
+            w.joints
+                .iter()
+                .map(|j| {
+                    let (a, b) = (&w.bodies[j.parent], &w.bodies[j.child]);
+                    (a.position + a.rotation * j.anchor_parent)
+                        .distance(b.position + b.rotation * j.anchor_child)
+                })
+                .fold(0.0f32, f32::max)
         };
         let mut widest = 0.0f32;
         for _ in 0..240 {
@@ -2005,7 +2542,10 @@ mod tests {
         }
         assert!(widest < 0.02, "a joint opened by {widest} m");
         let held = w.bodies[gun].position - w.bodies[left].position;
-        assert!(held.is_finite() && held.length() < 1.0, "gun came loose: {held}");
+        assert!(
+            held.is_finite() && held.length() < 1.0,
+            "gun came loose: {held}"
+        );
     }
 
     /// Collision-only scenery moving into a body pushes it along without launching it,
@@ -2023,7 +2563,10 @@ mod tests {
             run(&mut w, 0.2);
             let (wall, body) = (&w.bodies[wall], &w.bodies[b]);
             // Touching at 0.3 m; soft contacts let a pushed body overlap a little.
-            assert!(body.position.x > wall.position.x + 0.27, "passed through at momentum {momentum}");
+            assert!(
+                body.position.x > wall.position.x + 0.27,
+                "passed through at momentum {momentum}"
+            );
             let speed = body.linear_velocity.x;
             if momentum == 0.0 {
                 assert!(speed < 0.5, "launched at {speed} m/s");
@@ -2043,9 +2586,16 @@ mod tests {
         let cup = ball(&mut w, Vec3::new(0.0, 0.8, 0.0), 0.1, 0.3);
         w.bodies[cup].group = 1;
         run(&mut w, 2.0);
-        assert_eq!(w.bodies[table].position, Vec3::ZERO, "a massless body must not move");
+        assert_eq!(
+            w.bodies[table].position,
+            Vec3::ZERO,
+            "a massless body must not move"
+        );
         let rest = w.bodies[cup].position.y;
-        assert!((rest - 0.6).abs() < 0.01, "should rest on the fixed body, at {rest}");
+        assert!(
+            (rest - 0.6).abs() < 0.01,
+            "should rest on the fixed body, at {rest}"
+        );
     }
 
     #[test]
@@ -2053,7 +2603,12 @@ mod tests {
         let make = || {
             let mut w = world();
             for i in 0..5 {
-                ball(&mut w, Vec3::new(i as f32 * 0.15, 0.5 + i as f32 * 0.3, 0.0), 0.1, 1.0);
+                ball(
+                    &mut w,
+                    Vec3::new(i as f32 * 0.15, 0.5 + i as f32 * 0.3, 0.0),
+                    0.1,
+                    1.0,
+                );
             }
             run(&mut w, 2.0);
             w.bodies.iter().map(|b| b.position).collect::<Vec<_>>()
@@ -2061,8 +2616,6 @@ mod tests {
         assert_eq!(make(), make());
     }
 }
-
-
 
 #[cfg(test)]
 mod chain_tests {
@@ -2073,8 +2626,18 @@ mod chain_tests {
     /// stiff force-limited muscles holding the rest pose under gravity.
     fn arm(tight: bool, stiffness: f32) -> f32 {
         let mut w = World::new(Vec3::new(0.0, -9.81, 0.0), ContactModel::ForceCapped);
-        w.set_materials(1, |_, _| Interaction { restitution: 0.2, friction: 100.0, adhesion: 0.0, softness: 0.0 });
-        let specs = [(5.0, 0.05, 0.0), (0.7, 0.03, 0.27), (0.5, 0.025, 0.13), (0.4, 0.02, 0.09)];
+        w.set_materials(1, |_, _| Interaction {
+            restitution: 0.2,
+            friction: 100.0,
+            adhesion: 0.0,
+            softness: 0.0,
+        });
+        let specs = [
+            (5.0, 0.05, 0.0),
+            (0.7, 0.03, 0.27),
+            (0.5, 0.025, 0.13),
+            (0.4, 0.02, 0.09),
+        ];
         let mut x = 0.0;
         for (i, (mass, r, len)) in specs.iter().enumerate() {
             x += len;
@@ -2086,7 +2649,11 @@ mod chain_tests {
                 angular_velocity: Vec3::ZERO,
                 inv_mass: 1.0 / mass,
                 inv_inertia: Vec3::splat(1.0 / inertia),
-                motion: if i == 0 { Motion::Kinematic { momentum: 1.0 } } else { Motion::Dynamic },
+                motion: if i == 0 {
+                    Motion::Kinematic { momentum: 1.0 }
+                } else {
+                    Motion::Dynamic
+                },
                 group: 0,
                 parent: if i == 0 { None } else { Some(i - 1) },
             });
@@ -2094,13 +2661,44 @@ mod chain_tests {
         for i in 1..specs.len() {
             let len = specs[i].2;
             let limits = if tight {
-                Limits { twist_min: -0.03, twist_max: 0.03, swing1: 0.01, swing2: 0.5 }
+                Limits {
+                    twist_min: -0.03,
+                    twist_max: 0.03,
+                    swing1: 0.01,
+                    swing2: 0.5,
+                }
             } else {
-                Limits { twist_min: -1.0, twist_max: 1.0, swing1: 1.0, swing2: 1.0 }
+                Limits {
+                    twist_min: -1.0,
+                    twist_max: 1.0,
+                    swing1: 1.0,
+                    swing2: 1.0,
+                }
             };
-            let mut j = Joint::new(i - 1, i, Vec3::ZERO, Vec3::new(-len, 0.0, 0.0), Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY, limits, limits, 10.0, 10.0);
-            let g = Gains { stiffness, damping: stiffness * 0.5, force_limit: stiffness };
-            j.muscle = Some(Muscle { target: Quat::IDENTITY, twist: g, swing: g });
+            let mut j = Joint::new(
+                i - 1,
+                i,
+                Vec3::ZERO,
+                Vec3::new(-len, 0.0, 0.0),
+                Quat::IDENTITY,
+                Quat::IDENTITY,
+                Quat::IDENTITY,
+                Quat::IDENTITY,
+                limits,
+                limits,
+                10.0,
+                10.0,
+            );
+            let g = Gains {
+                stiffness,
+                damping: stiffness * 0.5,
+                force_limit: stiffness,
+            };
+            j.muscle = Some(Muscle {
+                target: Quat::IDENTITY,
+                twist: g,
+                swing: g,
+            });
             w.joints.push(j);
         }
         let mut fastest = 0.0f32;
@@ -2119,8 +2717,18 @@ mod chain_tests {
     fn loaded_vertical_chain_stays_still() {
         for load in [10.0, 80.0] {
             let mut w = World::new(Vec3::new(0.0, -9.81, 0.0), ContactModel::ForceCapped);
-            w.set_materials(1, |_, _| Interaction { restitution: 0.0, friction: 100.0, adhesion: 0.0, softness: 0.0 });
-            let free = Limits { twist_min: -0.5, twist_max: 0.5, swing1: 1.2, swing2: 1.2 };
+            w.set_materials(1, |_, _| Interaction {
+                restitution: 0.0,
+                friction: 100.0,
+                adhesion: 0.0,
+                softness: 0.0,
+            });
+            let free = Limits {
+                twist_min: -0.5,
+                twist_max: 0.5,
+                swing1: 1.2,
+                swing2: 1.2,
+            };
             for k in 0..8usize {
                 let mass = if k == 7 { load } else { 0.1 };
                 let inertia = 0.4 * mass * 0.09 * 0.09;
@@ -2131,30 +2739,62 @@ mod chain_tests {
                     angular_velocity: Vec3::ZERO,
                     inv_mass: 1.0 / mass,
                     inv_inertia: Vec3::splat(1.0 / inertia),
-                    motion: if k == 0 { Motion::Kinematic { momentum: 0.0 } } else { Motion::Dynamic },
+                    motion: if k == 0 {
+                        Motion::Kinematic { momentum: 0.0 }
+                    } else {
+                        Motion::Dynamic
+                    },
                     group: 0,
                     parent: k.checked_sub(1),
                 });
                 if k > 0 {
-                    w.joints.push(Joint::new(k - 1, k, Vec3::new(0.0, -0.1, 0.0), Vec3::new(0.0, 0.1, 0.0), Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY, Quat::IDENTITY, free, free, 0.0, 0.0));
+                    w.joints.push(Joint::new(
+                        k - 1,
+                        k,
+                        Vec3::new(0.0, -0.1, 0.0),
+                        Vec3::new(0.0, 0.1, 0.0),
+                        Quat::IDENTITY,
+                        Quat::IDENTITY,
+                        Quat::IDENTITY,
+                        Quat::IDENTITY,
+                        free,
+                        free,
+                        0.0,
+                        0.0,
+                    ));
                 }
             }
             let mut fastest = 0.0f32;
             for _ in 0..360 {
                 w.step(1.0 / 120.0);
-                fastest = w.bodies.iter().map(|b| b.linear_velocity.length()).fold(fastest, f32::max);
+                fastest = w
+                    .bodies
+                    .iter()
+                    .map(|b| b.linear_velocity.length())
+                    .fold(fastest, f32::max);
             }
             let bottom = w.bodies[7].position.y;
-            assert!(fastest < 1.0 && (bottom - 3.6).abs() < 0.1, "load {load}: fastest {fastest}, bottom at {bottom}");
+            assert!(
+                fastest < 1.0 && (bottom - 3.6).abs() < 0.1,
+                "load {load}: fastest {fastest}, bottom at {bottom}"
+            );
         }
     }
 
     #[test]
     fn light_chain_with_stiff_muscles_and_tight_stops_is_stable() {
-        for (tight, k) in [(false, 1000.0), (true, 50.0), (true, 1000.0), (true, 5000.0)] {
+        for (tight, k) in [
+            (false, 1000.0),
+            (true, 50.0),
+            (true, 1000.0),
+            (true, 5000.0),
+        ] {
             let fastest = arm(tight, k);
             eprintln!("tight stops {tight}, stiffness {k}: fastest {fastest:.2} m/s");
-            assert!(fastest < 2.0, "chain blew up (tight {tight}, k {k}): {fastest} m/s");
+            assert!(
+                fastest < 2.0,
+                "chain blew up (tight {tight}, k {k}): {fastest} m/s"
+            );
         }
     }
 }

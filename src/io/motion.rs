@@ -77,7 +77,10 @@ pub fn sample(project: &Project, character: usize, simulation: Option<&Simulatio
     let mut simulated = false;
     let frames = (range.start..=range.end)
         .map(|frame| {
-            let state = simulation.and_then(|s| s.frame(frame)).and_then(|f| f.get(character)).and_then(Option::as_ref);
+            let state = simulation
+                .and_then(|s| s.frame(frame))
+                .and_then(|f| f.get(character))
+                .and_then(Option::as_ref);
             match state {
                 Some(state) if state.joints.len() == skeleton.joints.len() => {
                     simulated = true;
@@ -90,7 +93,12 @@ pub fn sample(project: &Project, character: usize, simulation: Option<&Simulatio
             }
         })
         .collect();
-    Motion { fps: project.settings.fps, start: range.start, frames, simulated }
+    Motion {
+        fps: project.settings.fps,
+        start: range.start,
+        frames,
+        simulated,
+    }
 }
 
 /// A joint's motion as exporters write it: full local rotations (rest included) as
@@ -120,7 +128,11 @@ pub const ORDERS: [(EulerRot, &str); 6] = [
 ];
 
 pub fn joint_curves(skeleton: &SkeletonRef, motion: &Motion) -> Vec<JointCurves> {
-    let locals: Vec<Vec<(Quat, Vec3)>> = motion.frames.iter().map(|world| local_transforms(skeleton, world)).collect();
+    let locals: Vec<Vec<(Quat, Vec3)>> = motion
+        .frames
+        .iter()
+        .map(|world| local_transforms(skeleton, world))
+        .collect();
     skeleton
         .joints
         .iter()
@@ -139,8 +151,14 @@ pub fn joint_curves(skeleton: &SkeletonRef, motion: &Motion) -> Vec<JointCurves>
             let positions: Vec<Vec3> = locals.iter().map(|l| l[i].1).collect();
             let offset = Vec3::from(joint.offset);
             let is_root = joint.parent.filter(|&p| p < i).is_none();
-            let moves = positions.iter().any(|p| p.distance(offset) > TRANSLATION_TOLERANCE);
-            JointCurves { order, rotation, translation: (is_root || moves).then_some(positions) }
+            let moves = positions
+                .iter()
+                .any(|p| p.distance(offset) > TRANSLATION_TOLERANCE);
+            JointCurves {
+                order,
+                rotation,
+                translation: (is_root || moves).then_some(positions),
+            }
         })
         .collect()
 }
@@ -148,11 +166,20 @@ pub fn joint_curves(skeleton: &SkeletonRef, motion: &Motion) -> Vec<JointCurves>
 /// XYZ (NeuroMotion's own order) unless the motion passes near its gimbal lock, then
 /// whichever order keeps the middle angle furthest from ±90°.
 fn euler_order(rotations: &[Quat]) -> EulerRot {
-    let worst = |order: EulerRot| rotations.iter().map(|q| q.to_euler(order).1.abs()).fold(0.0f32, f32::max);
+    let worst = |order: EulerRot| {
+        rotations
+            .iter()
+            .map(|q| q.to_euler(order).1.abs())
+            .fold(0.0f32, f32::max)
+    };
     if worst(EulerRot::XYZ) < 75f32.to_radians() {
         return EulerRot::XYZ;
     }
-    ORDERS.iter().map(|o| o.0).min_by(|a, b| worst(*a).total_cmp(&worst(*b))).unwrap_or(EulerRot::XYZ)
+    ORDERS
+        .iter()
+        .map(|o| o.0)
+        .min_by(|a, b| worst(*a).total_cmp(&worst(*b)))
+        .unwrap_or(EulerRot::XYZ)
 }
 
 /// Joint names that are safe in export files: no whitespace or quotes, and unique.
@@ -165,9 +192,19 @@ pub fn export_names(skeleton: &SkeletonRef) -> Vec<String> {
             let clean: String = joint
                 .name
                 .chars()
-                .map(|c| if c.is_whitespace() || matches!(c, '"' | ':' | '{' | '}' | ',') { '_' } else { c })
+                .map(|c| {
+                    if c.is_whitespace() || matches!(c, '"' | ':' | '{' | '}' | ',') {
+                        '_'
+                    } else {
+                        c
+                    }
+                })
                 .collect();
-            let base = if clean.is_empty() { "joint".to_owned() } else { clean };
+            let base = if clean.is_empty() {
+                "joint".to_owned()
+            } else {
+                clean
+            };
             let mut name = base.clone();
             let mut n = 2;
             while !used.insert(name.clone()) {
@@ -198,22 +235,35 @@ mod samples {
     #[test]
     #[ignore = "writes files for checking exports in Blender, see tools/blender_check.py"]
     fn export_samples() {
-        let dir = std::env::var("NEUROMOTION_EXPORT_DIR").map_or_else(|_| PathBuf::from("target/export-samples"), PathBuf::from);
+        let dir = std::env::var("NEUROMOTION_EXPORT_DIR")
+            .map_or_else(|_| PathBuf::from("target/export-samples"), PathBuf::from);
         std::fs::create_dir_all(&dir).unwrap();
         let mut projects = vec![
             ("placeholder".to_owned(), placeholder_project()),
             ("physics-demo".to_owned(), physics_demo_project()),
-            ("rotated-rest".to_owned(), crate::io::bvh::tests::rotated_rest_project()),
+            (
+                "rotated-rest".to_owned(),
+                crate::io::bvh::tests::rotated_rest_project(),
+            ),
         ];
         if let Ok(scene) = std::env::var("NEUROMOTION_SAMPLE_SCENE") {
             let path = PathBuf::from(&scene);
-            let name = path.file_stem().unwrap().to_string_lossy().replace(' ', "-");
-            projects.push((name, crate::io::endorphin::import_scene(&path).unwrap().project));
+            let name = path
+                .file_stem()
+                .unwrap()
+                .to_string_lossy()
+                .replace(' ', "-");
+            projects.push((
+                name,
+                crate::io::endorphin::import_scene(&path).unwrap().project,
+            ));
         }
         for (name, project) in projects {
             let simulation = simulate(&project);
             for (ci, character) in project.characters.iter().enumerate() {
-                if character.kind == CharacterKind::Environment || character.skeleton.joints.is_empty() {
+                if character.kind == CharacterKind::Environment
+                    || character.skeleton.joints.is_empty()
+                {
                     continue;
                 }
                 let motion = sample(&project, ci, simulation.as_ref());
@@ -222,18 +272,51 @@ mod samples {
                 let file = |suffix: &str| dir.join(format!("{base}{suffix}"));
                 bvh::save(&file(".bvh"), skeleton, &motion, Units::Metres).unwrap();
                 bvh::save(&file("-cm.bvh"), skeleton, &motion, Units::Centimetres).unwrap();
-                fbx::save(&file(".fbx"), skeleton, &motion, Units::Metres, fbx::Encoding::Binary).unwrap();
-                fbx::save(&file("-cm.fbx"), skeleton, &motion, Units::Centimetres, fbx::Encoding::Binary).unwrap();
-                fbx::save(&file("-ascii.fbx"), skeleton, &motion, Units::Metres, fbx::Encoding::Ascii).unwrap();
+                fbx::save(
+                    &file(".fbx"),
+                    skeleton,
+                    &motion,
+                    Units::Metres,
+                    fbx::Encoding::Binary,
+                )
+                .unwrap();
+                fbx::save(
+                    &file("-cm.fbx"),
+                    skeleton,
+                    &motion,
+                    Units::Centimetres,
+                    fbx::Encoding::Binary,
+                )
+                .unwrap();
+                fbx::save(
+                    &file("-ascii.fbx"),
+                    skeleton,
+                    &motion,
+                    Units::Metres,
+                    fbx::Encoding::Ascii,
+                )
+                .unwrap();
 
                 // Joint positions (metres, Y up) at a few frames, by exported joint name.
                 let last = motion.frames.len() - 1;
-                let checked: Vec<usize> = [0, last / 4, last / 2, 3 * last / 4, last].into_iter().collect();
+                let checked: Vec<usize> = [0, last / 4, last / 2, 3 * last / 4, last]
+                    .into_iter()
+                    .collect();
                 let names = export_names(skeleton);
                 let joints: serde_json::Map<String, serde_json::Value> = names
                     .iter()
                     .enumerate()
-                    .map(|(j, n)| (n.clone(), json!(checked.iter().map(|&f| motion.frames[f][j].1.to_array()).collect::<Vec<_>>())))
+                    .map(|(j, n)| {
+                        (
+                            n.clone(),
+                            json!(
+                                checked
+                                    .iter()
+                                    .map(|&f| motion.frames[f][j].1.to_array())
+                                    .collect::<Vec<_>>()
+                            ),
+                        )
+                    })
                     .collect();
                 let reference = json!({
                     "fps": motion.fps,
@@ -242,7 +325,11 @@ mod samples {
                     "simulated": motion.simulated,
                     "joints": joints,
                 });
-                std::fs::write(file(".json"), serde_json::to_string_pretty(&reference).unwrap()).unwrap();
+                std::fs::write(
+                    file(".json"),
+                    serde_json::to_string_pretty(&reference).unwrap(),
+                )
+                .unwrap();
                 println!("wrote {}", file("").display());
             }
         }
