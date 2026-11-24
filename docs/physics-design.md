@@ -37,7 +37,8 @@ Each tick (1/rate s) runs 4 substeps. Each substep:
    - muscles;
    - locks (one 6-row block each, each row capped at its strength);
    - bodies that locks tie together, with the joints between them, solved directly as
-     one system (lesson 12);
+     one system (lesson 12), and the same for characters something much heavier
+     presses on (lesson 15);
    - contact normals, as *soft* constraints (frequency and damping ratio);
    - friction.
 5. Integrate positions.
@@ -233,6 +234,46 @@ Writing the test for a join's drive showed one more.
     held lock the two levers differ only by the lock's error, so every join's rows
     change by about that much.
 
+Car Hit, the last sample scene failing the sweep, added one more.
+
+15. **A character something much heavier presses on is solved directly, like a locked
+    group.** In Car Hit a 747 kg car, joined to a keyed carrier, drives into a
+    pedestrian at 8 m/s, carries them on the bonnet and stops dead, and a clavicle
+    came apart by 10 cm. The Car carry stand-in sets it up the same way, with
+    clavicles on the placeholder: the bonnet's edge catches the arm hanging at the
+    pedestrian's side and drives it into their ribs, and the shoulder opened 5.8 cm
+    and stayed open for about ten frames, right after the hit (whether the scene's
+    clavicle goes at the hit or at the stop isn't known without its files). The car
+    can't give way (its join holds it to the carrier) and the ribs only as the whole
+    body does, so the arm is caught between them,
+    and what keeps it on the body is a chain of joints, 2.2 kg upper arm, 0.4 kg
+    clavicle, through to a 14 kg chest, under a contact load from something hundreds
+    of times heavier than any of its links. Sequential impulses pass that load along
+    the chain one link per iteration, and the contacts, solved last, win: the arm is
+    pushed where the car wants it and the shoulder lets go. It is lesson 12's mass
+    ratio problem without a lock in the chain.
+    So the direct solve of lesson 12 now also covers, for the substep, every group of
+    jointed bodies with a contact (closer than 1 cm) from a moving group that is at
+    least 5 times heavier than it, or that a lock holds to the world or to a keyed
+    body. The whole character's joint anchors are then solved as one system (no lock
+    rows), and the load reaches the chest in one go. The shoulder now stays within
+    1 cm (0.96 cm worst, a toe). The same rule closes two other ways a car came
+    through the placeholder in the experiments that led to the stand-in: run over
+    lying head first, the neck stretched 6.6 cm (now 0.4); lying on the bonnet with
+    an arm under the body when the car stopped, the shoulder reached 4.9 cm (now
+    2.5 cm, all of it in that pose's first frames).
+    Characters that nothing heavy touches are unchanged, and every other stand-in
+    gives the same numbers. Car carry takes about 110 ms instead of 75 for its 2 s
+    (the character is direct-solved for most of the scene); scenes without such a
+    contact don't pay for it.
+    Keyed bodies don't trigger it. Counting a keyed body moving faster than 2 m/s
+    as heavy helped the old Car Hit stand-in, whose car is keyed (3.0 to 1.5 cm), but
+    nudged Balcony and Tackle (0.50 to 0.55 cm, 0.59 to 0.65 cm). Counting slow ones
+    too (moving floors) helped Turntable (0.9 to 0.2 cm) but made it and Rotating
+    Floor two to three times slower. Solving every character directly all the time
+    slowed single characters about twice and made Balance lose its footing, so the
+    direct solve stays where a heavy body needs it.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates the first two seconds of
@@ -260,6 +301,10 @@ skipped for size):
 |---|---|
 | Clean | Arrows, Balcony, Bendy Stick, Car Crash, Catch Rope, Catch Run, Gymnast Rings, Heli Leap, Multi Martial, Rotating Floor, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
 | Failing | Car Hit: a clavicle stretches 10 cm. The 747 kg car, joined to a keyed carrier, drives into the pedestrian at 8 m/s, carries them on the bonnet, and stops dead when the carrier's keys end at 1.65 s, with an arm under it |
+
+Lesson 15 fixes Car Hit's stand-in (Car carry). Whether it fixes the scene itself still
+needs confirming with `cargo test --release -- --ignored` on a machine with endorphin
+installed.
 
 Four of the five scenes still failing after lesson 12 weren't solver problems at all:
 the importer set them up wrongly. Looking at Balcony in the app showed it: one
@@ -292,6 +337,7 @@ What each stand-in reproduces:
 | Rotating Floor | No ground; a thin collision-only slab spinning and rocking | sinks through | rides it |
 | Turntable | No ground; a flat cylinder spinning | floats 0.9 m above it | rests on it |
 | Hanging weight | A 20-80 kg weight on a rope locked at the top, hanging straight (lesson 10) | 0.36 m stretch, 63 m/s | 1.5 cm, 0.6 m/s |
+| Car carry | Car Hit: a 747 kg car joined (1e5) to a keyed carrier drives into a standing character with clavicles at 8 m/s, catches its arm against its ribs, carries it on the bonnet and stops dead at 1.65 s (lesson 15). The join gives way by 23 cm as the carrier stops, by design | 5.8 cm (shoulder) | 1.0 cm |
 | Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -74° at 297, leaves the box at 329, lands behind it at 393, -285° in all. Left alone: tips forwards and falls off the front at 348 |
 
 Of endorphin's behaviours, Balance and CatchFall now have controllers of their own
@@ -306,8 +352,9 @@ simulate as if the character went limp.
 - Virtual-muscle reach springs.
 - Exact cylinders: long ones have rounded ends; flat ones a rounded rim, touching
   flat things at six rim points, the lowest rim point and the point nearest them.
-- An exact solve for joint anchors where no lock holds the chain (lesson 12 covers
-  what locks hold).
+- An exact solve for joint anchors where no lock holds the chain and nothing heavy
+  presses on it (lessons 12 and 15 cover those). Keyed bodies pressing on a character
+  don't count as heavy yet: lesson 15 says what that cost.
 - Interpolated output between frames.
 
 ## Improvements planned beyond endorphin

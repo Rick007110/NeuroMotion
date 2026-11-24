@@ -2154,11 +2154,10 @@ mod tests {
 
     /// endorphin's Car Hit: a heavy car joined to a keyed carrier catches the
     /// character's arm against their ribs, carries them on the bonnet and stops dead.
-    /// The shoulder comes apart by 5.8 cm. The join is meant to give way when
+    /// The shoulder came apart by 5.8 cm (lesson 15). The join is meant to give way when
     /// the carrier stops dead (1e5 N can't stop 747 kg at once), so its drift isn't
     /// checked.
     #[test]
-    #[ignore = "fails: the shoulder comes apart by 5.8 cm"]
     fn car_carry_keeps_joints_together() {
         let project = car_carry();
         let report = sweep(&project);

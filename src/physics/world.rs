@@ -4,8 +4,9 @@
 //! Each substep: gravity → contacts → warm start → solve with position bias →
 //! integrate positions → relax without bias. Joints keep their impulses between
 //! substeps; contacts are matched by (shape, shape, feature) and locks by their bodies
-//! to warm start. Bodies that locks tie together are also solved directly, as one
-//! system per group, each iteration (see `LockGroup`).
+//! to warm start. Bodies that locks tie together, and characters that something much
+//! heavier presses on, are also solved directly, as one system per group, each
+//! iteration (see `LockGroup`).
 
 use std::collections::HashMap;
 
@@ -59,6 +60,10 @@ const GROUP_PUSH_SOFTNESS: f64 = 1e-2;
 /// time, until it explodes. Four fifths keeps it still. Locks and muscles start from
 /// their full impulse; locks need it to hold heavy loads up.
 const WARM_START: f32 = 0.8;
+/// A jointed group touched (closer than `CRUSH_SEPARATION`, m) by a group this many times
+/// heavier is solved directly (see `World::crushed_groups`).
+const CRUSH_RATIO: f32 = 5.0;
+const CRUSH_SEPARATION: f32 = 0.01;
 const STATIC: usize = usize::MAX;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -389,7 +394,8 @@ enum RowSource {
 /// joined to both hands closes a loop through the arms, and a trapeze bar joined to a
 /// rope hinged 6 m away swings on a lever hundreds of times its own inertia. Solving
 /// those rows together, directly, after the per-joint and per-lock passes each
-/// iteration, handles both.
+/// iteration, handles both. A character something much heavier presses on (a car
+/// catching an arm against the ribs) is solved the same way, joints only.
 struct LockGroup {
     rows: Vec<GroupRow>,
     /// The rows' effective mass matrix J M⁻¹ Jᵀ (lower triangle, row-major).
@@ -620,7 +626,7 @@ impl World {
             mass_scale: 1.0,
             impulse_scale: 0.0,
         };
-        let mut groups = self.prepare_groups(&sb, &joints, &locks, joint_soft.bias_rate);
+        let mut groups = self.prepare_groups(&sb, &joints, &locks, &contacts, joint_soft.bias_rate);
         for _ in 0..ITERATIONS {
             self.solve_joints(&mut sb, &mut joints, joint_soft, h, true);
             solve_locks(&mut sb, &mut locks, joint_soft.bias_rate);
@@ -1091,15 +1097,17 @@ impl World {
     }
 
     /// Groups of moving bodies that locks tie together (with the joints between them),
-    /// and the rows each group solves directly. Nothing without a lock is grouped.
+    /// and jointed groups something heavy presses on, and the rows each group solves
+    /// directly. Nothing else is grouped.
     fn prepare_groups(
         &self,
         sb: &[SolverBody],
         joints: &[JointRows],
         locks: &[LockBlock],
+        contacts: &[ContactRow],
         bias_rate: f32,
     ) -> Vec<LockGroup> {
-        if locks.is_empty() {
+        if locks.is_empty() && contacts.is_empty() {
             return Vec::new();
         }
         let moves = |i: usize| i != STATIC && self.bodies[i].is_dynamic();
@@ -1125,6 +1133,8 @@ impl World {
             moves(body).then(|| find(&mut root, body))
         };
         let mut locked: Vec<usize> = locks.iter().filter_map(|l| group_of(l.a, l.b)).collect();
+        // Groups something presses on that won't give way (lesson 15).
+        locked.extend(self.crushed_groups(contacts, locks, &mut |i| group_of(i, i)));
         locked.sort_unstable();
         locked.dedup();
         let mut rows: Vec<Vec<GroupRow>> = locked.iter().map(|_| Vec::new()).collect();
@@ -1188,6 +1198,58 @@ impl World {
         }
         rows.into_iter()
             .filter_map(|rows| LockGroup::new(sb, rows, locks))
+            .collect()
+    }
+
+    /// Groups of jointed bodies (characters, mostly) pressed on by something that won't
+    /// give way: a group at least `CRUSH_RATIO` times heavier, or one a lock holds to the
+    /// world or to a keyed body (a car joined to its carrier). A limb caught between such
+    /// a body and the ground, or the rest of its own character, can't get out of the way,
+    /// and sequential impulses then let its joints come apart. These groups are solved
+    /// directly, like locked ones, while it lasts (lesson 15).
+    fn crushed_groups(
+        &self,
+        contacts: &[ContactRow],
+        locks: &[LockBlock],
+        group_of: &mut dyn FnMut(usize) -> Option<usize>,
+    ) -> Vec<usize> {
+        // Contacts between a jointed body and a body of another moving group.
+        let mut jointed = vec![false; self.bodies.len()];
+        for joint in self.joints.iter().filter(|j| j.enabled) {
+            jointed[joint.parent] = true;
+            jointed[joint.child] = true;
+        }
+        let mut pressed: Vec<(usize, usize)> = Vec::new();
+        for c in contacts.iter().filter(|c| c.separation < CRUSH_SEPARATION) {
+            for (mine, other) in [(c.a, c.b), (c.b, c.a)] {
+                if mine == STATIC || other == STATIC || !jointed[mine] {
+                    continue;
+                }
+                if let (Some(g), Some(h)) = (group_of(mine), group_of(other))
+                    && g != h
+                {
+                    pressed.push((g, h));
+                }
+            }
+        }
+        if pressed.is_empty() {
+            return Vec::new();
+        }
+        let mut mass: HashMap<usize, f32> = HashMap::new();
+        for (i, body) in self.bodies.iter().enumerate() {
+            if let Some(g) = group_of(i) {
+                *mass.entry(g).or_default() += 1.0 / body.inv_mass;
+            }
+        }
+        let held: Vec<usize> = locks
+            .iter()
+            .filter(|l| l.a == STATIC || !self.bodies[l.a].is_dynamic())
+            .filter_map(|l| group_of(l.b))
+            .collect();
+        pressed
+            .into_iter()
+            .filter(|(g, h)| held.contains(h) || mass[h] >= CRUSH_RATIO * mass[g])
+            .map(|(g, _)| g)
             .collect()
     }
 
