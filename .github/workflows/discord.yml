@@ -46,6 +46,10 @@ jobs:
             echo "The DISCORD_WEBHOOK secret isn't set (Settings → Secrets and variables → Actions)."
             exit 1
           fi
+          # Discord's .../github endpoint only takes GitHub's own event payloads;
+          # this posts a Discord message, which needs the plain webhook URL.
+          WEBHOOK="${WEBHOOK%/}"
+          WEBHOOK="${WEBHOOK%/github}"
           if [ -n "$TAG" ]; then
             gh release view "$TAG" --json name,body,url,isPrerelease > release.json
             TITLE=$(jq -r '.name' release.json)
