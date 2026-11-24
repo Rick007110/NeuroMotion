@@ -1862,6 +1862,99 @@ pub fn curl_hand_back() -> Project {
     p
 }
 
+/// An active pose event on a character, driving `targets` (`character.Joints.name`,
+/// none = every joint) towards its held channels.
+fn active_pose(
+    project: &mut Project,
+    on: CharacterId,
+    start: i32,
+    end: i32,
+    targets: &[&str],
+    channels: Vec<Channel>,
+) {
+    let track = project.add_track(on, "Active pose");
+    let id = project.add_clip(
+        props("Active pose", track, start, end - start),
+        ClipKind::Event {
+            event: "Active pose".into(),
+        },
+        channels,
+    );
+    let source = &mut project.clip_mut(id).unwrap().source;
+    source.insert("strength".into(), "1".into());
+    if !targets.is_empty() {
+        source.insert("targets".into(), targets.join(", "));
+    }
+}
+
+/// Back-Flip-To-Combo splits its character between overlapping active poses: one
+/// event drives the legs, another, overlapping it, the spine and arms, and so on. Like
+/// endorphin's, each pose here stores the whole body (the joints it doesn't drive at
+/// rest) and names the joints it drives. Hung by the hips so it doesn't fall, the
+/// placeholder bends its knees by 60° in one event from frame 10, then its elbows by
+/// 60° in another from frame 20 that leaves the knees at rest.
+pub fn split_poses() -> Project {
+    let mut p = new_scene("Split poses", 3.0);
+    let id = person(&mut p, "poser", Vec3::new(0.0, 1.5, 0.0), 0.0, &[]);
+    constrain(
+        &mut p,
+        id,
+        0,
+        180,
+        "Lock",
+        &["poser.MetaBodies.hips"],
+        (STRONG, STRONG),
+    );
+    let pose = |knee: f32, elbow: f32| {
+        ["l", "r"]
+            .into_iter()
+            .flat_map(|side| {
+                [
+                    held(&format!("{side}_knee"), Property::RotX, knee),
+                    held(&format!("{side}_elbow"), Property::RotX, elbow),
+                ]
+            })
+            .collect::<Vec<_>>()
+    };
+    let knees = ["poser.Joints.l_knee", "poser.Joints.r_knee"];
+    let elbows = ["poser.Joints.l_elbow", "poser.Joints.r_elbow"];
+    active_pose(&mut p, id, 10, 180, &knees, pose(60.0, 0.0));
+    active_pose(&mut p, id, 20, 180, &elbows, pose(0.0, -60.0));
+    p
+}
+
+/// A character whose head may collide with its parent (endorphin's `collidesWithParent`)
+/// and already overlaps the neck at rest, like Back-Flip-To-Combo's: the placeholder's
+/// head sphere grown and moved down onto the neck. Hung by the hips, with the soft
+/// muscles a character starts with.
+pub fn head_on_neck() -> Project {
+    let mut p = new_scene("Head on neck", 1.0);
+    let (skeleton, mut rig) = person_rig();
+    let head = rig.body_index("head").unwrap();
+    let shape = &mut rig.bodies[head].shapes[0];
+    shape.geometry = Geometry::Sphere { radius: 0.12 };
+    shape.collides_with_parent = true;
+    rig.bodies[head].frame.position = [0.0, -0.02, 0.08];
+    let id = add_person(
+        &mut p,
+        "nodder",
+        (skeleton, rig),
+        Vec3::new(0.0, 1.5, 0.0),
+        0.0,
+        &[],
+    );
+    constrain(
+        &mut p,
+        id,
+        0,
+        60,
+        "Lock",
+        &["nodder.MetaBodies.hips"],
+        (STRONG, STRONG),
+    );
+    p
+}
+
 /// Prints, per frame and character, the lowest body, the most stretched joint and the
 /// fastest body, for finding where a scene goes wrong.
 pub fn trace(project: &Project) {
@@ -2291,6 +2384,64 @@ mod tests {
                 assert!(hips.z < -0.6, "landed in front of the box: {hips}");
             }
         }
+    }
+
+    /// Angle (degrees) between the bones either side of `joint`, from its parent to it
+    /// and from it to `child`, at a frame.
+    fn bend(project: &Project, sim: &Simulation, frame: i32, joint: &str, child: &str) -> f32 {
+        let skeleton = &project.characters[0].skeleton;
+        let at = |name: &str| {
+            sim.frame(frame).unwrap()[0].as_ref().unwrap().joints
+                [skeleton.joint_index(name).unwrap()]
+            .1
+        };
+        let j = skeleton.joint_index(joint).unwrap();
+        let parent = &skeleton.joints[skeleton.joints[j].parent.unwrap()].name;
+        let (a, b, c) = (at(parent), at(joint), at(child));
+        (b - a).angle_between(c - b).to_degrees()
+    }
+
+    /// Overlapping active poses each drive the joints they name (lesson 19). The
+    /// elbows' event starts last; it used to drive the whole body, so the knees went
+    /// back to rest when it started (0° at frame 150, with the elbows at 59°). Now
+    /// 59° and 60°.
+    #[test]
+    fn overlapping_active_poses_each_drive_their_own_joints() {
+        let project = split_poses();
+        let sim = check(project.clone());
+        let knees = bend(&project, &sim, 150, "l_knee", "l_ankle");
+        let elbows = bend(&project, &sim, 150, "l_elbow", "l_wrist");
+        let early = bend(&project, &sim, 18, "l_elbow", "l_wrist");
+        println!(
+            "split poses: knees {knees:.0}°, elbows {elbows:.0}° at frame 150; elbows {early:.0}° at 18"
+        );
+        assert!((45.0..75.0).contains(&knees), "knees bent {knees}°");
+        assert!((45.0..75.0).contains(&elbows), "elbows bent {elbows}°");
+        assert!(early < 15.0, "elbows bent {early}° before their event");
+    }
+
+    /// A head that may collide with its parent but overlaps the neck at rest isn't
+    /// thrown off it when the simulation starts (lesson 19). It turned 44° against the
+    /// neck within the first second; now 2.6°.
+    #[test]
+    fn a_shape_overlapping_its_parent_at_rest_does_not_push_it() {
+        let project = head_on_neck();
+        let sim = check(project.clone());
+        let rig = project.characters[0].physics.as_ref().unwrap();
+        let (head, neck) = (
+            rig.body_index("head").unwrap(),
+            rig.body_index("neck").unwrap(),
+        );
+        // The head's turn relative to the neck.
+        let rot = |f: i32| {
+            let bodies = &sim.frame(f).unwrap()[0].as_ref().unwrap().bodies;
+            bodies[neck].0.inverse() * bodies[head].0
+        };
+        let turned = (0..=60)
+            .map(|f| rot(0).angle_between(rot(f)).to_degrees())
+            .fold(0.0f32, f32::max);
+        println!("head on neck: turned {turned:.1}° at most");
+        assert!(turned < 5.0, "head turned {turned}°");
     }
 
     /// endorphin's Car Hit stretched a joint by 6 cm. The stand-in's character takes the

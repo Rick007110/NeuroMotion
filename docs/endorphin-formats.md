@@ -122,6 +122,17 @@ These are what the importer relies on:
   means cut) or, if no target resolves, does nothing. To verify
   against a real scene: look at the clip's *Other imported settings* in the inspector
   and rename the keys in `physics/sim.rs` and `document/events.rs`.
+- Active pose events (`DesiredPoseEvent`) store a whole-body `Pose` (every joint,
+  relative to its parent), a `strength`, an entry blend (`bentryBlendPeriod`,
+  seconds) and `Objects`, the joints the event drives (`character.Joints.Joint`).
+  Scenes split the body between overlapping events: Back-Flip-To-Combo drives its
+  legs, feet, spine and arms from separate events with their own strengths. The
+  importer keeps `Objects` as `targets`, and the simulation drives only those joints
+  (physics-design.md, lesson 19).
+- `CollisionSurface`s carry `collidesWithParent`, `collidesWithSiblings` and
+  `collidesWithAncestors`. Back-Flip-To-Combo's head sets `collidesWithParent` on
+  shapes that sit inside the neck at rest; NeuroMotion doesn't let a shape collide
+  with a moving parent it already overlaps at rest (lesson 19).
 - Constraint events give a strength per axis for position and for orientation
   (newtons and newton-metres; 1e5 is effectively unbreakable, 0 leaves the axis free).
   endorphin's help doesn't document negative strengths; scenes use them as drives.

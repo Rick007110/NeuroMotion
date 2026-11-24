@@ -213,7 +213,7 @@ fn active_pose(
                         .suffix(" s"),
                 )
             })
-            .on_hover_text("Seconds the muscles take to reach full strength");
+            .on_hover_text("Seconds the muscles take to move over to this pose");
             ui.end_row();
             ui.label("Joints held");
             let mut joints: Vec<&str> = clip.channels.iter().map(|c| c.joint.as_str()).collect();
