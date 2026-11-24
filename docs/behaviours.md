@@ -315,5 +315,8 @@ move it. Friction now only acts on contacts that touch or push.
 
 The rest of endorphin's library still needs designs: protective reactions (protect the
 head, brace for impact), reaching and grabbing, looking at a target, hit and shot
-reactions, and others found in imported scenes. See [ROADMAP.md](../ROADMAP.md),
-milestone 2.
+reactions, and others found in imported scenes. [behaviour-inventory.md](behaviour-inventory.md)
+lists what the sample scenes use and ranks the missing ones (Look and Reach, 11 scenes,
+comes first). Two things in it come before new controllers: imported behaviour names
+(`Bob2: Balance 2.5`) don't match `Behaviour::from_name` yet, and event settings aren't
+read. See [ROADMAP.md](../ROADMAP.md), milestone 2.

@@ -1813,6 +1813,212 @@ mod tests {
         assert!(ok > 150);
     }
 
+    /// Inventory of the behaviours (and event types) the scenes of a local endorphin
+    /// install use, for planning which behaviours to design next. Reads only the scenes'
+    /// own event settings, never the protected behaviour files.
+    /// See docs/behaviour-inventory.md.
+    /// Run with `ENDORPHIN_DIR=... cargo test --release behaviour_inventory -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "needs a local endorphin 2.5 install"]
+    fn behaviour_inventory() {
+        use crate::physics::behaviour::Behaviour;
+        use std::collections::BTreeSet;
+
+        #[derive(Default)]
+        struct Usage {
+            events: usize,
+            scenes: BTreeSet<String>,
+            settings: BTreeMap<String, BTreeSet<String>>,
+        }
+        impl Usage {
+            fn add(&mut self, other: &Usage) {
+                self.events += other.events;
+                self.scenes.extend(other.scenes.iter().cloned());
+                for (key, values) in &other.settings {
+                    self.settings
+                        .entry(key.clone())
+                        .or_default()
+                        .extend(values.iter().cloned());
+                }
+            }
+        }
+
+        // Scenes name behaviours like "Bob2: Balance 2.5": a library prefix, the
+        // behaviour, and a version. The family is the behaviour on its own.
+        fn family(name: &str) -> String {
+            let name = name.rsplit(':').next().unwrap_or(name).trim();
+            let words: Vec<&str> = name.split(' ').collect();
+            let versioned = words.len() > 1
+                && words.last().is_some_and(|w| {
+                    w.contains('.') && w.chars().all(|c| c.is_ascii_digit() || c == '.')
+                });
+            if versioned {
+                words[..words.len() - 1].join(" ")
+            } else {
+                name.to_owned()
+            }
+        }
+
+        let root = std::env::var("ENDORPHIN_DIR")
+            .unwrap_or_else(|_| r"C:\Program Files (x86)\NaturalMotion\endorphin 2.5.2".to_owned());
+        let mut scenes = Vec::new();
+        let mut stack = vec![std::path::PathBuf::from(root)];
+        while let Some(dir) = stack.pop() {
+            for entry in fs::read_dir(&dir).into_iter().flatten().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path
+                    .extension()
+                    .is_some_and(|x| x.eq_ignore_ascii_case("ens"))
+                {
+                    scenes.push(path);
+                }
+            }
+        }
+        scenes.sort();
+
+        let mut behaviours: BTreeMap<String, Usage> = BTreeMap::new();
+        let mut types: BTreeMap<String, (usize, BTreeSet<String>)> = BTreeMap::new();
+        let (mut imported, mut skipped) = (0, 0);
+        for path in &scenes {
+            // Password-protected scenes don't import; skip them like the sweep does.
+            let Ok(scene) = import_scene(path) else {
+                skipped += 1;
+                continue;
+            };
+            imported += 1;
+            let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+            for clip in &scene.project.clips {
+                let ClipKind::Event { event } = &clip.kind else {
+                    continue;
+                };
+                let kind = clip
+                    .source
+                    .get("endorphin.type")
+                    .cloned()
+                    .unwrap_or_default();
+                let entry = types.entry(kind).or_default();
+                entry.0 += 1;
+                entry.1.insert(name.clone());
+                // Secondary behaviour events (what sim.rs calls "Behaviour").
+                if event != "Behaviour" {
+                    continue;
+                }
+                let behaviour = clip
+                    .source
+                    .get("behaviourName")
+                    .unwrap_or(&clip.props.name)
+                    .clone();
+                let usage = behaviours.entry(behaviour).or_default();
+                usage.events += 1;
+                usage.scenes.insert(name.clone());
+                for (key, value) in &clip.source {
+                    if key != "endorphin.type" && key != "behaviourName" {
+                        usage
+                            .settings
+                            .entry(key.clone())
+                            .or_default()
+                            .insert(value.clone());
+                    }
+                }
+            }
+
+            // The importer doesn't carry a behaviour's parameters yet, so read them from
+            // the scene's own XML: one `Variable` per parameter, its value in `ja`.
+            let text = read_document(path).unwrap();
+            let xml = parse(&text).unwrap();
+            for node in xml
+                .descendants()
+                .filter(|n| n.has_tag_name("SecondaryBehaviour"))
+            {
+                let Some(behaviour) = node.attribute("behaviourName") else {
+                    continue;
+                };
+                let usage = behaviours.entry(behaviour.to_owned()).or_default();
+                for var in node.descendants().filter(|n| n.has_tag_name("Variable")) {
+                    let (Some(key), value) = (var.attribute("fk"), var.attribute("ja")) else {
+                        continue;
+                    };
+                    usage
+                        .settings
+                        .entry(format!("param {key}"))
+                        .or_default()
+                        .insert(value.unwrap_or("(default)").to_owned());
+                }
+            }
+        }
+
+        let have = |name: &str| {
+            if Behaviour::from_name(name).is_some() {
+                "yes"
+            } else {
+                "no"
+            }
+        };
+        fn ranked(map: &BTreeMap<String, Usage>) -> Vec<(String, &Usage)> {
+            let mut v: Vec<_> = map.iter().map(|(k, u)| (k.clone(), u)).collect();
+            v.sort_by(|a, b| {
+                (b.1.scenes.len(), b.1.events, &a.0).cmp(&(a.1.scenes.len(), a.1.events, &b.0))
+            });
+            v
+        }
+
+        println!(
+            "scenes: {} found, {imported} imported, {skipped} skipped (protected)",
+            scenes.len()
+        );
+        println!("\nEVENT TYPES (type | events | scenes)");
+        let mut by_count: Vec<_> = types.iter().collect();
+        by_count.sort_by(|a, b| b.1.0.cmp(&a.1.0).then(a.0.cmp(b.0)));
+        for (kind, (events, in_scenes)) in by_count {
+            println!("{kind} | {events} | {}", in_scenes.len());
+        }
+
+        println!("\nBEHAVIOUR NAMES AS IN THE SCENES (name | scenes | events | from_name matches)");
+        for (name, usage) in ranked(&behaviours) {
+            println!(
+                "{name} | {} | {} | {}",
+                usage.scenes.len(),
+                usage.events,
+                have(&name)
+            );
+        }
+
+        let mut families: BTreeMap<String, Usage> = BTreeMap::new();
+        for (name, usage) in &behaviours {
+            families.entry(family(name)).or_default().add(usage);
+        }
+        println!(
+            "\nFAMILIES, version and library prefix dropped (family | scenes | events | from_name matches)"
+        );
+        for (name, usage) in ranked(&families) {
+            println!(
+                "\n## {name} | {} scenes | {} events | {}",
+                usage.scenes.len(),
+                usage.events,
+                have(&name)
+            );
+            println!(
+                "scenes: {}",
+                usage.scenes.iter().cloned().collect::<Vec<_>>().join(", ")
+            );
+            for (key, values) in &usage.settings {
+                let numbers: Vec<f64> = values.iter().filter_map(|v| v.parse().ok()).collect();
+                if numbers.len() == values.len() && values.len() > 3 {
+                    let min = numbers.iter().cloned().fold(f64::INFINITY, f64::min);
+                    let max = numbers.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                    println!("  {key}: {min} .. {max} ({} distinct)", values.len());
+                } else {
+                    let shown: Vec<_> = values.iter().take(6).cloned().collect();
+                    let more = if values.len() > 6 { " | ..." } else { "" };
+                    println!("  {key}: {}{more}", shown.join(" | "));
+                }
+            }
+        }
+        assert!(imported > 0, "no scenes found; set ENDORPHIN_DIR");
+    }
+
     #[test]
     fn euler_unwrap_avoids_jumps() {
         let mut a = [179.0, -170.0, 10.0];
