@@ -9,8 +9,7 @@ mod camera;
 pub use camera::OrbitCamera;
 
 use eframe::egui::{
-    self, Align2, Color32, CursorIcon, FontId, Mesh, PointerButton, Pos2, Rect, Sense, Stroke,
-    vec2,
+    self, Align2, Color32, CursorIcon, FontId, Mesh, PointerButton, Pos2, Rect, Sense, Stroke, vec2,
 };
 use glam::{Mat4, Quat, Vec3};
 
@@ -77,7 +76,13 @@ impl Default for Viewport {
 impl Viewport {
     /// Draws every character of `project` as described by `views` (one per character, in
     /// order) into the remaining space of `ui`. `hud` lines are overlaid top-left.
-    pub fn show(&mut self, ui: &mut egui::Ui, project: &Project, views: &[CharacterView], hud: &[String]) {
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        project: &Project,
+        views: &[CharacterView],
+        hud: &[String],
+    ) {
         let rect = ui.available_rect_before_wrap();
         let response = ui.allocate_rect(rect, Sense::click_and_drag());
         self.handle_input(ui, &response, rect);
@@ -106,7 +111,9 @@ impl Viewport {
         if self.show_bodies {
             let eye = self.camera.eye();
             for (character, view) in project.characters.iter().zip(views) {
-                let (Some(rig), Some(bodies)) = (&character.physics, &view.bodies) else { continue };
+                let (Some(rig), Some(bodies)) = (&character.physics, &view.bodies) else {
+                    continue;
+                };
                 let color = match (character.kind, view.simulated) {
                     (CharacterKind::Environment, _) => BODY_SCENERY,
                     (_, true) => BODY_SIMULATED,
@@ -120,7 +127,13 @@ impl Viewport {
                 continue;
             }
             let is_prop = character.kind == CharacterKind::Prop;
-            self.paint_skeleton(&painter, &project_point, &character.skeleton, &view.joints, is_prop);
+            self.paint_skeleton(
+                &painter,
+                &project_point,
+                &character.skeleton,
+                &view.joints,
+                is_prop,
+            );
         }
 
         paint_axis_gizmo(&painter, rect, &self.camera.view());
@@ -144,7 +157,6 @@ impl Viewport {
             TEXT.gamma_multiply(0.5),
         );
     }
-
 
     fn paint_skeleton(
         &self,
@@ -202,7 +214,9 @@ impl Viewport {
             self.camera.orbit(response.drag_delta());
             ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
         }
-        if response.dragged_by(PointerButton::Secondary) || response.dragged_by(PointerButton::Middle) {
+        if response.dragged_by(PointerButton::Secondary)
+            || response.dragged_by(PointerButton::Middle)
+        {
             self.camera.pan(response.drag_delta(), rect.height());
             ui.ctx().set_cursor_icon(CursorIcon::AllScroll);
         }
@@ -221,7 +235,10 @@ impl Viewport {
 /// World-space joint positions for a pose.
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn forward_kinematics(skeleton: &SkeletonRef, pose: &Pose) -> Vec<Vec3> {
-    world_transforms(skeleton, pose).into_iter().map(|(_, p)| p).collect()
+    world_transforms(skeleton, pose)
+        .into_iter()
+        .map(|(_, p)| p)
+        .collect()
 }
 
 /// Draws collision shapes as translucent silhouettes.
@@ -253,9 +270,16 @@ fn paint_bodies(
                     }
                 }
                 Geometry::Capsule { radius, length } | Geometry::Cylinder { radius, length } => {
-                    let half = if matches!(shape.geometry, Geometry::Capsule { .. }) { length * 0.5 } else { (length * 0.5 - radius).max(0.0) };
+                    let half = if matches!(shape.geometry, Geometry::Capsule { .. }) {
+                        length * 0.5
+                    } else {
+                        (length * 0.5 - radius).max(0.0)
+                    };
                     let axis = r * Vec3::Z * half;
-                    if let (Some((a, ra)), Some((b, _))) = (screen_radius(p - axis, radius), screen_radius(p + axis, radius)) {
+                    if let (Some((a, ra)), Some((b, _))) = (
+                        screen_radius(p - axis, radius),
+                        screen_radius(p + axis, radius),
+                    ) {
                         painter.line_segment([a, b], Stroke::new(ra * 2.0, color));
                         painter.circle(a, ra, color, Stroke::NONE);
                         painter.circle(b, ra, color, Stroke::NONE);
@@ -271,7 +295,20 @@ fn paint_bodies(
                         );
                         project(p + r * (h * s))
                     };
-                    for (i, j) in [(0, 1), (2, 3), (4, 5), (6, 7), (0, 2), (1, 3), (4, 6), (5, 7), (0, 4), (1, 5), (2, 6), (3, 7)] {
+                    for (i, j) in [
+                        (0, 1),
+                        (2, 3),
+                        (4, 5),
+                        (6, 7),
+                        (0, 2),
+                        (1, 3),
+                        (4, 6),
+                        (5, 7),
+                        (0, 4),
+                        (1, 5),
+                        (2, 6),
+                        (3, 7),
+                    ] {
                         if let (Some(a), Some(b)) = (corner(i), corner(j)) {
                             painter.line_segment([a, b], edge);
                         }
@@ -329,7 +366,13 @@ fn paint_axis_gizmo(painter: &egui::Painter, rect: Rect, view: &Mat4) {
         let v = view.transform_vector3(axis);
         let tip = origin + vec2(v.x, -v.y) * 22.0;
         painter.line_segment([origin, tip], Stroke::new(2.0_f32, color));
-        painter.text(tip, Align2::CENTER_CENTER, label, FontId::proportional(11.0), color);
+        painter.text(
+            tip,
+            Align2::CENTER_CENTER,
+            label,
+            FontId::proportional(11.0),
+            color,
+        );
     }
 }
 
@@ -343,7 +386,10 @@ mod tests {
         let skeleton = humanoid_skeleton();
         let world = forward_kinematics(&skeleton, &Pose::rest(skeleton.joints.len()));
         let lowest = world.iter().map(|p| p.y).fold(f32::MAX, f32::min);
-        assert!(lowest.abs() < 0.05, "feet should touch the ground, lowest joint at {lowest}");
+        assert!(
+            lowest.abs() < 0.05,
+            "feet should touch the ground, lowest joint at {lowest}"
+        );
     }
 
     #[test]

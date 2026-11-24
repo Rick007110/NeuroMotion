@@ -7,7 +7,10 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use super::model::{CharacterId, Channel, Clip, ClipId, ClipProps, Keyframe, Project, ProjectSettings, Track, TrackId};
+use super::model::{
+    Channel, CharacterId, Clip, ClipId, ClipProps, Keyframe, Project, ProjectSettings, Track,
+    TrackId,
+};
 use super::physics::SimLevel;
 
 pub const UNDO_LIMIT: usize = 500;
@@ -89,17 +92,29 @@ impl Edit {
                     project.tracks[i] = pick(before, after, forward).clone();
                 }
             }
-            Edit::ClipProps { clip, before, after } => {
+            Edit::ClipProps {
+                clip,
+                before,
+                after,
+            } => {
                 if let Some(c) = project.clip_mut(*clip) {
                     c.props = pick(before, after, forward).clone();
                 }
             }
-            Edit::ClipSource { clip, before, after } => {
+            Edit::ClipSource {
+                clip,
+                before,
+                after,
+            } => {
                 if let Some(c) = project.clip_mut(*clip) {
                     c.source = pick(before, after, forward).clone();
                 }
             }
-            Edit::ClipChannels { clip, before, after } => {
+            Edit::ClipChannels {
+                clip,
+                before,
+                after,
+            } => {
                 if let Some(c) = project.clip_mut(*clip) {
                     c.channels = pick(before, after, forward).clone();
                 }
@@ -135,7 +150,11 @@ impl Edit {
                     project.tracks.remove(i);
                 }
             }
-            Edit::CharacterLevel { character, before, after } => {
+            Edit::CharacterLevel {
+                character,
+                before,
+                after,
+            } => {
                 if let Some(c) = project.characters.iter_mut().find(|c| c.id == *character) {
                     c.default_level = *pick(before, after, forward);
                 }
@@ -173,29 +192,45 @@ impl Edit {
                 *after = next.clone();
                 true
             }
-            (Edit::Track { id, after, .. }, Edit::Track { id: other, after: next, .. })
-                if *id == *other =>
-            {
+            (
+                Edit::Track { id, after, .. },
+                Edit::Track {
+                    id: other,
+                    after: next,
+                    ..
+                },
+            ) if *id == *other => {
                 *after = next.clone();
                 true
             }
             (
                 Edit::ClipProps { clip, after, .. },
-                Edit::ClipProps { clip: other, after: next, .. },
+                Edit::ClipProps {
+                    clip: other,
+                    after: next,
+                    ..
+                },
             ) if *clip == *other => {
                 *after = next.clone();
                 true
             }
             (
                 Edit::ClipSource { clip, after, .. },
-                Edit::ClipSource { clip: other, after: next, .. },
+                Edit::ClipSource {
+                    clip: other,
+                    after: next,
+                    ..
+                },
             ) if *clip == *other => {
                 *after = next.clone();
                 true
             }
             (
                 Edit::ChannelKeys {
-                    clip, channel, after, ..
+                    clip,
+                    channel,
+                    after,
+                    ..
                 },
                 Edit::ChannelKeys {
                     clip: other_clip,

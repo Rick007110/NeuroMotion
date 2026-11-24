@@ -1,0 +1,3 @@
+# Formatting the whole codebase with rustfmt (no other changes).
+# Hide it from blame: git config blame.ignoreRevsFile .git-blame-ignore-revs
+63ba8cbf1c01cdf4908df9035c826e6001c82341

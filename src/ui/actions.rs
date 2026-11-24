@@ -22,7 +22,10 @@ pub enum Action {
     DuplicateClip,
     /// Adds a clip on a given track at a given frame, or (`None`) for the selected
     /// character at the playhead.
-    AddClip { kind: NewClip, at: Option<(TrackId, i32)> },
+    AddClip {
+        kind: NewClip,
+        at: Option<(TrackId, i32)>,
+    },
     /// Re-records an active pose event's pose from the playhead.
     CapturePose(ClipId),
     BakeSimulation,
@@ -93,7 +96,11 @@ impl Action {
     pub fn discards_document(self) -> bool {
         matches!(
             self,
-            Action::NewProject | Action::OpenProject | Action::OpenDemo | Action::OpenPhysicsDemo | Action::Quit
+            Action::NewProject
+                | Action::OpenProject
+                | Action::OpenDemo
+                | Action::OpenPhysicsDemo
+                | Action::Quit
         )
     }
 }

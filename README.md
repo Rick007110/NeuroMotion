@@ -93,9 +93,15 @@ Force event at the same frame. Design and status:
    animation, visual feedback on muscle effort, re-simulating only from the edited
    frame.
 
+## Download
+
+Builds for Windows, macOS and Linux are attached to each
+[release](https://github.com/Rick007110/NeuroMotion/releases). They aren't signed yet,
+so Windows SmartScreen and macOS Gatekeeper will warn the first time you open them.
+
 ## Building and running
 
-You need [Rust](https://rustup.rs) (stable).
+You need [Rust](https://rustup.rs) (stable, 1.88 or newer).
 
 ```bash
 cargo run --release
@@ -140,6 +146,17 @@ cargo test -- --ignored
 Design notes: [docs/layout.md](docs/layout.md),
 [docs/project-format.md](docs/project-format.md), [docs/export.md](docs/export.md),
 [docs/events.md](docs/events.md).
+
+## Contributing
+
+NeuroMotion is meant to be built by its community, and help of every kind is welcome:
+bug reports, measurements of how endorphin behaves, documentation, test scenes and
+code. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and send a
+pull request, and the project's ground rules (clean-room work only, signed-off
+commits). [ARCHITECTURE.md](ARCHITECTURE.md) is a map of the code, and issues labelled
+[good first issue](https://github.com/Rick007110/NeuroMotion/labels/good%20first%20issue)
+are a good place to begin. Everyone taking part follows the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

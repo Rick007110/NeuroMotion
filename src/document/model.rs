@@ -363,12 +363,19 @@ impl Project {
         let max_character = self.characters.iter().map(|c| c.id).max().unwrap_or(0);
         let max_track = self.tracks.iter().map(|t| t.id).max().unwrap_or(0);
         let max_clip = self.clips.iter().map(|c| c.id).max().unwrap_or(0);
-        self.next_id = self.next_id.max(max_character.max(max_track).max(max_clip) + 1);
+        self.next_id = self
+            .next_id
+            .max(max_character.max(max_track).max(max_clip) + 1);
     }
 
     /// Construction helper for built-in content, importers and tests; editor changes go
     /// through [`crate::document::Document::apply`] so they can be undone.
-    pub fn add_character(&mut self, name: &str, kind: CharacterKind, skeleton: SkeletonRef) -> CharacterId {
+    pub fn add_character(
+        &mut self,
+        name: &str,
+        kind: CharacterKind,
+        skeleton: SkeletonRef,
+    ) -> CharacterId {
         let id = self.alloc_id();
         self.characters.push(Character {
             id,
@@ -420,7 +427,8 @@ impl Project {
 
     /// The character a clip animates (through its track).
     pub fn clip_character(&self, clip: &Clip) -> Option<&Character> {
-        self.track(clip.props.track).and_then(|t| self.character(t.character))
+        self.track(clip.props.track)
+            .and_then(|t| self.character(t.character))
     }
 
     pub fn tracks_of(&self, character: CharacterId) -> impl Iterator<Item = &Track> {
