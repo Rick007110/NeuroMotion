@@ -4337,3 +4337,278 @@ mod endorphin_scenes {
         assert!(failures.is_empty(), "{failures:?}");
     }
 }
+
+/// The physics settings the editor changes (gravity, rate, contact model, material
+/// interactions and pairs) must reach the simulation, and leave results alone when
+/// they aren't touched.
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+    use crate::document::physics::{Interaction, PhysicsSettings};
+    use crate::document::{Document, Edit};
+
+    /// A 0.5 m box released at rest `height` m up, over the default ground, for two
+    /// seconds at 60 frames per second.
+    fn dropped_box(height: f32) -> Project {
+        let mut p = new_scene("Dropped box", 2.0);
+        let free = Limits {
+            twist_min: 0.0,
+            twist_max: 0.0,
+            swing1: 0.0,
+            swing2: 0.0,
+        };
+        let no_muscle = Gains {
+            stiffness: 0.0,
+            damping: 0.0,
+            force_limit: 0.0,
+        };
+        let piece = Piece::at(
+            Geometry::Box {
+                size: [0.5, 0.5, 0.5],
+            },
+            10.0,
+            Quat::IDENTITY,
+            Vec3::ZERO,
+        );
+        add_prop(
+            &mut p,
+            "box",
+            CharacterKind::Prop,
+            prop_rig(
+                vec![("body", None, Vec3::new(0.0, height, 0.0), piece)],
+                free,
+                no_muscle,
+            ),
+            SimLevel::Simulated,
+        );
+        p
+    }
+
+    fn box_at(sim: &Simulation, frame: i32) -> Vec3 {
+        sim.frame(frame).unwrap()[0].as_ref().unwrap().bodies[0].1
+    }
+
+    /// Applies `change` to the project's physics settings the way the inspector does.
+    fn edited(project: &Project, change: impl FnOnce(&mut PhysicsSettings)) -> Project {
+        let mut doc = Document::new(project.clone());
+        let before = doc.project.physics.clone();
+        let mut after = before.clone();
+        change(&mut after);
+        doc.apply(
+            "Edit physics settings",
+            Edit::Physics { before, after },
+            false,
+        );
+        doc.project
+    }
+
+    /// How high the box bounces after its first landing, m.
+    fn rebound(project: &Project) -> f32 {
+        let (sim, _) = simulate(project);
+        let end = project.settings.range.end;
+        let ys: Vec<f32> = (0..=end).map(|f| box_at(&sim, f).y).collect();
+        let landing = (0..ys.len())
+            .min_by(|&a, &b| ys[a].total_cmp(&ys[b]))
+            .unwrap();
+        // The lowest point before the box rises again is the first landing.
+        let first_landing = (1..ys.len())
+            .find(|&i| ys[i] > ys[i - 1] && ys[i - 1] < 0.6)
+            .map_or(landing, |i| i - 1);
+        let peak = ys[first_landing..].iter().copied().fold(f32::MIN, f32::max);
+        peak - ys[first_landing]
+    }
+
+    /// Nudge-proof bounds: how far the numbers moved is in the assertion messages.
+    #[test]
+    fn zero_gravity_keeps_a_body_still() {
+        let project = dropped_box(2.0);
+        let (falling, _) = simulate(&project);
+        let (floating, _) = simulate(&edited(&project, |p| p.gravity = [0.0; 3]));
+        let end = project.settings.range.end;
+        eprintln!(
+            "default: y {:.3} -> {:.3}; zero gravity: y {:.3} -> {:.3}",
+            box_at(&falling, 0).y,
+            box_at(&falling, end).y,
+            box_at(&floating, 0).y,
+            box_at(&floating, end).y
+        );
+        assert!(box_at(&falling, end).y < 0.3, "it lands under gravity");
+        for f in [0, end / 2, end] {
+            let p = box_at(&floating, f);
+            assert!(
+                (p - Vec3::new(0.0, 2.0, 0.0)).length() < 1e-3,
+                "frame {f}: {p}"
+            );
+        }
+    }
+
+    #[test]
+    fn edited_gravity_sets_how_fast_it_falls() {
+        let project = dropped_box(5.0);
+        // After one second of free fall from rest: g / 2 metres.
+        let drop_after_one_second = |g: f32| {
+            let moon = edited(&project, |p| p.gravity = [0.0, -g, 0.0]);
+            let (sim, _) = simulate(&moon);
+            5.0 - box_at(&sim, 60).y
+        };
+        let earth = drop_after_one_second(9.81);
+        let moon = drop_after_one_second(1.62);
+        eprintln!("one second of fall: {earth:.3} m at 9.81, {moon:.3} m at 1.62");
+        // Free fall is g / 2: 4.905 and 0.81 m. The engine measures 4.72 and 0.81 (a
+        // little damping on fast bodies), so the bounds are about the trend, not the digit.
+        assert!((4.5..5.0).contains(&earth), "{earth}");
+        assert!((0.75..0.87).contains(&moon), "{moon}");
+        assert!(earth > 5.0 * moon, "{earth} vs {moon}");
+        // Sideways gravity too.
+        let sideways = edited(&project, |p| p.gravity = [3.0, 0.0, 0.0]);
+        let (sim, _) = simulate(&sideways);
+        let p = box_at(&sim, 60);
+        assert!((p.x - 1.5).abs() < 0.05 && (p.y - 5.0).abs() < 1e-3, "{p}");
+    }
+
+    #[test]
+    fn edited_restitution_changes_the_bounce() {
+        let project = dropped_box(1.5);
+        let dead = rebound(&edited(&project, |p| {
+            p.interactions.get_mut("Default").unwrap().restitution = 0.0;
+        }));
+        let lively = rebound(&edited(&project, |p| {
+            p.interactions.get_mut("Default").unwrap().restitution = 0.9;
+        }));
+        eprintln!("rebound: {dead:.3} m at restitution 0, {lively:.3} m at 0.9");
+        assert!(dead < 0.1, "{dead}");
+        assert!(lively > 0.5, "{lively}");
+    }
+
+    #[test]
+    fn a_material_pair_picks_the_interaction() {
+        let project = dropped_box(1.5);
+        let plain = rebound(&edited(&project, |p| {
+            p.interactions.get_mut("Default").unwrap().restitution = 0.0;
+        }));
+        // The box's shapes are "default" and the ground "tarmac": pair them with a
+        // bouncy interaction added in the same edit.
+        let bouncy = rebound(&edited(&project, |p| {
+            p.interactions.get_mut("Default").unwrap().restitution = 0.0;
+            p.interactions.insert(
+                "Bouncy".into(),
+                Interaction {
+                    restitution: 0.9,
+                    friction: 100.0,
+                    adhesion: 0.0,
+                    softness: 0.0,
+                },
+            );
+            p.pairs
+                .push(("tarmac".into(), "default".into(), "Bouncy".into()));
+        }));
+        eprintln!("rebound: {plain:.3} m unpaired, {bouncy:.3} m paired with Bouncy");
+        assert!(plain < 0.1, "{plain}");
+        assert!(bouncy > 0.5, "{bouncy}");
+    }
+
+    #[test]
+    fn edited_friction_changes_how_far_a_box_slides() {
+        let mut project = dropped_box(0.26);
+        let id = project.characters[0].id;
+        push(
+            &mut project,
+            id,
+            30,
+            "box.MetaBodies.body",
+            Vec3::new(3.0, 0.0, 0.0),
+        );
+        let slid = |friction: f32, contact: ContactModel| {
+            let edit = edited(&project, |p| {
+                p.contact = contact;
+                p.interactions.get_mut("Default").unwrap().friction = friction;
+            });
+            let (sim, _) = simulate(&edit);
+            box_at(&sim, edit.settings.range.end).x
+        };
+        let grippy = slid(100.0, ContactModel::Coulomb);
+        let slippery = slid(5.0, ContactModel::Coulomb);
+        eprintln!("slid {grippy:.2} m at mu 1, {slippery:.2} m at mu 0.05");
+        // v² / 2μg: about 0.46 m at μ 1; at μ 0.05 it is still moving at the end.
+        assert!((0.3..0.7).contains(&grippy), "{grippy}");
+        assert!(slippery > 2.0 * grippy, "{slippery}");
+    }
+
+    #[test]
+    fn a_different_simulation_rate_still_agrees() {
+        let project = dropped_box(5.0);
+        let at = |rate: f32| {
+            let (sim, _) = simulate(&edited(&project, |p| p.rate = rate));
+            box_at(&sim, 60).y
+        };
+        let (slow, normal, fast) = (at(60.0), at(120.0), at(240.0));
+        eprintln!(
+            "height after one second: {slow:.3} at 60 Hz, {normal:.3} at 120, {fast:.3} at 240"
+        );
+        assert!((normal - fast).abs() < 0.05, "{normal} vs {fast}");
+        assert!((normal - slow).abs() < 0.1, "{normal} vs {slow}");
+    }
+
+    #[test]
+    fn untouched_and_undone_settings_leave_the_motion_identical() {
+        let project = dropped_box(1.5);
+        let (reference, _) = simulate(&project);
+
+        // Edit, then undo: same project, same motion, bit for bit.
+        let mut doc = Document::new(project.clone());
+        let before = doc.project.physics.clone();
+        let mut after = before.clone();
+        after.gravity = [0.0; 3];
+        after.contact = ContactModel::Coulomb;
+        doc.apply(
+            "Edit physics settings",
+            Edit::Physics { before, after },
+            false,
+        );
+        doc.undo();
+        assert_eq!(doc.project, project);
+        let (again, _) = simulate(&doc.project);
+        for f in 0..=project.settings.range.end {
+            assert_eq!(box_at(&reference, f), box_at(&again, f), "frame {f}");
+        }
+    }
+
+    #[test]
+    fn the_default_settings_are_what_the_tests_were_tuned_on() {
+        let p = PhysicsSettings::default();
+        assert_eq!(p.rate, 120.0);
+        assert_eq!(p.gravity, [0.0, -9.81, 0.0]);
+        assert_eq!(p.contact, ContactModel::ForceCapped);
+        let default = p.interactions["Default"];
+        assert_eq!(
+            (
+                default.restitution,
+                default.friction,
+                default.adhesion,
+                default.softness
+            ),
+            (0.2, 100.0, 0.0, 0.0)
+        );
+        assert_eq!(p.interactions["Grippy"].friction, 300.0);
+        assert_eq!(p.interactions.len(), 2);
+        assert_eq!(p.pairs.len(), 2);
+    }
+
+    #[test]
+    fn saving_and_reopening_keeps_the_edited_settings_and_the_motion() {
+        let project = edited(&dropped_box(1.5), |p| {
+            p.gravity = [0.5, -4.0, 0.0];
+            p.rate = 240.0;
+            p.contact = ContactModel::Coulomb;
+            p.pairs
+                .push(("steel".into(), "ice".into(), "Grippy".into()));
+        });
+        let text = crate::io::to_string(&project).unwrap();
+        let reopened = crate::io::from_str(&text).unwrap();
+        assert_eq!(reopened.physics, project.physics);
+        let (a, _) = simulate(&project);
+        let (b, _) = simulate(&reopened);
+        let end = project.settings.range.end;
+        assert_eq!(box_at(&a, end), box_at(&b, end));
+    }
+}

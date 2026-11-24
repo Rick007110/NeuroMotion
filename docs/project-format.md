@@ -38,6 +38,17 @@ Pretty-printed JSON, chosen over RON because every language and diff tool reads 
         ]
       }
     ],
+    "physics": {
+      "rate": 120.0,
+      "gravity": [0.0, -9.81, 0.0],
+      "ground": { "height": 0.0, "material": "tarmac" },
+      "contact": "coulomb",
+      "spring_cap": "bodies",
+      "interactions": {
+        "Default": { "restitution": 0.2, "friction": 100.0, "adhesion": 0.0, "softness": 0.0 }
+      },
+      "pairs": [ ["skin", "tarmac", "Default"] ]
+    },
     "next_id": 5
   }
 }
@@ -67,3 +78,14 @@ Pretty-printed JSON, chosen over RON because every language and diff tool reads 
 - `skeleton.source` points at an external rig file; `joints` is a cached copy so the
   project still opens without it. Parents always precede children.
 - `interp` is the curve *leaving* that key: `step`, `linear` or `smooth`.
+- `physics` holds the scene-wide physics settings and is optional: a file without it (older
+  builds wrote none) opens with the defaults shown above. Those defaults were force caps
+  until Coulomb friction became the default (physics-design.md, lesson 26), so such a
+  file now simulates with Coulomb friction; a file that stores its settings keeps them.
+  `rate` is physics ticks per second (each frame is split into `round(rate / fps)` steps,
+  at least one); `gravity` is in m/s²; `ground` is `null` for a scene without a ground
+  plane; `contact` and `spring_cap` are described above; each interaction has `restitution`, `friction`,
+  `adhesion` (N) and `softness`; each pair is `[material, material, interaction]`, in
+  either order, and unlisted pairs use the `Default` interaction. The editor's Physics
+  group on the project page edits all of these (docs/layout.md). Adding the editing needed
+  no format change: the fields were already stored, so the version stays 2.

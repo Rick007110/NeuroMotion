@@ -1,18 +1,19 @@
 # NeuroMotion editor layout
 
-The editor window has a menu bar, three working panels and a status line. The goal is
+The editor window has a menu bar, three working panels, an optional scene tree on the
+left and a status line. The goal is
 that people who already know 3D and animation tools can find their way around without
 reading anything, while the details are designed for NeuroMotion.
 
 ```
 ┌───────────────────────────────────────────────────────────┐
 │ File  Edit  View  Help                                     │  menu bar
-├──────────────────────────────────────────┬────────────────┤
-│                                          │                │
-│              viewport                    │   inspector    │
-│        (character preview)               │  (selection)   │
-│                                          │                │
-├──────────────────────────────────────────┴────────────────┤
+├────────┬─────────────────────────────────┬────────────────┤
+│ scene  │                                 │                │
+│ tree   │           viewport              │   inspector    │
+│        │     (character preview)         │  (selection)   │
+│        │                                 │                │
+├────────┴─────────────────────────────────┴────────────────┤
 │ ⏮ ◀ ▶ ■ ▶ ⏭ │ frame 42 / 240 │ ⟳ │            − + Fit     │  transport
 │ TRACKS │ 0    20    40    60 ▼   80    100 ...             │  ruler
 │ Base   │ [ Idle breathe ............................... ]  │
@@ -55,6 +56,17 @@ keeps the playhead visually close to the pose it is driving. Inside the panel:
   frame; on a track or character name it adds or deletes tracks; on a clip it
   duplicates, disables or deletes it.
 
+**Scene tree on the left.** The viewport shows what the scene looks like; the tree
+shows what it is made of. It lists the characters, the props and the environment,
+and under each one its physics bodies with their mass. Clicking a name selects it
+exactly as clicking a track or clip does, so the inspector follows; clicking the
+arrow folds it. A body opens a read-only page in the inspector: the character it
+belongs to, mass, inertia, each collision shape with its size and material, and the
+joint to its parent body. The tree sits on the left because the right is the
+inspector's and the bottom the timeline's, and a list of names reads best against the
+left edge. View → Scene Tree hides it when you need the room. Characters unfold on
+first sight; the environment, which can have many pieces, starts folded.
+
 **Inspector on the right.** Your eye and pointer are usually on the viewport or the
 timeline, so the inspector sits beside them rather than between them. A vertical strip
 also suits a list of labelled fields. It always shows exactly one thing (the project,
@@ -63,13 +75,39 @@ always clear what you're editing. Controls are grouped by what they affect:
 
 | Selection | Groups |
 |-----------|--------|
-| Nothing   | General · Time (fps, range) · Skeleton · Contents |
+| Nothing   | General · Time (fps, range) · Physics (below) · Characters · Contents |
 | Character | Rig · Physics (bodies, starting simulation level) · Tracks (add a track) |
+| Body      | Body (character, joint, mass, inertia, centre of mass) · Shapes · Joint to parent. Read-only |
 | Track     | Track (name, mute) · delete track |
 | Clip      | Clip (name, enabled, track) · Timing (start, duration) · Blending (weight, blend in/out, live influence) · Channels |
 | Event     | Clip · Timing · the event's own settings (see [events.md](events.md)) |
 | Channel   | Channel (joint, property, live value) · Keys |
 | Key       | Key (frame, value, curve) · Belongs to (links back up) |
+
+**Physics group (project page).** The scene-wide settings that decide how everything
+in the project simulates, with units in the fields:
+
+- *Simulation rate* in Hz. Each frame is split into a whole number of steps, so the
+  rate that actually runs is a multiple of the frame rate; the line under the field
+  says how many steps and what rate results.
+- *Gravity* as x, y, z in metres per second squared.
+- *Contact model*: force cap or Coulomb. It changes what the friction number means,
+  and the friction field shows the coefficient (μ) next to it under Coulomb.
+- *Muscle cap*: the joint's two bodies or the whole limb. What a muscle's stiffness
+  is capped for: NeuroMotion's own projects use the two bodies (Balance and Stagger
+  are tuned for it), imported scenes the whole limb, as endorphin's muscles behave
+  (physics-design.md, lesson 27).
+- *Ground*, read-only.
+- *Material interactions*, folded: one entry each with restitution, friction, maximum
+  adhesion (N) and softness. Interactions can be added, and removed unless a pair uses
+  them (Default is never removed).
+- *Material pairs*, folded: which two surface materials (Default, Ice, Rubber, Skin,
+  Sponge, Steel, Tarmac, Velcro) use which interaction. A pair picked here is spelt as
+  the project's shapes spell the material, since lookups compare names exactly.
+
+How long the simulation runs is the frame range under Time, and looping is the
+transport's loop toggle: neither is a physics setting. Changing anything re-simulates
+from the start, like any other edit.
 
 Every edit in the inspector goes through the document's undo history; dragging a value
 records one undo step per drag, not one per frame.

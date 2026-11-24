@@ -168,8 +168,14 @@ endorphin scenes.
   constraints; pose with rotate gizmos and IK
 - ⬜ **Pose tools**: mirror left↔right, a pose library, key the current pose
 - ⬜ **Ghosting**: show the animated and simulated pose together, and motion trails
-- ⬜ **Timeline**: an undo history window, separate playback and export ranges, and the
-  simulation rate in the settings
+- ⬜ **Timeline**: an undo history window and separate playback and export ranges
+- ✅ **Physics settings panel**: simulation rate, gravity, contact model, muscle cap,
+  material interactions and material pairs, editable on the project page of the
+  inspector and undoable ([docs/layout.md](docs/layout.md)); the frame range sets the
+  length
+- ✅ **Scene tree**: a left panel listing characters, props and the environment with
+  their physics bodies; a body shows its mass, shapes and material in the inspector,
+  read-only for now (editing bodies, shapes and materials is still open)
 - ⬜ **Preferences and keyboard profiles**, editable in the app
 - ⬜ **Playblast**: export the viewport as a video or an image sequence
 - ✅ Window and app icon ([#17](https://github.com/Rick007110/NeuroMotion/issues/17))

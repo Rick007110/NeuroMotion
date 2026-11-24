@@ -238,6 +238,11 @@ mod tests {
             crate::document::SimLevel::Animated
         );
         assert!(project.characters[0].physics.is_none());
+        // No physics settings in the file: the defaults (Coulomb friction since lesson 26).
+        assert_eq!(
+            project.physics,
+            crate::document::physics::PhysicsSettings::default()
+        );
         assert_eq!(project.evaluate(30.0)[0].joints[1][0], 20.0);
         // Edits made by this build allocate ids past the loaded ones.
         let mut doc = crate::document::Document::new(project);
