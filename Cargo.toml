@@ -2,6 +2,7 @@
 name = "neuromotion"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
 description = "A timeline-based motion editor for physically simulated character animation that opens endorphin scenes."
 license = "GPL-3.0-or-later"
 repository = "https://github.com/Rick007110/NeuroMotion"
