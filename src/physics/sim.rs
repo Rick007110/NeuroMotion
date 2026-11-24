@@ -818,7 +818,7 @@ fn plan(project: &Project, character_index: usize) -> Plan {
                         plan.behaviours.push(BehaviourSpan {
                             start,
                             end,
-                            behaviour,
+                            behaviour: behaviour.with_settings(&clip.source),
                             source: clip.source.clone(),
                             reach: None,
                         });

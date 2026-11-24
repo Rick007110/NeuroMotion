@@ -122,8 +122,8 @@ name and settings (see [behaviour settings](#behaviour-parameters)), impulse mat
 target bodies and constraint strengths. The physics engine acts on simulation levels,
 forces, transitions, active poses (whose target pose is stored as channels on the
 clip) and constraints. Behaviours named Balance, Stagger, CatchFall, BodyFoetal,
-BodyWrithe and Look and Reach run NeuroMotion's own controllers (see `behaviours.md`);
-others are kept but not simulated.
+BodyWrithe, Look and Reach and Explosion (Writhe in mid-air) run NeuroMotion's own
+controllers (see `behaviours.md`); others are kept but not simulated.
 
 Overlapping events of the same kind go onto extra tracks ("Animation 2").
 
@@ -152,22 +152,27 @@ These are what the importer relies on:
 - Event elements live in `Events`, `ForceEvents`, `SecondaryBehaviours`,
   `TertiaryBehaviours` and `SeverBehaviourEvents`. Each has `startFrameNumber`,
   `endFrameNumber`, `priority`, `enabled` and `character`.
-- <a id="behaviour-parameters"></a>**Behaviour settings** (`SecondaryBehaviour`)
-  are in its `Parameters`: one `Variable` per setting, its name in `fk` and its value
-  in `ja` (`LeftHand_Speed` = `0.700`). `kg` gives the kind: 0 a number, 2 a flag
-  (`true`/`false`), 5 a selection or a helper graphic. A variable without `ja` keeps
-  endorphin's default, which the scene doesn't record (its `de` names the default, not
-  a value). A target is a selection, `ja="MetaBodyAndCollisionSelection"`, listing what
-  was picked as `ValuePtr`s: a body (`character02.MetaBodies.HeadMass`) or a collision
-  surface by its path through the skeleton
-  (`character02.root.LowerSpineJoint....HeadMass.Sphere1`: the body, then the
+- <a id="behaviour-parameters"></a>**Behaviour settings** (`SecondaryBehaviour`): a
+  behaviour event names its behaviour in `behaviourName` (`Bob2: Explosion 2.0`) and
+  shows `displayName` (`Writhe in mid-air 2.0`). Its settings are in its `Parameters`:
+  one `Variable` per setting, its name in `fk` and its value in `ja`
+  (`LeftHand_Speed` = `0.700`; `de`, when present, is the name endorphin shows).
+  `kg` gives the kind: 0 a number, 1 a whole number, 2 a flag (`true`/`false`), 5 a
+  selection or a helper graphic. A variable without `ja` keeps endorphin's default,
+  which the scene doesn't record. A target is a selection,
+  `ja="MetaBodyAndCollisionSelection"`, listing what was picked as `ValuePtr`s: a body
+  (`character02.MetaBodies.HeadMass`) or a collision surface by its path through the
+  skeleton (`character02.root.LowerSpineJoint....HeadMass.Sphere1`: the body, then the
   surface's name). `ja="HelperGraphic"` variables are the locators endorphin draws
   (target crosses, look-at lines), not settings. The importer keeps every setting with
   a value under its `fk` name, and a selection as its picks, comma separated; it
-  leaves out defaults, empty selections and helper graphics. Look and Reach reads its
-  settings from there ([behaviours.md](behaviours.md#look-and-reach)); a surface
-  target resolves to its body, and to the surface's centre only when the body has a
-  single shape, since NeuroMotion doesn't keep shape names.
+  leaves out defaults, empty selections and helper graphics, and a name the event's
+  own attributes already use keeps the attribute. Behaviours read their settings from
+  there through one reader (`behaviour::setting`): Look and Reach
+  ([behaviours.md](behaviours.md#look-and-reach)), where a surface target resolves to
+  its body, and to the surface's centre only when the body has a single shape, since
+  NeuroMotion doesn't keep shape names; and Explosion
+  ([behaviours.md](behaviours.md#explosion-writhe-in-mid-air)).
 - <a id="sever-events"></a>**Sever events** (`SeverEvent`, in `SeverBehaviourEvents`) are
   **a best guess**: we have no scene containing one. The importer keeps every
   attribute and its `Objects` (as `targets`), and the simulation reads `severType`

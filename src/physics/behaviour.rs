@@ -7,10 +7,13 @@
 //! Controllers are stateless (everything comes from the bodies each tick), so they keep
 //! the simulation deterministic.
 
+use std::collections::BTreeMap;
+
 use glam::{Mat3, Quat, Vec3};
 
 use super::sim::rig_bodies;
 use super::world::{Body, Joint, World};
+use crate::document::events;
 use crate::document::physics::{Gains, Geometry, MuscleGains, PhysicsRig};
 use crate::document::{Pose, SkeletonRef, world_transforms};
 
@@ -31,6 +34,9 @@ pub enum Behaviour {
     /// (endorphin's Look and Reach, "Hands reach and look at"); the rest of the body
     /// holds its pose. Its targets and settings come from the event: [`LookAndReach`].
     LookAndReach,
+    /// Writhe in mid-air: arms flap up and down from out to the sides, legs pedal,
+    /// back arched, until the character nears the ground.
+    Explosion(Explosion),
 }
 
 impl Behaviour {
@@ -56,6 +62,9 @@ impl Behaviour {
             "writhe" | "bodywrithe" => Some(Behaviour::Writhe),
             "stagger" => Some(Behaviour::Stagger),
             "lookandreach" | "handsreachandlookat" => Some(Behaviour::LookAndReach),
+            // endorphin 2.0 calls it Explosion, 2.5 WritheInMidAir; both show as
+            // "Writhe in mid-air".
+            "explosion" | "writheinmidair" => Some(Behaviour::Explosion(Explosion::default())),
             _ => None,
         }
     }
@@ -68,8 +77,36 @@ impl Behaviour {
             Behaviour::Writhe => writhe(d),
             Behaviour::Stagger => stagger(d),
             Behaviour::LookAndReach => look_and_reach(d),
+            Behaviour::Explosion(settings) => explosion(d, settings),
         }
     }
+
+    /// This behaviour with the settings an event carries (`clip.source`, endorphin's
+    /// parameter names); missing or unreadable ones keep their defaults. Look and
+    /// Reach's settings name bodies in the world, so it reads them once the world is
+    /// built ([`LookAndReach::read`]), through the same [`setting`].
+    pub fn with_settings(self, source: &BTreeMap<String, String>) -> Self {
+        let number = |key: &str| setting(source, key);
+        match self {
+            Behaviour::Explosion(e) => Behaviour::Explosion(e.read(number)),
+            other => other,
+        }
+    }
+}
+
+/// A number from a behaviour event's settings (`clip.source`: endorphin's parameter
+/// names, as the importer keeps them); `None` when missing or unreadable, so the
+/// behaviour keeps its default. Every behaviour reads its settings through this and
+/// [`setting_flag`].
+pub fn setting(source: &BTreeMap<String, String>, key: &str) -> Option<f32> {
+    events::number(source, key).filter(|v| v.is_finite())
+}
+
+/// A yes/no setting (`true` or `false`, as endorphin writes them); `None` when missing.
+pub fn setting_flag(source: &BTreeMap<String, String>, key: &str) -> Option<bool> {
+    source
+        .get(key)
+        .map(|v| v.trim().eq_ignore_ascii_case("true"))
 }
 
 /// Rig bodies of a limb, from the trunk outwards: thigh, shin, foot or upper arm,
@@ -213,7 +250,28 @@ impl Layout {
             off.sort_by(|a, b| b.0.total_cmp(&a.0));
             for &(_, s, c) in off.iter().take(2) {
                 let start = pivot(c);
-                let chain = follow(c, &|b| at(b).distance(start));
+                let mut chain = follow(c, &|b| at(b).distance(start));
+                let whole = chain.clone();
+                // A body that only twists about its own bone (endorphin's forearm twist)
+                // continues the segment before it: without this, half forearms made the
+                // collarbone and upper arm the longest pair.
+                let twist_only = |b: usize, from: usize| {
+                    let Some(j) = joint_of[b] else { return false };
+                    let jd = &rig.joints[j];
+                    let axis = rest_joints[jd.joint].0
+                        * Quat::from_array(jd.secondary).normalize()
+                        * Vec3::X;
+                    let bone = (pivot(b) - pivot(from)).normalize_or_zero();
+                    jd.hard.swing1.max(jd.hard.swing2) < 0.05 && axis.dot(bone).abs() > 0.9
+                };
+                let mut k = 1;
+                while k < chain.len() {
+                    if twist_only(chain[k], chain[k - 1]) {
+                        chain.remove(k);
+                    } else {
+                        k += 1;
+                    }
+                }
                 // Segment lengths, joint to next joint; pick the longest consecutive pair.
                 let length = |i: usize| {
                     chain
@@ -229,7 +287,7 @@ impl Layout {
                         lower: chain[i + 1],
                         end: chain[i + 2],
                     });
-                    hand_chains.push(chain.clone());
+                    hand_chains.push(whole);
                     chest.get_or_insert(s);
                 }
             }
@@ -302,11 +360,9 @@ impl Layout {
             .map(|l| rest[pelvis].0.inverse() * flat(pivot(l.upper) - at(pelvis)))
             .collect();
         // Each hand, for reaching: the tip of the arm's furthest body (the fingers), and
-        // the upper arm and forearm as two bones out to it. Those are the consecutive
-        // pair with the longest reach, shoulder joint to tip, weighed by how evenly it
-        // splits at the elbow (shorter / longer): a collarbone is short, and an arm whose
-        // forearm is split in two (endorphin's, with a forearm twist) would otherwise be
-        // bent at the twist. `arms` keeps its own pick, which the other behaviours use.
+        // the arm's upper arm and forearm (`arms`, past a collarbone and a forearm
+        // twist) as two bones out to it. What comes before the upper arm is the
+        // collarbone; what follows the forearm (a twist, the hand) is carried along.
         let hands = arms
             .iter()
             .zip(hand_chains)
@@ -317,15 +373,12 @@ impl Layout {
                     .map(|&b| at(b))
                     .max_by(|a, b| a.distance(start).total_cmp(&b.distance(start)))
                     .unwrap_or(start);
-                let score = |i: usize| {
-                    let upper = pivot(chain[i]).distance(pivot(chain[i + 1]));
-                    let lower = tip.distance(pivot(chain[i + 1]));
-                    (upper + lower) * upper.min(lower) / upper.max(lower).max(1e-6)
-                };
-                let i = (0..chain.len() - 1)
-                    .max_by(|&a, &b| score(a).total_cmp(&score(b)))
-                    .unwrap_or(0);
-                let (upper, lower) = (chain[i], chain[(i + 1).min(chain.len() - 1)]);
+                let (upper, lower) = (arm.upper, arm.lower);
+                let i = chain.iter().position(|&b| b == upper).unwrap_or(0);
+                let after = chain
+                    .iter()
+                    .position(|&b| b == lower)
+                    .map_or(chain.len(), |l| l + 1);
                 let (fr, fp) = rest[lower];
                 // Where the arm points at rest, shoulder to tip, seen from the trunk body
                 // it hangs from.
@@ -335,7 +388,7 @@ impl Layout {
                     lower,
                     collar: chain[..i].to_vec(),
                     rest_reach: rest[trunk].0.inverse() * (tip - pivot(upper)).normalize_or_zero(),
-                    chain: chain[(i + 2).min(chain.len())..].to_vec(),
+                    chain: chain[after..].to_vec(),
                     tip: fr.inverse() * (tip - fp),
                     left: (pivot(arm.upper) - at(pelvis)).dot(Vec3::Y.cross(forward)) > 0.0,
                 }
@@ -1429,22 +1482,9 @@ impl LookAndReach {
     /// Reads an event's settings, as imported from endorphin (`LeftHand_Speed`, ...).
     /// `aim` turns a target as the scene names it (`character.MetaBodies.Body`, or a
     /// collision surface's path) into a point on a body in the world.
-    pub fn read(
-        settings: &std::collections::BTreeMap<String, String>,
-        aim: &dyn Fn(&str) -> Option<Aim>,
-    ) -> Self {
-        let number = |key: &str, default: f32| {
-            settings
-                .get(key)
-                .and_then(|v| v.trim().parse::<f32>().ok())
-                .filter(|v| v.is_finite())
-                .unwrap_or(default)
-        };
-        let flag = |key: &str, default: bool| {
-            settings
-                .get(key)
-                .map_or(default, |v| v.trim().eq_ignore_ascii_case("true"))
-        };
+    pub fn read(settings: &BTreeMap<String, String>, aim: &dyn Fn(&str) -> Option<Aim>) -> Self {
+        let number = |key: &str, default: f32| setting(settings, key).unwrap_or(default);
+        let flag = |key: &str, default: bool| setting_flag(settings, key).unwrap_or(default);
         // A selection may list several; the first that resolves is used.
         let target = |key: &str| {
             settings
@@ -1805,6 +1845,215 @@ impl Drive<'_> {
     }
 }
 
+/// Explosion's settings, as endorphin's scenes name them (all 0 to 1 but `PhaseOffset`).
+/// The defaults are what Car Hit and most other scenes use.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Explosion {
+    /// How far the arms swing up and down (`ShoulderAmplitude`).
+    pub shoulder: f32,
+    /// How far the elbows bend (`ElbowAmplitude`).
+    pub elbow: f32,
+    /// How far the legs pedal (`LegAmplitude`).
+    pub legs: f32,
+    /// How fast it all cycles (`Speed`, endorphin's "Frequency").
+    pub speed: f32,
+    /// Muscle strength, a fraction of the rig's "Normal" preset (`Strength`).
+    pub strength: f32,
+    /// How far the head turns from side to side (`HeadTurn`).
+    pub head_turn: f32,
+    /// How far the back arches (`BackArch`).
+    pub back_arch: f32,
+    /// Where in the cycle it starts, in cycles (`PhaseOffset`).
+    pub phase: f32,
+}
+
+impl Default for Explosion {
+    fn default() -> Self {
+        Self {
+            shoulder: 0.7,
+            elbow: 0.6,
+            legs: 0.5,
+            speed: 0.6,
+            strength: 0.5,
+            head_turn: 0.6,
+            back_arch: 1.0,
+            phase: 0.0,
+        }
+    }
+}
+
+impl Explosion {
+    /// Reads the settings by endorphin's names. WritheInMidAir (endorphin 2.5) has one
+    /// `Amplitude` for arms, elbows and legs where Explosion (2.0) has one each.
+    fn read(self, number: impl Fn(&str) -> Option<f32>) -> Self {
+        let amplitude = number("Amplitude");
+        let get = |key: &str, default: f32| number(key).or(amplitude).unwrap_or(default);
+        Self {
+            shoulder: get("ShoulderAmplitude", self.shoulder),
+            elbow: get("ElbowAmplitude", self.elbow),
+            legs: get("LegAmplitude", self.legs),
+            speed: number("Speed").unwrap_or(self.speed),
+            strength: number("Strength").unwrap_or(self.strength),
+            head_turn: number("HeadTurn").unwrap_or(self.head_turn),
+            back_arch: number("BackArch").unwrap_or(self.back_arch),
+            phase: number("PhaseOffset").unwrap_or(self.phase),
+        }
+    }
+}
+
+/// The cycle's rate per unit of `Speed`, rad/s: at Speed 0.6 (7.2 rad/s, 52 frames at
+/// 60 fps) the arms, lagging their targets, are highest at frame 16-24 and lowest at
+/// 40-50, where endorphin's are at 20-30 and 42-46.
+const EXPLOSION_RATE: f32 = 12.0;
+/// How far the arms swing above and below out to the sides per unit of amplitude, rad.
+const EXPLOSION_SHOULDER: f32 = 1.1;
+/// Elbow bend at its fullest per unit of amplitude, rad.
+const EXPLOSION_ELBOW: f32 = 1.5;
+/// Hip flexion and knee bend per unit of leg amplitude, rad.
+const EXPLOSION_HIP: f32 = 0.6;
+const EXPLOSION_KNEE: f32 = 1.0;
+/// How far each leg is spread to its side, rad.
+const EXPLOSION_SPREAD: f32 = 0.15;
+/// The back's arch at `BackArch` 1, over the whole trunk (neck and head included), rad.
+const EXPLOSION_ARCH: f32 = 0.4;
+/// Head turn per unit of `HeadTurn`, rad, at half the limbs' rate.
+const EXPLOSION_HEAD: f32 = 0.5;
+/// Height of the lowest body's centre above the ground below which the character has
+/// landed, and the height over which the behaviour fades in above that, m: endorphin's
+/// characters lie still once they have landed.
+const EXPLOSION_LANDED: f32 = 0.15;
+const EXPLOSION_FADE: f32 = 0.35;
+/// The trunk's tilt from upright, rad, over which a character on the ground counts as
+/// lying down (and goes limp) rather than standing.
+const EXPLOSION_LYING: (f32, f32) = (0.8, 1.3);
+/// Seconds after the behaviour starts before legs near the ground give.
+const EXPLOSION_SETTLE: f32 = 0.25;
+
+/// Explosion (endorphin's "Writhe in mid-air"): the arms, held out to the sides, flap
+/// up and down together, the elbows bending as they come up; the legs pedal, spread a
+/// little; the back arches and the head turns from side to side. Everything follows
+/// sines of the time since the event began, so it is deterministic. Moving the arms
+/// together keeps the swing from turning the body: endorphin's characters fall
+/// upright. While it touches anything the flailing stops (the pose stays); lying on
+/// the ground it goes limp and lies still, as endorphin's characters do once landed.
+/// Works from the chest's frame and the rig's rest frames, so any biped works, T-pose
+/// or not.
+fn explosion(d: &mut Drive, e: Explosion) {
+    use std::f32::consts::{FRAC_PI_4, PI, TAU};
+    let layout = d.layout;
+    // How far above the ground it is: 1 well clear of it, 0 landed.
+    let lowest = d
+        .all_bodies()
+        .map(|b| d.body(b).position.y)
+        .fold(f32::MAX, f32::min);
+    let clear = d.world.ground.map_or(1.0, |(h, _)| {
+        ((lowest - h - EXPLOSION_LANDED) / EXPLOSION_FADE).clamp(0.0, 1.0)
+    });
+    // It only flails in the air. Flailing while Car Hit's pedestrian lay on the
+    // bonnet pushed it along the car: it landed 0.5 m further forward than endorphin's,
+    // 10 frames early.
+    let first = d.first_body;
+    let pressing = d.world.pressing(first..first + d.rig.bodies.len());
+    let airborne = if pressing { 0.0 } else { clear };
+    // Down on the ground it goes limp, as endorphin's characters lie still once they
+    // have landed. Held, even at a third of `Strength`, ours sat up again or rolled
+    // over for a second or more. Standing, it keeps its strength: Multi Martial starts
+    // it on characters still on their feet as they are kicked.
+    let chest = layout.chest.unwrap_or(layout.pelvis);
+    let trunk = d.body(chest).position - d.body(layout.pelvis).position;
+    let tilt = trunk.normalize_or(Vec3::Y).y.clamp(-1.0, 1.0).acos();
+    let lying =
+        ((tilt - EXPLOSION_LYING.0) / (EXPLOSION_LYING.1 - EXPLOSION_LYING.0)).clamp(0.0, 1.0);
+    d.preset(
+        "Normal",
+        e.strength * (1.0 - (1.0 - clear) * lying),
+        d.all_bodies(),
+    );
+    // Landing on its feet, its legs give: held, ours stood on landing in some runs and
+    // went down on its back in others. Not in the first moments, though, so a character
+    // it starts on while standing (Multi Martial's, as they are kicked) keeps its feet.
+    if d.elapsed > EXPLOSION_SETTLE {
+        let legs: Vec<usize> = layout
+            .legs
+            .iter()
+            .flat_map(|l| [l.upper, l.lower, l.end])
+            .collect();
+        d.preset("Normal", e.strength * clear, legs.into_iter());
+    }
+    // The presets are tuned to hold poses against the ground; for arms swinging in the
+    // air they are several times overdamped, and the arms then barely moved. The legs
+    // keep them: damped critically, they kicked Car Hit's pedestrian off the bonnet
+    // 0.45 m higher than endorphin's goes.
+    for arm in &layout.arms {
+        d.damp_for_swing(arm.upper, &[arm.upper, arm.lower, arm.end]);
+        d.damp_for_swing(arm.lower, &[arm.lower, arm.end]);
+    }
+    let angle = EXPLOSION_RATE * e.speed * d.elapsed + e.phase * TAU;
+
+    // The back arches, shared by the trunk's joints; the head turns.
+    let pelvis = d.body(layout.pelvis).rotation;
+    let n = layout.spine.len();
+    let spine: Vec<(usize, Turn)> = layout
+        .spine
+        .iter()
+        .enumerate()
+        .map(|(i, &s)| {
+            let turn = Turn {
+                bend: -e.back_arch * EXPLOSION_ARCH / n as f32,
+                twist: if i + 1 == n {
+                    airborne * e.head_turn * EXPLOSION_HEAD * (0.5 * angle).sin()
+                } else {
+                    0.0
+                },
+                ..Turn::default()
+            };
+            (s, turn)
+        })
+        .collect();
+    d.pose_chain(pelvis, &spine);
+
+    // The legs pedal in turn, spread a little to their sides.
+    let (fwd, up) = (
+        layout.fwd_local[layout.pelvis],
+        layout.up_local[layout.pelvis],
+    );
+    for (l, leg) in layout.legs.iter().enumerate() {
+        // Turning about the forward axis by +θ swings a hanging leg towards fwd × -up.
+        let side = fwd.cross(-up).dot(layout.outward[l]).signum();
+        let cycle = angle + l as f32 * PI;
+        let swing = airborne * e.legs;
+        let hip = Turn {
+            bend: -swing * EXPLOSION_HIP * cycle.sin(),
+            side: side * EXPLOSION_SPREAD,
+            twist: 0.0,
+        };
+        let knee = Turn {
+            bend: swing * EXPLOSION_KNEE * (0.5 + 0.5 * cycle.cos()),
+            ..Turn::default()
+        };
+        d.pose_chain(
+            pelvis,
+            &[
+                (leg.upper, hip),
+                (leg.lower, knee),
+                (leg.end, Turn::default()),
+            ],
+        );
+    }
+
+    // The arms flap together about out to the sides; the elbows bend most just after
+    // the arms are at their highest, bringing the hands in over the head.
+    let Some(chest) = layout.chest else { return };
+    let lift = airborne * e.shoulder * EXPLOSION_SHOULDER * angle.sin();
+    let bend = airborne * e.elbow * EXPLOSION_ELBOW * (0.5 + 0.5 * (angle - FRAC_PI_4).sin());
+    for &arm in &layout.arms {
+        let frame = d.chest_frame(chest, arm);
+        // (up, forward, out) weights: out to the side, turned up by `a`.
+        let along = |a: f32| Vec3::new(a.sin(), 0.15, a.cos());
+        d.point_arm(arm, frame, along(lift), along(lift + bend));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1858,7 +2107,101 @@ mod tests {
         ] {
             assert_eq!(Behaviour::from_name(name), Some(Behaviour::LookAndReach));
         }
-        assert_eq!(Behaviour::from_name("Bob2: Explosion 2.0"), None);
+        // endorphin's "Writhe in mid-air", under its 2.0 and 2.5 names and its display
+        // name; plain writhe stays Writhe.
+        for name in [
+            "Explosion",
+            "Bob2: Explosion 2.0",
+            "Bob2: Explosion",
+            "Bob2: WritheInMidAir 2.5",
+            "Writhe in mid-air 2.0",
+            "Writhe in mid-air",
+        ] {
+            assert_eq!(
+                Behaviour::from_name(name),
+                Some(Behaviour::Explosion(Explosion::default())),
+                "{name}"
+            );
+        }
+        assert_eq!(Behaviour::from_name("Writhe"), Some(Behaviour::Writhe));
+        assert_eq!(Behaviour::from_name("Bob2: JumpDive 2.0"), None);
+    }
+
+    #[test]
+    fn explosion_reads_its_settings() {
+        let source = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect()
+        };
+        let explosion = |pairs: &[(&str, &str)]| match Behaviour::from_name("Bob2: Explosion 2.0")
+            .unwrap()
+            .with_settings(&source(pairs))
+        {
+            Behaviour::Explosion(e) => e,
+            other => panic!("{other:?}"),
+        };
+        // Explosion 2.0's own names; anything missing or unreadable keeps the default.
+        let e = explosion(&[
+            ("ShoulderAmplitude", "0.300"),
+            ("ElbowAmplitude", "0.2"),
+            ("LegAmplitude", "1.000"),
+            ("Speed", "0.8"),
+            ("Strength", "1"),
+            ("HeadTurn", "0"),
+            ("BackArch", "0.000"),
+            ("PhaseOffset", "0.25"),
+            ("index", "27"),
+        ]);
+        assert_eq!(
+            e,
+            Explosion {
+                shoulder: 0.3,
+                elbow: 0.2,
+                legs: 1.0,
+                speed: 0.8,
+                strength: 1.0,
+                head_turn: 0.0,
+                back_arch: 0.0,
+                phase: 0.25,
+            }
+        );
+        assert_eq!(explosion(&[("Speed", "fast")]), Explosion::default());
+        // WritheInMidAir 2.5's one Amplitude sets all three, unless one is given.
+        let e = explosion(&[("Amplitude", "0.4"), ("LegAmplitude", "0.9")]);
+        assert_eq!((e.shoulder, e.elbow, e.legs), (0.4, 0.4, 0.9));
+        // Other behaviours ignore settings.
+        assert_eq!(
+            Behaviour::Balance.with_settings(&source(&[("Speed", "1")])),
+            Behaviour::Balance
+        );
+    }
+
+    /// endorphin's characters have a clavicle before each upper arm and a twist body
+    /// half way along each forearm. The upper arm and forearm are still the arm.
+    #[test]
+    fn finds_the_arms_past_clavicles_and_forearm_twists() {
+        for t_pose in [false, true] {
+            let (skeleton, rig) = super::super::scenes::person_rig_like_endorphins(t_pose);
+            let layout = Layout::new(&rig, &skeleton).unwrap();
+            let name = |b: usize| rig.bodies[b].name.as_str();
+            let mut arms: Vec<_> = layout
+                .arms
+                .iter()
+                .map(|a| [name(a.upper), name(a.lower), name(a.end)])
+                .collect();
+            arms.sort();
+            assert_eq!(
+                arms,
+                [
+                    ["l_shoulder", "l_elbow", "l_wrist"],
+                    ["r_shoulder", "r_elbow", "r_wrist"]
+                ],
+                "t-pose {t_pose}"
+            );
+            assert_eq!(layout.chest.map(name), Some("chest"));
+        }
     }
 
     /// A rig whose joints loop (only possible from a malformed file) must not hang.

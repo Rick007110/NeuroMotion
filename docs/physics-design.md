@@ -1017,6 +1017,24 @@ endorphin's. Not yet known: whether endorphin's strength-5 event is weaker than
 NeuroMotion makes it (its arms, too, stay about 20° below the first pose, where
 NeuroMotion's reach it), and how it reads the negative lock strength of the drive.
 
+The first behaviour that reads its event's settings, Explosion, taught one more.
+
+28. **A behaviour can ask whether a character touches anything.** Explosion
+    (endorphin's "Writhe in mid-air", docs/behaviours.md) flails only in the air.
+    Judged by height above the ground plane alone, Car Hit's pedestrian flailed while
+    lying on the bonnet, 1 m up, and pushed itself along the car: its centre of mass
+    went forwards (+0.13 / +0.20 / +0.22 m at frames 68 / 78 / 88) where endorphin's
+    goes back, and it landed at frame 90 at x = +0.22 m.
+    `World::pressing(bodies)` now says whether any of a character's bodies pushed on
+    something else (ground, scenery, another body) in the last substep, from the
+    contacts kept for warm starting; it only answers yes or no, so the cache's order
+    doesn't matter. With it the flailing stops on the bonnet: 0.03 / 0.05 / 0.06 m,
+    landing at frame 100 at -0.31 m (endorphin about 96, at -0.3 to -0.44 m). And a
+    swinging limb must not be damped critically against what it stands on: Explosion's
+    legs, damped like Balance's swinging leg, kicked the pedestrian off the bonnet to a
+    centre of mass of 2.2 m (endorphin 1.81 m); with the preset's damping, 1.75 m at
+    frame 68, as endorphin's.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over
@@ -1105,18 +1123,19 @@ What each stand-in reproduces:
 | Unnamed ankles | Back-Flip-To-Combo's crouch: an event names only the knees and stores the ankles bent 30° (lesson 27) | ankles don't move (0°), knees 59° | ankles 21°, knees 59° |
 | Head on neck | A head shape that may collide with its parent, inside the neck at rest (lesson 19) | turned 44° against the neck in 1 s | 2.6° |
 | Curl hand-back | Car Hit's hand-back: a character with clavicles curls up on the ground (BodyFoetal), then a 0.75 s transition, overlapping the curl's end, blends it back onto its standing animation (lesson 18) | 16.6 cm (knee) mid-transition | 0.09 cm |
+| Mid-air | endorphin's "Writhe in mid-air": a character with clavicles and forearm twists, resting in a T-pose, dropped from 4 m running Explosion with the 2.5 scene's settings (lesson 28) | falls with its arms out, lands limp | arms +44° at frame 24 and -56° at 50 (endorphin +35-38° at 20-30, -40 to -58° at 42-46), upright in the air, feet first at 54, still on its back |
 | Tilting floor | Rotating Floor's end: no ground; a long collision-only slab with a wall at its low end tilts 20°, carrying a character 1.9 m below y = 0 | fails the sweep (lowest -1.9 m) | rides it (nothing under the slab) |
 | Roof edge | Heli Leap's jumper: no ground; a character runs off a roof whose top is at y = 0 and falls past the building's side | fails the sweep (lowest -10.6 m) | falls 10.6 m beside the building |
 | Cut rope | Catch Rope: a force on the environment's track names a rope's end; the environment's roof is massless; the rope's last link is cut at 1 s | roof drifts 1.98 m in 2 s, rope end not pushed; the cut link counts as 0.83 m stretch | roof still, end swings 0.14 m; cut link not counted |
 
-Of endorphin's behaviours, Balance (which now steps), CatchFall and Stagger have
-controllers of their own (docs/behaviours.md). Scenes that depend on others simulate
+Of endorphin's behaviours, Balance (which now steps), CatchFall, Stagger, BodyFoetal,
+Writhe and Explosion have controllers of their own (docs/behaviours.md). Scenes that depend on others simulate
 as if the character went limp. Stagger Walk now runs the Stagger controller; it
 hasn't been re-run against endorphin's scene since.
 
 ## Not yet
 
-- Behaviours beyond Balance, Stagger, CatchFall, BodyFoetal and Writhe, and stepping
+- Behaviours beyond Balance, Stagger, CatchFall, BodyFoetal, Writhe and Explosion, and stepping
   that holds sideways pushes. endorphin's are vendor-protected, so these need original
   designs.
 - Sever events are in (cut a joint, or switch its muscle off; `events.md`), but

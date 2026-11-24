@@ -359,7 +359,7 @@ pub fn import_scene(path: &Path) -> Result<Import, IoError> {
         ));
     }
     if counts.contains_key("Behaviour") {
-        notes.push("Behaviours are kept with their settings; Balance, Stagger, CatchFall, BodyFoetal, BodyWrithe and Look and Reach run NeuroMotion's own controllers, the others aren't simulated yet.".into());
+        notes.push("Behaviours are kept with their settings; Balance, Stagger, CatchFall, BodyFoetal, BodyWrithe, Look and Reach and Writhe in mid-air (Explosion) run NeuroMotion's own controllers, the others aren't simulated yet.".into());
     }
     if skipped_joints > 0 {
         notes.push(format!(
@@ -986,7 +986,8 @@ fn event_settings(event: Node) -> BTreeMap<String, String> {
 /// which the scene doesn't say, so it is left out. A selection of bodies or collision
 /// surfaces (`ja="MetaBodyAndCollisionSelection"`, a reach or look-at target) lists them
 /// as `ValuePtr`s, kept comma separated (and left out when empty). Helper graphics (the
-/// locators endorphin draws) aren't settings.
+/// locators endorphin draws) aren't settings. The event's own attributes win if a name
+/// is taken.
 fn behaviour_parameters(event: Node, out: &mut BTreeMap<String, String>) {
     for var in elements(child(event, "Parameters")).filter(|v| v.has_tag_name("Variable")) {
         let (Some(key), Some(value)) = (var.attribute("fk"), var.attribute("ja")) else {
@@ -1001,11 +1002,13 @@ fn behaviour_parameters(event: Node, out: &mut BTreeMap<String, String>) {
                     .filter_map(|c| c.attribute("ja"))
                     .collect();
                 if !picked.is_empty() {
-                    out.insert(key.to_owned(), picked.join(", "));
+                    out.entry(key.to_owned())
+                        .or_insert_with(|| picked.join(", "));
                 }
             }
             _ => {
-                out.insert(key.to_owned(), value.to_owned());
+                out.entry(key.to_owned())
+                    .or_insert_with(|| value.to_owned());
             }
         }
     }
@@ -1684,6 +1687,46 @@ mod tests {
         assert_eq!(get("RightHandTarget"), None);
         assert_eq!(get("LeftHand_Delay"), None);
         assert_eq!(get("LookAtTargetLocator"), None);
+    }
+
+    #[test]
+    fn behaviour_events_keep_their_parameters() {
+        // As endorphin writes them: one Variable per parameter, its value in `ja`, none
+        // when the behaviour's default is used.
+        let xml = scene_xml().replace(
+            "</ForceEvents>",
+            r#"</ForceEvents>
+  <SecondaryBehaviours>
+    <SecondaryBehaviour behaviourName="Bob2: Explosion 2.0" index="27" name="5" displayName="Writhe in mid-air 2.0" startFrameNumber="48" endFrameNumber="60" priority="2" character="hero">
+      <Parameters>
+        <Variable fk="ShoulderAmplitude" kg="0" ja="0.7" de="ShoulderAmplitude"/>
+        <Variable fk="Speed" kg="0" ja="0.6" de="Frequency"/>
+        <Variable fk="NoiseLevel" kg="0"/>
+        <Variable fk="priority" kg="0" ja="9"/>
+      </Parameters>
+      <TargetSelection numRequiredObjects="0"/>
+      <Objects/>
+    </SecondaryBehaviour>
+  </SecondaryBehaviours>"#,
+        );
+        let Import { project, .. } = import(&xml);
+        let behaviour = project
+            .clips
+            .iter()
+            .find(|c| {
+                c.kind
+                    == ClipKind::Event {
+                        event: "Behaviour".into(),
+                    }
+            })
+            .unwrap();
+        let get = |key: &str| behaviour.source.get(key).map(String::as_str);
+        assert_eq!(get("behaviourName"), Some("Bob2: Explosion 2.0"));
+        assert_eq!(get("ShoulderAmplitude"), Some("0.7"));
+        assert_eq!(get("Speed"), Some("0.6"));
+        assert_eq!(get("NoiseLevel"), None);
+        // The event's own attributes win over a parameter of the same name.
+        assert_eq!(get("priority"), Some("2"));
     }
 
     /// A crate placed at (3, 2, 0) and turned 90° about Y, with a start pose, a mass

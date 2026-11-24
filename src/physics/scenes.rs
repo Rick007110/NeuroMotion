@@ -804,6 +804,107 @@ fn person_rig_with_clavicles() -> (SkeletonRef, PhysicsRig) {
     (skeleton, rig)
 }
 
+/// `person_rig_with_clavicles` with each forearm split in two like endorphin's
+/// characters: the forearm to half way, then a forearm-twist body that only turns
+/// about the bone, then the hand. With `t_pose`, it rests with its arms out to the
+/// sides, as endorphin's characters do.
+pub(crate) fn person_rig_like_endorphins(t_pose: bool) -> (SkeletonRef, PhysicsRig) {
+    let (mut skeleton, mut rig) = person_rig_with_clavicles();
+    for (side, x) in [("l", 1.0f32), ("r", -1.0)] {
+        let wrist = skeleton.joint_index(&format!("{side}_wrist")).unwrap();
+        let elbow = skeleton.joints[wrist].parent.unwrap();
+        // Insert the twist joint just before the wrist, so parents still come first.
+        let at = wrist;
+        let bump = |i: usize| if i >= at { i + 1 } else { i };
+        for j in &mut skeleton.joints {
+            j.parent = j.parent.map(bump);
+        }
+        for b in &mut rig.bodies {
+            b.joint = bump(b.joint);
+        }
+        for j in &mut rig.joints {
+            j.joint = bump(j.joint);
+        }
+        let wrist = wrist + 1;
+        let half = Vec3::from(skeleton.joints[wrist - 1].offset) * 0.5;
+        skeleton.joints.insert(
+            at,
+            Joint::new(
+                &format!("{side}_forearm_twist"),
+                Some(elbow),
+                half.to_array(),
+            ),
+        );
+        skeleton.joints[wrist].parent = Some(at);
+        skeleton.joints[wrist].offset = half.to_array();
+
+        // The forearm keeps its first half; the twist body takes the rest of its mass.
+        let forearm = rig.body_index(&format!("{side}_elbow")).unwrap();
+        let first = Piece::along(half, 0.038, 0.8);
+        let body = &mut rig.bodies[forearm];
+        body.frame = Frame {
+            rotation: first.frame.0.to_array(),
+            position: first.frame.1.to_array(),
+        };
+        body.mass = first.mass;
+        body.inertia = first.geometry.inertia(first.mass);
+        body.shapes[0].geometry = first.geometry;
+        let piece = Piece::along(half, 0.035, 0.6);
+        rig.bodies.push(BodyDef {
+            name: format!("{side}_forearm_twist"),
+            joint: at,
+            frame: Frame {
+                rotation: piece.frame.0.to_array(),
+                position: piece.frame.1.to_array(),
+            },
+            mass: piece.mass,
+            inertia: piece.geometry.inertia(piece.mass),
+            shapes: vec![ShapeDef {
+                geometry: piece.geometry,
+                frame: Frame::IDENTITY,
+                material: "skin".into(),
+                collides_with_parent: false,
+                collides_with_siblings: true,
+                collides_with_ancestors: false,
+            }],
+        });
+        let twist_body = rig.bodies.len() - 1;
+        let hand = rig.body_index(&format!("{side}_wrist")).unwrap();
+        rig.joints
+            .iter_mut()
+            .find(|j| j.body == hand)
+            .unwrap()
+            .parent_body = twist_body;
+        // Twist about the bone only, like endorphin's forearm twist joints.
+        let along = Quat::from_rotation_arc(Vec3::X, half.normalize()).to_array();
+        let limits = |twist: f32, swing: f32| Limits {
+            twist_min: -twist,
+            twist_max: twist,
+            swing1: swing,
+            swing2: swing,
+        };
+        rig.joints.push(JointDef {
+            name: format!("{side}_forearm_twist"),
+            joint: at,
+            body: twist_body,
+            parent_body: forearm,
+            primary: along,
+            secondary: along,
+            hard: limits(1.6, 0.01),
+            soft: limits(1.55, 0.005),
+            soft_stiffness: 10.0,
+            soft_damping: 1.0,
+            muscle: format!("{side}_elbow"),
+        });
+        if t_pose {
+            let shoulder = skeleton.joint_index(&format!("{side}_shoulder")).unwrap();
+            skeleton.joints[shoulder].rest_rotation =
+                Quat::from_rotation_z(x * std::f32::consts::FRAC_PI_2).to_array();
+        }
+    }
+    (skeleton, rig)
+}
+
 /// Adds the stand-in character with its feet at `at`, facing `yaw` degrees from +Z,
 /// held in a start pose (joint, property, value) for the whole scene.
 fn person(
@@ -2386,6 +2487,46 @@ pub fn curl_hand_back() -> Project {
     p
 }
 
+/// Writhe in mid-air, like endorphin's behaviour scene of that name: a character
+/// (the placeholder, or with `like_endorphins` a rig resting in a T-pose with
+/// clavicles and forearm twists) drops from 4 m. With `behaviour`, Explosion runs
+/// throughout with the scene's settings (WritheInMidAir 2.5's).
+pub fn mid_air(like_endorphins: bool, behaviour: bool) -> Project {
+    let mut p = new_scene("Writhe in mid-air", 3.5);
+    let at = Vec3::new(0.0, 4.0, 0.0);
+    let id = if like_endorphins {
+        add_person(
+            &mut p,
+            "writher",
+            person_rig_like_endorphins(true),
+            at,
+            0.0,
+            &[],
+        )
+    } else {
+        placeholder(&mut p, "writher", at, 0.0)
+    };
+    if behaviour {
+        event(
+            &mut p,
+            id,
+            "Behaviour",
+            0,
+            210,
+            &[
+                ("behaviourName", "Bob2: WritheInMidAir 2.5"),
+                ("Amplitude", "0.6"),
+                ("Speed", "0.6"),
+                ("PhaseOffset", "0.000"),
+                ("Strength", "0.5"),
+                ("HeadTurn", "0.6"),
+                ("BackArch", "1"),
+            ],
+        );
+    }
+    p
+}
+
 /// An active pose event on a character, driving `targets` (`character.Joints.name`,
 /// none = every joint) towards its held channels.
 fn active_pose(
@@ -2652,6 +2793,10 @@ mod tests {
             "arms_out" => arms_out(SpringCap::Limbs),
             "arms_out_bodies" => arms_out(SpringCap::Bodies),
             "unnamed_ankles" => unnamed_ankles(),
+            "mid_air" => mid_air(false, true),
+            "mid_air_limp" => mid_air(false, false),
+            "mid_air_t_pose" => mid_air(true, true),
+            "mid_air_t_pose_limp" => mid_air(true, false),
             "balance" => balance_push(1.5, Vec3::Z, true),
             "balance_step" => balance_push(1.5, -Vec3::Z, true),
             "balance_steps" => balance_push(HARD_PUSHES[1], Vec3::Z, true),
@@ -4272,6 +4417,164 @@ mod behaviour_tests {
         // The same scene again gives the same bodies, bit for bit.
         let (again, _) = simulate(&project);
         for frame in [90, 150, 210] {
+            let (a, b) = (
+                sim.frame(frame).unwrap()[0].as_ref().unwrap(),
+                again.frame(frame).unwrap()[0].as_ref().unwrap(),
+            );
+            assert_eq!(a.bodies, b.bodies, "frame {frame} differs between runs");
+        }
+    }
+
+    /// What `mid_air` shows, per frame: (left and right upper arms' elevation above
+    /// the horizontal, deg; how far the pelvis has turned since frame 0, deg; the
+    /// trunk's tilt from upright, deg; lowest body centre and its name).
+    struct Flight {
+        arms: Vec<(f32, f32)>,
+        turned: Vec<f32>,
+        tilt: Vec<f32>,
+        lowest: Vec<(f32, String)>,
+        speed: Vec<f32>,
+    }
+
+    fn flight(project: &Project, sim: &Simulation) -> Flight {
+        let c = &project.characters[0];
+        let rig = c.physics.as_ref().unwrap();
+        let joint = |n: &str| c.skeleton.joint_index(n).unwrap();
+        let hips = rig.body_index("hips").unwrap();
+        let start = sim.frame(0).unwrap()[0].as_ref().unwrap().bodies[hips].0;
+        let mut f = Flight {
+            arms: vec![],
+            turned: vec![],
+            tilt: vec![],
+            lowest: vec![],
+            speed: vec![],
+        };
+        let mut last: Option<Vec<Vec3>> = None;
+        for frame in 0..=project.settings.range.end {
+            let cf = sim.frame(frame).unwrap()[0].as_ref().unwrap();
+            let at = |n: &str| cf.joints[joint(n)].1;
+            let elevation = |from: &str, to: &str| {
+                let v = at(to) - at(from);
+                v.y.atan2(v.with_y(0.0).length()).to_degrees()
+            };
+            f.arms.push((
+                elevation("l_shoulder", "l_elbow"),
+                elevation("r_shoulder", "r_elbow"),
+            ));
+            f.turned.push(
+                (cf.bodies[hips].0 * start.inverse())
+                    .to_axis_angle()
+                    .1
+                    .to_degrees(),
+            );
+            let trunk = (at("neck") - at("hips")).normalize();
+            f.tilt.push(trunk.y.clamp(-1.0, 1.0).acos().to_degrees());
+            let (b, low) = cf
+                .bodies
+                .iter()
+                .enumerate()
+                .min_by(|a, b| a.1.1.y.total_cmp(&b.1.1.y))
+                .unwrap();
+            f.lowest.push((low.1.y, rig.bodies[b].name.clone()));
+            let now: Vec<Vec3> = cf.bodies.iter().map(|b| b.1).collect();
+            f.speed.push(last.map_or(0.0, |last| {
+                let fps = project.settings.fps;
+                now.iter()
+                    .zip(&last)
+                    .map(|(a, b)| a.distance(*b))
+                    .sum::<f32>()
+                    * fps
+                    / now.len() as f32
+            }));
+            last = Some(now);
+        }
+        f
+    }
+
+    /// Highest (or lowest, `-1`) mean elevation of the two upper arms over `frames`,
+    /// with its frame.
+    fn arm_extreme(f: &Flight, frames: std::ops::RangeInclusive<usize>, sign: f32) -> (f32, usize) {
+        frames
+            .map(|i| ((f.arms[i].0 + f.arms[i].1) / 2.0, i))
+            .max_by(|a, b| (sign * a.0).total_cmp(&(sign * b.0)))
+            .unwrap()
+    }
+
+    /// Explosion, measured against endorphin's "Writhe in mid-air 2.5" (both
+    /// characters start in a T-pose 4 m up, Amplitude and Speed 0.6, Strength 0.5):
+    /// its arms go from out to the sides up to +35-38° between frames 20 and 30, down
+    /// to -40 to -58° at 42-46 and are coming back up at 52; the body falls upright,
+    /// lands feet first at about frame 56, goes down on its back and lies still.
+    #[test]
+    fn explosion_flails_in_mid_air_like_endorphins() {
+        let project = mid_air(true, true);
+        let (sim, time) = simulate(&project);
+        let report = measure(&project, &sim, time);
+        println!("explosion run: {report}");
+        assert!(report.ok(), "{report}");
+        let f = flight(&project, &sim);
+        let landed = f.lowest.iter().position(|l| l.0 < 0.1).unwrap();
+        let (high, at_high) = arm_extreme(&f, 0..=30, 1.0);
+        let (low, at_low) = arm_extreme(&f, 30..=landed, -1.0);
+        let turned = f.turned[..landed].iter().fold(0.0f32, |a, &b| a.max(b));
+        let settled = f.speed[190..].iter().sum::<f32>() / f.speed[190..].len() as f32;
+        println!(
+            "explosion: arms up to {high:.0}° at frame {at_high}, down to {low:.0}° at \
+             {at_low}; pelvis turned {turned:.0}° in the air; lands at frame {landed} on \
+             {}; trunk tilted {:.0}° at frame 200; bodies moving {settled:.2} m/s over the \
+             last 20 frames",
+            f.lowest[landed].1, f.tilt[200]
+        );
+        assert!((30.0..60.0).contains(&high), "arms up to {high}°");
+        assert!((14..=28).contains(&at_high), "highest at {at_high}");
+        assert!((-70.0..-30.0).contains(&low), "arms down to {low}°");
+        assert!((36..=54).contains(&at_low), "lowest at {at_low}");
+        assert!(turned < 20.0, "turned {turned}° in the air");
+        assert!((50..=60).contains(&landed), "landed at {landed}");
+        assert!(
+            ["ankle", "toe", "knee"]
+                .iter()
+                .any(|n| f.lowest[landed].1.ends_with(n)),
+            "landed on {}",
+            f.lowest[landed].1
+        );
+        assert!(f.tilt[200] > 60.0, "trunk {}° from upright", f.tilt[200]);
+        assert!(settled < 0.1, "still moving at {settled} m/s");
+
+        // Limp, the same character drops with its arms out and lands sprawled.
+        let limp = mid_air(true, false);
+        let (limp_sim, _) = simulate(&limp);
+        let lf = flight(&limp, &limp_sim);
+        let still = lf.arms[..landed]
+            .iter()
+            .fold(0.0f32, |a, b| a.max(b.0.abs()).max(b.1.abs()));
+        println!("limp: arms within {still:.1}° of out to the sides until it lands");
+        assert!(still < 5.0, "limp arms moved {still}°");
+    }
+
+    /// The same on the placeholder, which rests with its arms hanging: the arms come up
+    /// and flap, it stays upright in the air, and two runs agree bit for bit.
+    #[test]
+    fn explosion_works_on_the_placeholder_and_is_deterministic() {
+        let project = mid_air(false, true);
+        let (sim, time) = simulate(&project);
+        let report = measure(&project, &sim, time);
+        println!("explosion on the placeholder: {report}");
+        assert!(report.ok(), "{report}");
+        let f = flight(&project, &sim);
+        let landed = f.lowest.iter().position(|l| l.0 < 0.1).unwrap();
+        let (high, at_high) = arm_extreme(&f, 5..=30, 1.0);
+        let (low, at_low) = arm_extreme(&f, 30..=landed, -1.0);
+        let turned = f.turned[..landed].iter().fold(0.0f32, |a, &b| a.max(b));
+        println!(
+            "placeholder: arms up to {high:.0}° at frame {at_high}, down to {low:.0}° at \
+             {at_low}; turned {turned:.0}° in the air; lands at {landed} on {}",
+            f.lowest[landed].1
+        );
+        assert!(high > 10.0 && low < -20.0, "arms {low}° to {high}°");
+        assert!(turned < 20.0, "turned {turned}° in the air");
+        let (again, _) = simulate(&project);
+        for frame in [30, 60, 120] {
             let (a, b) = (
                 sim.frame(frame).unwrap()[0].as_ref().unwrap(),
                 again.frame(frame).unwrap()[0].as_ref().unwrap(),
