@@ -7,6 +7,7 @@
 - Friction and constraints that behave like endorphin's, smooth transitions back to animation
 - Balance and Stagger on endorphin's friction, now used by NeuroMotion's own projects too
 - Behaviours: **Balance** (with stepping), **Stagger**, **CatchFall**, **BodyFoetal**, **Writhe**, now running in imported scenes too
+- **Look and Reach**: hands reach for a target and the head looks at it, compared with endorphin's own run
 - Sever events, constraints, active poses, forces
 - Export to **FBX** and **BVH**, bake simulation to keys
 - **v0.1.0 beta** with downloads for Windows, macOS and Linux, and our new logo
@@ -14,7 +15,7 @@
 ### 🔨 In progress
 - Comparing **more scenes with endorphin, by numbers**, so every change is checked against endorphin's real results
 - Active poses applied the way endorphin does (Back-Flip-To-Combo)
-- New behaviours: **Look and Reach** and **Explosion**, designed from endorphin's own runs
+- New behaviour: **Explosion**, designed from endorphin's own runs
 - Stepping on endorphin's own characters (Stagger Walk), and stepping sideways
 - **Physics settings panel** (gravity, materials, friction) and a **scene tree**
 

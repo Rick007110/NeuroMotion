@@ -17,7 +17,7 @@ use std::time::Instant;
 
 use glam::{Quat, Vec3};
 
-use super::behaviour::{Behaviour, Drive, Layout};
+use super::behaviour::{Aim, Behaviour, Drive, Layout, LookAndReach};
 use super::world::{Body, CollisionFlags, Joint, Lock, Motion, Muscle, Shape, World};
 use crate::document::physics::{Gains, MuscleGains, MuscleSet, PhysicsRig, SimLevel};
 use crate::document::{CharacterKind, Clip, ClipKind, Pose, Project, world_transforms};
@@ -80,10 +80,21 @@ struct Plan {
     poses: Vec<PoseTarget>,
     /// (start, end, strength) of clips whose animation the muscles follow.
     active: Vec<(i32, i32, f32)>,
-    /// (start, end, behaviour) of behaviour events NeuroMotion has a controller for.
-    behaviours: Vec<(i32, i32, Behaviour)>,
+    /// Behaviour events NeuroMotion has a controller for.
+    behaviours: Vec<BehaviourSpan>,
     /// Joints cut or switched off, from the frame each event starts.
     severs: Vec<Sever>,
+}
+
+/// A behaviour event: when it runs, which controller, and the settings it reads.
+struct BehaviourSpan {
+    start: i32,
+    end: i32,
+    behaviour: Behaviour,
+    /// The event's settings, as imported.
+    source: std::collections::BTreeMap<String, String>,
+    /// Look and Reach's settings, with its targets found in the world (`build`).
+    reach: Option<LookAndReach>,
 }
 
 /// A sever event aimed at one joint of the rig.
@@ -385,6 +396,15 @@ fn build(project: &Project) -> Running {
     world.set_materials(materials.len(), |a, b| {
         settings.interaction(&materials[a], &materials[b])
     });
+    // Targets name bodies of any character, so they are found once all are in the world.
+    for plan in &mut plans {
+        for span in &mut plan.behaviours {
+            if span.behaviour == Behaviour::LookAndReach {
+                let aim = |name: &str| aim_at(project, &bindings, name);
+                span.reach = Some(LookAndReach::read(&span.source, &aim));
+            }
+        }
+    }
     let constraints = constraints(project, &bindings);
     Running {
         world,
@@ -417,6 +437,34 @@ fn constraints(project: &Project, bindings: &[Option<Binding>]) -> Vec<Constrain
             })
         })
         .collect()
+}
+
+/// A behaviour's target as a point on a body in the world. Scenes name a body
+/// (`character.MetaBodies.Body`: its centre) or a collision surface by its path
+/// (`character.root.<joints>.Body.Surface`: the body it is on; the shape's centre if
+/// the body has only one, as shapes aren't named, else the body's).
+fn aim_at(project: &Project, bindings: &[Option<Binding>], name: &str) -> Option<Aim> {
+    let (character, path) = name.trim().split_once('.')?;
+    let ci = project
+        .characters
+        .iter()
+        .position(|c| c.name == character)?;
+    let binding = bindings.get(ci)?.as_ref()?;
+    let rig = &binding.rig;
+    let mut parts = path.rsplit('.');
+    let (last, before) = (parts.next()?, parts.next());
+    let (body, surface) = match rig.body_index(last) {
+        Some(b) => (b, false),
+        None => (rig.body_index(before?)?, true),
+    };
+    let offset = match rig.bodies[body].shapes.as_slice() {
+        [one] if surface => Vec3::from(one.frame.position),
+        _ => Vec3::ZERO,
+    };
+    Some(Aim {
+        body: binding.first_body + body,
+        offset,
+    })
 }
 
 fn constraint_clips(project: &Project) -> impl Iterator<Item = &Clip> {
@@ -767,7 +815,13 @@ fn plan(project: &Project, character_index: usize) -> Plan {
                 "Behaviour" => {
                     let name = clip.source.get("behaviourName").unwrap_or(&clip.props.name);
                     if let Some(behaviour) = Behaviour::from_name(name) {
-                        plan.behaviours.push((start, end, behaviour));
+                        plan.behaviours.push(BehaviourSpan {
+                            start,
+                            end,
+                            behaviour,
+                            source: clip.source.clone(),
+                            reach: None,
+                        });
                     }
                 }
                 "Sever" => {
@@ -1119,12 +1173,12 @@ fn set_muscles(
         })
         .unzip();
     // The latest behaviour running now takes over from there.
-    let behaviour = plan
+    let span = plan
         .behaviours
         .iter()
         .rev()
-        .find(|(s, e, _)| *s <= frame && frame < *e);
-    if let (Some(&(start, _, behaviour)), Some(layout)) = (behaviour, &binding.layout) {
+        .find(|b| b.start <= frame && frame < b.end);
+    if let (Some(span), Some(layout)) = (span, &binding.layout) {
         let mut drive = Drive {
             world,
             first_body: binding.first_body,
@@ -1133,9 +1187,10 @@ fn set_muscles(
             layout,
             targets: &mut targets,
             gains: &mut gains,
-            elapsed: ((t - start as f32) / project.settings.fps.max(1.0)).max(0.0),
+            elapsed: ((t - span.start as f32) / project.settings.fps.max(1.0)).max(0.0),
+            settings: span.reach.as_ref(),
         };
-        behaviour.drive(&mut drive);
+        span.behaviour.drive(&mut drive);
     }
     for (j, (target, gains)) in targets.into_iter().zip(gains).enumerate() {
         let Some(joint) = world.joints.get_mut(binding.first_joint + j) else {
