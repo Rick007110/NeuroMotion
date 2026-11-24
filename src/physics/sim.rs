@@ -117,7 +117,13 @@ struct PoseTarget {
 
 impl Default for Simulation {
     fn default() -> Self {
-        Self { revision: None, start: 0, end: 0, frames: Vec::new(), running: None }
+        Self {
+            revision: None,
+            start: 0,
+            end: 0,
+            frames: Vec::new(),
+            running: None,
+        }
     }
 }
 
@@ -125,7 +131,10 @@ impl Simulation {
     /// Throws away results computed for an older document revision.
     pub fn sync(&mut self, revision: u64) {
         if self.revision != Some(revision) {
-            *self = Self { revision: Some(revision), ..Self::default() };
+            *self = Self {
+                revision: Some(revision),
+                ..Self::default()
+            };
         }
     }
 
@@ -138,7 +147,12 @@ impl Simulation {
         project.characters.iter().enumerate().any(|(i, c)| {
             c.physics.is_some()
                 && c.kind != CharacterKind::Environment
-                && plan(project, i).switches.iter().map(|s| s.1).chain([c.default_level]).any(|l| l != SimLevel::Animated)
+                && plan(project, i)
+                    .switches
+                    .iter()
+                    .map(|s| s.1)
+                    .chain([c.default_level])
+                    .any(|l| l != SimLevel::Animated)
         })
     }
 
@@ -147,7 +161,9 @@ impl Simulation {
         if self.running.is_none() && self.frames.is_empty() {
             self.begin(project);
         }
-        let Some(running) = self.running.as_mut() else { return true };
+        let Some(running) = self.running.as_mut() else {
+            return true;
+        };
         while running.frame < self.end {
             let next = step_frame(project, running);
             self.frames.push(next);
@@ -170,7 +186,10 @@ impl Simulation {
 
     /// (frames computed, frames in range).
     pub fn progress(&self) -> (usize, usize) {
-        (self.frames.len(), (self.end - self.start + 1).max(0) as usize)
+        (
+            self.frames.len(),
+            (self.end - self.start + 1).max(0) as usize,
+        )
     }
 
     fn begin(&mut self, project: &Project) {
@@ -179,7 +198,8 @@ impl Simulation {
         self.end = range.end;
         let mut running = build(project);
         running.frame = range.start;
-        self.frames.push(record(project, &running, range.start as f32));
+        self.frames
+            .push(record(project, &running, range.start as f32));
         self.running = Some(running);
     }
 }
@@ -189,9 +209,15 @@ pub fn rig_bodies(rig: &PhysicsRig, joints: &[(Quat, Vec3)]) -> Vec<(Quat, Vec3)
     rig.bodies
         .iter()
         .map(|body| {
-            let (jr, jp) = joints.get(body.joint).copied().unwrap_or((Quat::IDENTITY, Vec3::ZERO));
+            let (jr, jp) = joints
+                .get(body.joint)
+                .copied()
+                .unwrap_or((Quat::IDENTITY, Vec3::ZERO));
             let fr = Quat::from_array(body.frame.rotation).normalize();
-            ((jr * fr).normalize(), jp + jr * Vec3::from(body.frame.position))
+            (
+                (jr * fr).normalize(),
+                jp + jr * Vec3::from(body.frame.position),
+            )
         })
         .collect()
 }
@@ -239,7 +265,10 @@ fn build(project: &Project) -> Running {
             let body = &rig.bodies[bi];
             let (jr, jp) = transforms[body.joint];
             let frame_rot = Quat::from_array(body.frame.rotation).normalize();
-            ((jr * frame_rot).normalize(), jp + jr * Vec3::from(body.frame.position))
+            (
+                (jr * frame_rot).normalize(),
+                jp + jr * Vec3::from(body.frame.position),
+            )
         };
         let first_body = world.bodies.len();
         let level = initial_level(&plans[ci], character.default_level, start as i32);
@@ -257,7 +286,11 @@ fn build(project: &Project) -> Running {
                 rotation,
                 linear_velocity: Vec3::ZERO,
                 angular_velocity: Vec3::ZERO,
-                inv_mass: if body.mass > 0.0 { 1.0 / body.mass } else { 0.0 },
+                inv_mass: if body.mass > 0.0 {
+                    1.0 / body.mass
+                } else {
+                    0.0
+                },
                 inv_inertia: Vec3::new(recip(inertia.x), recip(inertia.y), recip(inertia.z)),
                 motion: motion_for(level, 1.0),
                 group: ci,
@@ -282,11 +315,28 @@ fn build(project: &Project) -> Running {
         let first_joint = world.joints.len();
         for jd in &rig.joints {
             // Keep world joints aligned with rig joints: invalid ones become disabled placeholders.
-            let valid = jd.body < rig.bodies.len() && jd.parent_body < rig.bodies.len() && jd.joint < rest.len();
-            let Some(pj) = skeleton.joints.get(jd.joint).and_then(|j| j.parent).filter(|_| valid) else {
+            let valid = jd.body < rig.bodies.len()
+                && jd.parent_body < rig.bodies.len()
+                && jd.joint < rest.len();
+            let Some(pj) = skeleton
+                .joints
+                .get(jd.joint)
+                .and_then(|j| j.parent)
+                .filter(|_| valid)
+            else {
                 let mut placeholder = Joint::new(
-                    first_body, first_body, Vec3::ZERO, Vec3::ZERO, Quat::IDENTITY, Quat::IDENTITY,
-                    Quat::IDENTITY, Quat::IDENTITY, jd.hard, jd.soft, 0.0, 0.0,
+                    first_body,
+                    first_body,
+                    Vec3::ZERO,
+                    Vec3::ZERO,
+                    Quat::IDENTITY,
+                    Quat::IDENTITY,
+                    Quat::IDENTITY,
+                    Quat::IDENTITY,
+                    jd.hard,
+                    jd.soft,
+                    0.0,
+                    0.0,
                 );
                 placeholder.enabled = false;
                 world.joints.push(placeholder);
@@ -325,18 +375,30 @@ fn build(project: &Project) -> Running {
     }
 
     let settings = &project.physics;
-    world.set_materials(materials.len(), |a, b| settings.interaction(&materials[a], &materials[b]));
+    world.set_materials(materials.len(), |a, b| {
+        settings.interaction(&materials[a], &materials[b])
+    });
     let constraints = constraints(project, &bindings);
-    Running { world, bindings, plans, constraints, frame: 0 }
+    Running {
+        world,
+        bindings,
+        plans,
+        constraints,
+        frame: 0,
+    }
 }
 
 /// Reads lock/join constraint events into world-body terms.
 fn constraints(project: &Project, bindings: &[Option<Binding>]) -> Vec<Constraint> {
-    let world_body = |(ci, bi): (usize, usize)| bindings.get(ci)?.as_ref().map(|b| b.first_body + bi);
+    let world_body =
+        |(ci, bi): (usize, usize)| bindings.get(ci)?.as_ref().map(|b| b.first_body + bi);
     constraint_clips(project)
         .filter_map(|clip| {
             let kind = lock_kind(clip)?;
-            let bodies: Vec<usize> = constraint_targets(project, clip).into_iter().filter_map(world_body).collect();
+            let bodies: Vec<usize> = constraint_targets(project, clip)
+                .into_iter()
+                .filter_map(world_body)
+                .collect();
             Some(Constraint {
                 start: clip.props.start,
                 end: clip.props.end(),
@@ -351,14 +413,25 @@ fn constraints(project: &Project, bindings: &[Option<Binding>]) -> Vec<Constrain
 }
 
 fn constraint_clips(project: &Project) -> impl Iterator<Item = &Clip> {
-    project.clips.iter().filter(|c| c.props.enabled && matches!(&c.kind, ClipKind::Event { event } if event == "Constraint"))
+    project.clips.iter().filter(|c| {
+        c.props.enabled && matches!(&c.kind, ClipKind::Event { event } if event == "Constraint")
+    })
 }
 
 fn lock_kind(clip: &Clip) -> Option<LockKind> {
     Some(match clip.source.get("lockType").map(String::as_str)? {
-        "Lock" => LockKind::World { position: true, orientation: true },
-        "LockPosition" => LockKind::World { position: true, orientation: false },
-        "LockOrientation" => LockKind::World { position: false, orientation: true },
+        "Lock" => LockKind::World {
+            position: true,
+            orientation: true,
+        },
+        "LockPosition" => LockKind::World {
+            position: true,
+            orientation: false,
+        },
+        "LockOrientation" => LockKind::World {
+            position: false,
+            orientation: true,
+        },
         "JoinBodies" => LockKind::Join,
         "LockWithParent" => LockKind::Parent,
         _ => return None,
@@ -371,26 +444,49 @@ fn constraint_targets(project: &Project, clip: &Clip) -> Vec<(usize, usize)> {
     let resolve = |name: &str| -> Option<(usize, usize)> {
         let mut parts = name.trim().split(".MetaBodies.");
         let (character, body) = (parts.next()?, parts.next()?);
-        let ci = project.characters.iter().position(|c| c.name == character)?;
-        Some((ci, project.characters[ci].physics.as_ref()?.body_index(body)?))
+        let ci = project
+            .characters
+            .iter()
+            .position(|c| c.name == character)?;
+        Some((
+            ci,
+            project.characters[ci].physics.as_ref()?.body_index(body)?,
+        ))
     };
-    clip.source.get("targets").map_or_else(Vec::new, |t| t.split(',').filter_map(resolve).collect())
+    clip.source
+        .get("targets")
+        .map_or_else(Vec::new, |t| t.split(',').filter_map(resolve).collect())
 }
 
 /// Which body each lock of a constraint holds, and to what (`None`: the world).
-fn lock_pairs<T: Copy + PartialEq>(kind: LockKind, bodies: &[T], parent: impl Fn(T) -> Option<T>) -> Vec<(Option<T>, T)> {
+fn lock_pairs<T: Copy + PartialEq>(
+    kind: LockKind,
+    bodies: &[T],
+    parent: impl Fn(T) -> Option<T>,
+) -> Vec<(Option<T>, T)> {
     match kind {
         LockKind::World { .. } => bodies.iter().map(|&b| (None, b)).collect(),
-        LockKind::Parent if bodies.len() == 1 => parent(bodies[0]).map(|p| (Some(p), bodies[0])).into_iter().collect(),
+        LockKind::Parent if bodies.len() == 1 => parent(bodies[0])
+            .map(|p| (Some(p), bodies[0]))
+            .into_iter()
+            .collect(),
         LockKind::Join | LockKind::Parent => {
-            let Some((&anchor, rest)) = bodies.split_last() else { return Vec::new() };
-            rest.iter().filter(|&&b| b != anchor).map(|&b| (Some(anchor), b)).collect()
+            let Some((&anchor, rest)) = bodies.split_last() else {
+                return Vec::new();
+            };
+            rest.iter()
+                .filter(|&&b| b != anchor)
+                .map(|&b| (Some(anchor), b))
+                .collect()
         }
     }
 }
 
 fn clip_vec3(clip: &Clip, key: &str) -> Vec3 {
-    clip.source.get(key).and_then(|v| parse_vec3(v)).unwrap_or(Vec3::ZERO)
+    clip.source
+        .get(key)
+        .and_then(|v| parse_vec3(v))
+        .unwrap_or(Vec3::ZERO)
 }
 
 /// A lock as the tests see it: bodies as (character index, rig body index).
@@ -409,9 +505,13 @@ pub(crate) struct LockSpan {
 pub(crate) fn lock_spans(project: &Project) -> Vec<LockSpan> {
     let mut out = Vec::new();
     for clip in constraint_clips(project) {
-        let Some(kind) = lock_kind(clip) else { continue };
+        let Some(kind) = lock_kind(clip) else {
+            continue;
+        };
         let linear = match kind {
-            LockKind::World { position: false, .. } => Vec3::ZERO,
+            LockKind::World {
+                position: false, ..
+            } => Vec3::ZERO,
             _ => clip_vec3(clip, "positionStrength"),
         };
         let parent = |(ci, bi): (usize, usize)| {
@@ -427,7 +527,13 @@ pub(crate) fn lock_spans(project: &Project) -> Vec<LockSpan> {
             None
         };
         for (anchor, body) in lock_pairs(kind, &constraint_targets(project, clip), parent) {
-            out.push(LockSpan { start: clip.props.start, end: clip.props.end(), anchor, body, linear });
+            out.push(LockSpan {
+                start: clip.props.start,
+                end: clip.props.end(),
+                anchor,
+                body,
+                linear,
+            });
         }
     }
     out
@@ -445,17 +551,25 @@ fn update_constraints(running: &mut Running, frame: i32) {
         let bodies = &world.bodies;
         let locks = c.locks.get_or_insert_with(|| {
             let (position, orientation) = match c.kind {
-                LockKind::World { position, orientation } => (position, orientation),
+                LockKind::World {
+                    position,
+                    orientation,
+                } => (position, orientation),
                 LockKind::Join | LockKind::Parent => (true, true),
             };
             lock_pairs(c.kind, &c.bodies, |b| bodies[b].parent)
                 .into_iter()
                 .map(|(anchor, b)| {
-                    let (ar, ap) = anchor.map_or((Quat::IDENTITY, Vec3::ZERO), |a| (bodies[a].rotation, bodies[a].position));
+                    let (ar, ap) = anchor.map_or((Quat::IDENTITY, Vec3::ZERO), |a| {
+                        (bodies[a].rotation, bodies[a].position)
+                    });
                     Lock {
                         anchor,
                         body: b,
-                        target: (ar.inverse() * bodies[b].rotation, ar.inverse() * (bodies[b].position - ap)),
+                        target: (
+                            ar.inverse() * bodies[b].rotation,
+                            ar.inverse() * (bodies[b].position - ap),
+                        ),
                         linear: if position { c.linear } else { Vec3::ZERO },
                         angular: if orientation { c.angular } else { Vec3::ZERO },
                     }
@@ -467,10 +581,17 @@ fn update_constraints(running: &mut Running, frame: i32) {
 }
 
 fn shape_frame(shape: &crate::document::physics::ShapeDef) -> (Quat, Vec3) {
-    (Quat::from_array(shape.frame.rotation).normalize(), Vec3::from(shape.frame.position))
+    (
+        Quat::from_array(shape.frame.rotation).normalize(),
+        Vec3::from(shape.frame.position),
+    )
 }
 
-fn parent_body(skeleton: &crate::document::SkeletonRef, body_of_joint: &[Option<usize>], joint: usize) -> Option<usize> {
+fn parent_body(
+    skeleton: &crate::document::SkeletonRef,
+    body_of_joint: &[Option<usize>],
+    joint: usize,
+) -> Option<usize> {
     let mut j = skeleton.joints[joint].parent;
     while let Some(i) = j {
         if let Some(b) = body_of_joint[i] {
@@ -500,7 +621,12 @@ fn local_rotations(skeleton: &crate::document::SkeletonRef, pose: &Pose) -> Vec<
         .joints
         .iter()
         .enumerate()
-        .map(|(i, j)| crate::document::pose_local_rotation(j.rest_rotation, pose.joints.get(i).copied().unwrap_or([0.0; 6])))
+        .map(|(i, j)| {
+            crate::document::pose_local_rotation(
+                j.rest_rotation,
+                pose.joints.get(i).copied().unwrap_or([0.0; 6]),
+            )
+        })
         .collect()
 }
 
@@ -511,7 +637,11 @@ fn plan(project: &Project, character_index: usize) -> Plan {
     let character = &project.characters[character_index];
     let fps = project.settings.fps.max(1.0);
     let mut plan = Plan::default();
-    let number = |clip: &crate::document::Clip, key: &str| clip.source.get(key).and_then(|v| v.trim().parse::<f32>().ok());
+    let number = |clip: &crate::document::Clip, key: &str| {
+        clip.source
+            .get(key)
+            .and_then(|v| v.trim().parse::<f32>().ok())
+    };
     for clip in &project.clips {
         if !clip.props.enabled || project.clip_character(clip).map(|c| c.id) != Some(character.id) {
             continue;
@@ -521,14 +651,20 @@ fn plan(project: &Project, character_index: usize) -> Plan {
             ClipKind::Motion => {
                 // Imported animations say whether they're active; our own clips always are.
                 if clip.source.get("active").is_none_or(|v| v == "true") {
-                    plan.active.push((start, end, number(clip, "strength").unwrap_or(1.0)));
+                    plan.active
+                        .push((start, end, number(clip, "strength").unwrap_or(1.0)));
                 }
             }
             ClipKind::Event { event } => match event.as_str() {
                 "Simulation" => {
-                    if let Some(level) = clip.source.get("physicsLevel").and_then(|v| SimLevel::from_endorphin(v)) {
+                    if let Some(level) = clip
+                        .source
+                        .get("physicsLevel")
+                        .and_then(|v| SimLevel::from_endorphin(v))
+                    {
                         plan.switches.push((start, level));
-                        plan.momentum.push((start, number(clip, "momentumScale").unwrap_or(1.0)));
+                        plan.momentum
+                            .push((start, number(clip, "momentumScale").unwrap_or(1.0)));
                     }
                 }
                 "Transition" => {
@@ -541,12 +677,22 @@ fn plan(project: &Project, character_index: usize) -> Plan {
                     plan.switches.push((end, level));
                 }
                 "Force" => {
-                    let Some(rig) = &character.physics else { continue };
-                    let Some(dv) = clip.source.get("matrix.Vi").and_then(|v| parse_vec3(v)) else { continue };
+                    let Some(rig) = &character.physics else {
+                        continue;
+                    };
+                    let Some(dv) = clip.source.get("matrix.Vi").and_then(|v| parse_vec3(v)) else {
+                        continue;
+                    };
                     let bodies: Vec<usize> = clip
                         .source
                         .get("targets")
-                        .map(|t| t.split(',').filter_map(|name| rig.body_index(name.trim().rsplit('.').next().unwrap_or(""))).collect())
+                        .map(|t| {
+                            t.split(',')
+                                .filter_map(|name| {
+                                    rig.body_index(name.trim().rsplit('.').next().unwrap_or(""))
+                                })
+                                .collect()
+                        })
                         .unwrap_or_default();
                     plan.forces.push((start, dv, bodies));
                 }
@@ -561,7 +707,9 @@ fn plan(project: &Project, character_index: usize) -> Plan {
                     let mut pose = Pose::rest(skeleton.joints.len());
                     let mut present = vec![false; skeleton.joints.len()];
                     for channel in &clip.channels {
-                        if let (Some(j), Some(v)) = (skeleton.joint_index(&channel.joint), channel.sample(0.0)) {
+                        if let (Some(j), Some(v)) =
+                            (skeleton.joint_index(&channel.joint), channel.sample(0.0))
+                        {
                             pose.joints[j][channel.property.index()] = v;
                             present[j] = true;
                         }
@@ -570,9 +718,14 @@ fn plan(project: &Project, character_index: usize) -> Plan {
                     plan.poses.push(PoseTarget {
                         start,
                         end,
-                        blend: number(clip, "entryBlendPeriod").map_or(0, |s| (s * fps).round() as i32),
+                        blend: number(clip, "entryBlendPeriod")
+                            .map_or(0, |s| (s * fps).round() as i32),
                         strength: number(clip, "strength").unwrap_or(1.0),
-                        targets: locals.into_iter().zip(present).map(|(q, p)| p.then_some(q)).collect(),
+                        targets: locals
+                            .into_iter()
+                            .zip(present)
+                            .map(|(q, p)| p.then_some(q))
+                            .collect(),
                     });
                 }
                 _ => {}
@@ -585,12 +738,19 @@ fn plan(project: &Project, character_index: usize) -> Plan {
 }
 
 fn parse_vec3(text: &str) -> Option<Vec3> {
-    let v: Vec<f32> = text.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+    let v: Vec<f32> = text
+        .split(',')
+        .filter_map(|p| p.trim().parse().ok())
+        .collect();
     (v.len() == 3).then(|| Vec3::new(v[0], v[1], v[2]))
 }
 
 fn level_at(plan: &Plan, default: SimLevel, frame: i32) -> SimLevel {
-    plan.switches.iter().rev().find(|(f, _)| *f <= frame).map_or(default, |s| s.1)
+    plan.switches
+        .iter()
+        .rev()
+        .find(|(f, _)| *f <= frame)
+        .map_or(default, |s| s.1)
 }
 
 fn initial_level(plan: &Plan, default: SimLevel, frame: i32) -> SimLevel {
@@ -598,7 +758,11 @@ fn initial_level(plan: &Plan, default: SimLevel, frame: i32) -> SimLevel {
 }
 
 fn momentum_at(plan: &Plan, frame: i32) -> f32 {
-    plan.momentum.iter().rev().find(|(f, _)| *f <= frame).map_or(1.0, |m| m.1)
+    plan.momentum
+        .iter()
+        .rev()
+        .find(|(f, _)| *f <= frame)
+        .map_or(1.0, |m| m.1)
 }
 
 // ---------------------------------------------------------------------------------
@@ -629,7 +793,11 @@ fn step_frame(project: &Project, running: &mut Running) -> Frame {
         }
         for (start, dv, bodies) in &plan.forces {
             if *start == frame && level == SimLevel::Simulated {
-                let targets: Vec<usize> = if bodies.is_empty() { (0..binding.rig.bodies.len()).collect() } else { bodies.clone() };
+                let targets: Vec<usize> = if bodies.is_empty() {
+                    (0..binding.rig.bodies.len()).collect()
+                } else {
+                    bodies.clone()
+                };
                 for b in targets {
                     running.world.bodies[binding.first_body + b].linear_velocity += *dv;
                 }
@@ -647,7 +815,15 @@ fn step_frame(project: &Project, running: &mut Running) -> Frame {
             let character = &project.characters[ci];
             let targets = world_transforms(&character.skeleton, &poses[ci]);
             if binding.level == SimLevel::Simulated {
-                set_muscles(&mut running.world, binding, &running.plans[ci], project, ci, &poses[ci], frame);
+                set_muscles(
+                    &mut running.world,
+                    binding,
+                    &running.plans[ci],
+                    project,
+                    ci,
+                    &poses[ci],
+                    frame,
+                );
             } else {
                 // Move kinematic bodies onto the animation, with matching velocity.
                 let bodies = binding.first_body..binding.first_body + binding.rig.bodies.len();
@@ -664,10 +840,17 @@ fn step_frame(project: &Project, running: &mut Running) -> Frame {
                     .collect();
                 // A cut, or snapping back from simulation: place the whole character, don't
                 // fling it (or what it holds or touches).
-                let jump = moves.iter().any(|&(.., v, w)| v.length() * dt > JUMP || w.length() * dt > JUMP_TURN);
+                let jump = moves
+                    .iter()
+                    .any(|&(.., v, w)| v.length() * dt > JUMP || w.length() * dt > JUMP_TURN);
                 for (b, (rot, pos, v, w)) in running.world.bodies[bodies].iter_mut().zip(moves) {
                     if jump {
-                        (b.position, b.rotation, b.linear_velocity, b.angular_velocity) = (pos, rot, Vec3::ZERO, Vec3::ZERO);
+                        (
+                            b.position,
+                            b.rotation,
+                            b.linear_velocity,
+                            b.angular_velocity,
+                        ) = (pos, rot, Vec3::ZERO, Vec3::ZERO);
                     } else {
                         (b.linear_velocity, b.angular_velocity) = (v, w);
                     }
@@ -706,9 +889,21 @@ const JUMP: f32 = 0.5;
 const JUMP_TURN: f32 = 1.0;
 
 /// Points each simulated joint's muscle at this frame's target pose.
-fn set_muscles(world: &mut World, binding: &Binding, plan: &Plan, project: &Project, ci: usize, anim: &Pose, frame: i32) {
+fn set_muscles(
+    world: &mut World,
+    binding: &Binding,
+    plan: &Plan,
+    project: &Project,
+    ci: usize,
+    anim: &Pose,
+    frame: i32,
+) {
     let skeleton = &project.characters[ci].skeleton;
-    let pose_target = plan.poses.iter().rev().find(|p| p.start <= frame && frame < p.end);
+    let pose_target = plan
+        .poses
+        .iter()
+        .rev()
+        .find(|p| p.start <= frame && frame < p.end);
     let active = plan
         .active
         .iter()
@@ -719,7 +914,11 @@ fn set_muscles(world: &mut World, binding: &Binding, plan: &Plan, project: &Proj
 
     let (set_name, strength) = match (pose_target, active) {
         (Some(p), _) => {
-            let ramp = if p.blend > 0 { ((frame - p.start) as f32 / p.blend as f32).clamp(0.0, 1.0) } else { 1.0 };
+            let ramp = if p.blend > 0 {
+                ((frame - p.start) as f32 / p.blend as f32).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
             ("DesiredPoseCalibration", p.strength * ramp)
         }
         (None, Some(s)) => ("Normal", s),
@@ -743,11 +942,18 @@ fn set_muscles(world: &mut World, binding: &Binding, plan: &Plan, project: &Proj
         .iter()
         .map(|jd| {
             let g = set.map_or(DEFAULT_GAINS, |s| s.gains(&jd.muscle));
-            MuscleGains { twist: scale(g.twist, strength), swing: scale(g.swing, strength) }
+            MuscleGains {
+                twist: scale(g.twist, strength),
+                swing: scale(g.swing, strength),
+            }
         })
         .collect();
     // The latest behaviour running now takes over from there.
-    let behaviour = plan.behaviours.iter().rev().find(|(s, e, _)| *s <= frame && frame < *e);
+    let behaviour = plan
+        .behaviours
+        .iter()
+        .rev()
+        .find(|(s, e, _)| *s <= frame && frame < *e);
     if let (Some(&(.., behaviour)), Some(layout)) = (behaviour, &binding.layout) {
         let mut drive = Drive {
             world,
@@ -761,22 +967,46 @@ fn set_muscles(world: &mut World, binding: &Binding, plan: &Plan, project: &Proj
         behaviour.drive(&mut drive);
     }
     for (j, (target, gains)) in targets.into_iter().zip(gains).enumerate() {
-        let Some(joint) = world.joints.get_mut(binding.first_joint + j) else { break };
-        joint.muscle = Some(Muscle { target, twist: gains.twist, swing: gains.swing });
+        let Some(joint) = world.joints.get_mut(binding.first_joint + j) else {
+            break;
+        };
+        joint.muscle = Some(Muscle {
+            target,
+            twist: gains.twist,
+            swing: gains.swing,
+        });
     }
 }
 
 const DEFAULT_GAINS: MuscleGains = MuscleGains {
-    twist: Gains { stiffness: 50.0, damping: 100.0, force_limit: 50.0 },
-    swing: Gains { stiffness: 50.0, damping: 100.0, force_limit: 50.0 },
+    twist: Gains {
+        stiffness: 50.0,
+        damping: 100.0,
+        force_limit: 50.0,
+    },
+    swing: Gains {
+        stiffness: 50.0,
+        damping: 100.0,
+        force_limit: 50.0,
+    },
 };
 
 fn scale(g: Gains, s: f32) -> Gains {
-    Gains { stiffness: g.stiffness * s, damping: g.damping * s, force_limit: g.force_limit * s }
+    Gains {
+        stiffness: g.stiffness * s,
+        damping: g.damping * s,
+        force_limit: g.force_limit * s,
+    }
 }
 
 /// Joint local rotations of a character, taken from its bodies where it has them.
-fn current_locals(world: &World, binding: &Binding, project: &Project, ci: usize, t: f32) -> Vec<Quat> {
+fn current_locals(
+    world: &World,
+    binding: &Binding,
+    project: &Project,
+    ci: usize,
+    t: f32,
+) -> Vec<Quat> {
     let skeleton = &project.characters[ci].skeleton;
     let joints = joints_from_bodies(world, binding, skeleton, &project.evaluate(t)[ci]);
     skeleton
@@ -792,14 +1022,20 @@ fn current_locals(world: &World, binding: &Binding, project: &Project, ci: usize
 
 /// Skeleton joint transforms from body poses; joints without a body follow the
 /// animation relative to their parent.
-fn joints_from_bodies(world: &World, binding: &Binding, skeleton: &crate::document::SkeletonRef, anim: &Pose) -> Vec<(Quat, Vec3)> {
+fn joints_from_bodies(
+    world: &World,
+    binding: &Binding,
+    skeleton: &crate::document::SkeletonRef,
+    anim: &Pose,
+) -> Vec<(Quat, Vec3)> {
     let anim_world = world_transforms(skeleton, anim);
     let mut out: Vec<(Quat, Vec3)> = Vec::with_capacity(skeleton.joints.len());
     for (i, joint) in skeleton.joints.iter().enumerate() {
         let transform = if let Some(bi) = binding.body_of_joint[i] {
             let body = &world.bodies[binding.first_body + bi];
             let def = &binding.rig.bodies[bi];
-            let rot = (body.rotation * Quat::from_array(def.frame.rotation).normalize().inverse()).normalize();
+            let rot = (body.rotation * Quat::from_array(def.frame.rotation).normalize().inverse())
+                .normalize();
             (rot, body.position - rot * Vec3::from(def.frame.position))
         } else if let Some(p) = joint.parent.filter(|&p| p < i) {
             // Keep the animated local transform under the simulated parent.
@@ -830,7 +1066,11 @@ fn record(project: &Project, running: &Running, t: f32) -> Frame {
             let mut joints = joints_from_bodies(&running.world, binding, skeleton, &poses[ci]);
             // Transitions blend the simulated pose back onto the animation.
             let plan = &running.plans[ci];
-            if let Some(&(start, end)) = plan.transitions.iter().find(|(s, e)| *s <= frame && frame < *e) {
+            if let Some(&(start, end)) = plan
+                .transitions
+                .iter()
+                .find(|(s, e)| *s <= frame && frame < *e)
+            {
                 let w = ((frame - start) as f32 / (end - start).max(1) as f32).clamp(0.0, 1.0);
                 // Blend orientations, then rebuild positions down the hierarchy so bones
                 // keep their length mid-blend.
@@ -856,7 +1096,11 @@ fn record(project: &Project, running: &Running, t: f32) -> Frame {
                     (body.rotation, body.position)
                 })
                 .collect();
-            Some(CharacterFrame { joints, bodies, level: binding.level })
+            Some(CharacterFrame {
+                joints,
+                bodies,
+                level: binding.level,
+            })
         })
         .collect()
 }
@@ -887,7 +1131,11 @@ mod tests {
         assert!(Simulation::is_needed(&project));
         let started = Instant::now();
         let sim = simulate(&project);
-        eprintln!("simulated {} frames in {:?}", sim.progress().0, started.elapsed());
+        eprintln!(
+            "simulated {} frames in {:?}",
+            sim.progress().0,
+            started.elapsed()
+        );
         assert_eq!(sim.progress().0, sim.progress().1);
 
         // Before the switch the bodies follow the animation exactly.
@@ -895,7 +1143,10 @@ mod tests {
         let anim = world_transforms(skeleton, &project.evaluate(30.0)[0]);
         let frame30 = sim.frame(30).unwrap()[0].as_ref().unwrap();
         for (a, s) in anim.iter().zip(&frame30.joints) {
-            assert!(a.1.distance(s.1) < 1e-3, "animated pose drifted before simulation");
+            assert!(
+                a.1.distance(s.1) < 1e-3,
+                "animated pose drifted before simulation"
+            );
         }
         assert_eq!(frame30.level, SimLevel::Animated);
 
@@ -903,14 +1154,23 @@ mod tests {
         let chest_after = body_at(&project, &sim, 150, "chest");
         let hips_after = body_at(&project, &sim, 150, "hips");
         eprintln!("chest {chest_before} -> {chest_after}, hips {hips_after}");
-        assert!(chest_after.y < 0.6, "should have fallen, chest at {chest_after}");
-        assert!(chest_after.z < chest_before.z - 0.2, "should fall backwards");
+        assert!(
+            chest_after.y < 0.6,
+            "should have fallen, chest at {chest_after}"
+        );
+        assert!(
+            chest_after.z < chest_before.z - 0.2,
+            "should fall backwards"
+        );
 
         for frame in 0..=150 {
             let f = sim.frame(frame).unwrap()[0].as_ref().unwrap();
             for (_, p) in &f.bodies {
                 assert!(p.is_finite());
-                assert!(p.y > -0.05, "body sank through the ground at frame {frame}: {p}");
+                assert!(
+                    p.y > -0.05,
+                    "body sank through the ground at frame {frame}: {p}"
+                );
             }
             // Joints stay connected: each skeleton joint's position from its own body
             // stays close to where its parent body's frame puts it.
@@ -918,7 +1178,12 @@ mod tests {
                 if let Some(p) = j.parent {
                     let bone = Vec3::from(j.offset).length();
                     let gap = f.joints[i].1.distance(f.joints[p].1);
-                    assert!((gap - bone).abs() < 0.03, "joint {} stretched by {} at frame {frame}", j.name, gap - bone);
+                    assert!(
+                        (gap - bone).abs() < 0.03,
+                        "joint {} stretched by {} at frame {frame}",
+                        j.name,
+                        gap - bone
+                    );
                 }
             }
         }

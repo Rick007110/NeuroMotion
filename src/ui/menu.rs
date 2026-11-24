@@ -16,7 +16,13 @@ impl NeuroMotionApp {
                 item(ui, actions, Action::NewProject, "New Project", true);
                 item(ui, actions, Action::OpenProject, "Open…", true);
                 item(ui, actions, Action::OpenDemo, "Open Placeholder Demo", true);
-                item(ui, actions, Action::OpenPhysicsDemo, "Open Physics Demo", true);
+                item(
+                    ui,
+                    actions,
+                    Action::OpenPhysicsDemo,
+                    "Open Physics Demo",
+                    true,
+                );
                 item(ui, actions, Action::ImportPose, "Import Pose (.nma)…", true);
                 ui.menu_button("Export", |ui| {
                     item(ui, actions, Action::ExportBvh, "BVH…", true);
@@ -30,20 +36,58 @@ impl NeuroMotionApp {
             });
 
             ui.menu_button("Edit", |ui| {
-                let undo = self.doc.undo_label().map_or("Undo".to_owned(), |l| format!("Undo {l}"));
-                let redo = self.doc.redo_label().map_or("Redo".to_owned(), |l| format!("Redo {l}"));
+                let undo = self
+                    .doc
+                    .undo_label()
+                    .map_or("Undo".to_owned(), |l| format!("Undo {l}"));
+                let redo = self
+                    .doc
+                    .redo_label()
+                    .map_or("Redo".to_owned(), |l| format!("Redo {l}"));
                 item(ui, actions, Action::Undo, &undo, self.doc.can_undo());
                 item(ui, actions, Action::Redo, &redo, self.doc.can_redo());
                 ui.separator();
-                item(ui, actions, Action::AddKey, "Add Key at Playhead", self.selection.channel().is_some());
+                item(
+                    ui,
+                    actions,
+                    Action::AddKey,
+                    "Add Key at Playhead",
+                    self.selection.channel().is_some(),
+                );
                 ui.menu_button("Add", |ui| {
-                    let character = self.target_character().and_then(|id| self.doc.project.character(id));
+                    let character = self
+                        .target_character()
+                        .and_then(|id| self.doc.project.character(id));
                     add_clip_items(ui, actions, character, None);
                 });
-                item(ui, actions, Action::DuplicateClip, "Duplicate Clip", self.selection.clip().is_some());
-                item(ui, actions, Action::BakeSimulation, "Bake Simulation", self.can_bake());
-                item(ui, actions, Action::Delete, "Delete", self.selection.is_deletable());
-                item(ui, actions, Action::Deselect, "Select None", self.selection != Selection::None);
+                item(
+                    ui,
+                    actions,
+                    Action::DuplicateClip,
+                    "Duplicate Clip",
+                    self.selection.clip().is_some(),
+                );
+                item(
+                    ui,
+                    actions,
+                    Action::BakeSimulation,
+                    "Bake Simulation",
+                    self.can_bake(),
+                );
+                item(
+                    ui,
+                    actions,
+                    Action::Delete,
+                    "Delete",
+                    self.selection.is_deletable(),
+                );
+                item(
+                    ui,
+                    actions,
+                    Action::Deselect,
+                    "Select None",
+                    self.selection != Selection::None,
+                );
             });
 
             ui.menu_button("View", |ui| {
@@ -55,11 +99,23 @@ impl NeuroMotionApp {
                 ui.checkbox(&mut self.viewport.show_bodies, "Physics Bodies");
                 item(ui, actions, Action::ResetCamera, "Reset Camera", true);
                 ui.separator();
-                item(ui, actions, Action::FitTimeline, "Fit Timeline to Range", true);
+                item(
+                    ui,
+                    actions,
+                    Action::FitTimeline,
+                    "Fit Timeline to Range",
+                    true,
+                );
             });
 
             ui.menu_button("Help", |ui| {
-                item(ui, actions, Action::ShowShortcuts, "Keyboard Shortcuts", true);
+                item(
+                    ui,
+                    actions,
+                    Action::ShowShortcuts,
+                    "Keyboard Shortcuts",
+                    true,
+                );
                 item(ui, actions, Action::ShowAbout, "About NeuroMotion", true);
             });
         });
@@ -68,7 +124,12 @@ impl NeuroMotionApp {
 
 /// One entry per kind of clip, for `character` (none: all disabled). `at` places the
 /// clip on a track at a frame; `None` uses the selection and the playhead.
-pub(super) fn add_clip_items(ui: &mut Ui, actions: &mut Vec<Action>, character: Option<&Character>, at: Option<(TrackId, i32)>) {
+pub(super) fn add_clip_items(
+    ui: &mut Ui,
+    actions: &mut Vec<Action>,
+    character: Option<&Character>,
+    at: Option<(TrackId, i32)>,
+) {
     for kind in NewClip::ALL {
         if kind == NewClip::Simulation {
             ui.separator();

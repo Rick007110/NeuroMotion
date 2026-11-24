@@ -18,7 +18,13 @@ use crate::document::{Character, Clip, ClipId, Document, Edit, Project, SimLevel
 
 type Settings = BTreeMap<String, String>;
 
-pub(super) fn show(ui: &mut Ui, doc: &mut Document, id: ClipId, event: &str, actions: &mut Vec<Action>) {
+pub(super) fn show(
+    ui: &mut Ui,
+    doc: &mut Document,
+    id: ClipId,
+    event: &str,
+    actions: &mut Vec<Action>,
+) {
     let project = &doc.project;
     let Some(clip) = project.clip(id) else { return };
     let before = clip.source.clone();
@@ -35,7 +41,11 @@ pub(super) fn show(ui: &mut Ui, doc: &mut Document, id: ClipId, event: &str, act
         _ => {}
     }
     other_settings(ui, &before, events::edited_keys(event));
-    let edit = (s != before).then(|| Edit::ClipSource { clip: id, before, after: s });
+    let edit = (s != before).then(|| Edit::ClipSource {
+        clip: id,
+        before,
+        after: s,
+    });
     g.commit(doc, "Edit event settings", edit);
 }
 
@@ -43,11 +53,19 @@ fn simulation(ui: &mut Ui, s: &mut Settings, g: &mut Gesture) {
     section(ui, "Simulation", |ui| {
         grid(ui, "event_simulation", |ui| {
             ui.label("Switch to");
-            level_combo(ui, "simulation_level", s, keys::PHYSICS_LEVEL, SimLevel::Simulated);
+            level_combo(
+                ui,
+                "simulation_level",
+                s,
+                keys::PHYSICS_LEVEL,
+                SimLevel::Simulated,
+            );
             ui.end_row();
             ui.label("Momentum kept");
-            number(ui, g, s, keys::MOMENTUM_SCALE, 1.0, |ui, v| ui.add(Slider::new(v, 0.0..=1.0)))
-                .on_hover_text("How much of the animation's velocity carries into physics");
+            number(ui, g, s, keys::MOMENTUM_SCALE, 1.0, |ui, v| {
+                ui.add(Slider::new(v, 0.0..=1.0))
+            })
+            .on_hover_text("How much of the animation's velocity carries into physics");
             ui.end_row();
         });
         ui.weak("Switches at the clip's first frame. The character stays at this level until another simulation or transition event.");
@@ -61,17 +79,35 @@ fn force(ui: &mut Ui, s: &mut Settings, g: &mut Gesture, character: Option<&Char
         let mut changed = false;
         grid(ui, "event_force", |ui| {
             ui.label("Strength");
-            let r = ui.add(DragValue::new(&mut speed).range(0.0..=100.0).speed(0.05).max_decimals(2).suffix(" m/s"));
+            let r = ui.add(
+                DragValue::new(&mut speed)
+                    .range(0.0..=100.0)
+                    .speed(0.05)
+                    .max_decimals(2)
+                    .suffix(" m/s"),
+            );
             changed |= r.changed();
             g.drag(&r.on_hover_text("The change of velocity the push gives the body"));
             ui.end_row();
             ui.label("Heading");
-            let r = ui.add(DragValue::new(&mut heading).range(-180.0..=180.0).speed(1.0).max_decimals(1).suffix("°"));
+            let r = ui.add(
+                DragValue::new(&mut heading)
+                    .range(-180.0..=180.0)
+                    .speed(1.0)
+                    .max_decimals(1)
+                    .suffix("°"),
+            );
             changed |= r.changed();
             g.drag(&r.on_hover_text("Direction around the up axis: 0° = +Z (the way NeuroMotion's own characters face), 90° = +X, 180° = −Z"));
             ui.end_row();
             ui.label("Elevation");
-            let r = ui.add(DragValue::new(&mut elevation).range(-90.0..=90.0).speed(1.0).max_decimals(1).suffix("°"));
+            let r = ui.add(
+                DragValue::new(&mut elevation)
+                    .range(-90.0..=90.0)
+                    .speed(1.0)
+                    .max_decimals(1)
+                    .suffix("°"),
+            );
             changed |= r.changed();
             g.drag(&r.on_hover_text("Degrees above horizontal"));
             ui.end_row();
@@ -98,22 +134,32 @@ fn body_combo(ui: &mut Ui, s: &mut Settings, character: Option<&Character>) {
         [one] => one.body.clone(),
         many => format!("{} bodies", many.len()),
     };
-    let (Some(character), Some(rig)) = (character, character.and_then(|c| c.physics.as_ref())) else {
+    let (Some(character), Some(rig)) = (character, character.and_then(|c| c.physics.as_ref()))
+    else {
         ui.weak(text);
         return;
     };
     let mut chosen: Option<Vec<BodyRef>> = None;
-    egui::ComboBox::from_id_salt("force_body").selected_text(text).height(320.0).show_ui(ui, |ui| {
-        if ui.selectable_label(current.is_empty(), "All bodies").clicked() {
-            chosen = Some(Vec::new());
-        }
-        for body in &rig.bodies {
-            let selected = current.len() == 1 && current[0].body == body.name;
-            if ui.selectable_label(selected, &body.name).clicked() {
-                chosen = Some(vec![BodyRef { character: character.name.clone(), body: body.name.clone() }]);
+    egui::ComboBox::from_id_salt("force_body")
+        .selected_text(text)
+        .height(320.0)
+        .show_ui(ui, |ui| {
+            if ui
+                .selectable_label(current.is_empty(), "All bodies")
+                .clicked()
+            {
+                chosen = Some(Vec::new());
             }
-        }
-    });
+            for body in &rig.bodies {
+                let selected = current.len() == 1 && current[0].body == body.name;
+                if ui.selectable_label(selected, &body.name).clicked() {
+                    chosen = Some(vec![BodyRef {
+                        character: character.name.clone(),
+                        body: body.name.clone(),
+                    }]);
+                }
+            }
+        });
     if let Some(targets) = chosen.filter(|t| *t != current) {
         events::set_targets(s, &targets);
     }
@@ -123,23 +169,50 @@ fn transition(ui: &mut Ui, s: &mut Settings) {
     section(ui, "Transition", |ui| {
         grid(ui, "event_transition", |ui| {
             ui.label("Then");
-            level_combo(ui, "transition_level", s, keys::REQUIRED_LEVEL, SimLevel::Animated);
+            level_combo(
+                ui,
+                "transition_level",
+                s,
+                keys::REQUIRED_LEVEL,
+                SimLevel::Animated,
+            );
             ui.end_row();
         });
         ui.weak("Blends from the simulation back to the animation over the length of the clip, then switches to this level.");
     });
 }
 
-fn active_pose(ui: &mut Ui, s: &mut Settings, g: &mut Gesture, clip: &Clip, actions: &mut Vec<Action>) {
+fn active_pose(
+    ui: &mut Ui,
+    s: &mut Settings,
+    g: &mut Gesture,
+    clip: &Clip,
+    actions: &mut Vec<Action>,
+) {
     section(ui, "Active pose", |ui| {
         grid(ui, "event_pose", |ui| {
             ui.label("Strength");
-            number(ui, g, s, keys::STRENGTH, 1.0, |ui, v| ui.add(DragValue::new(v).range(0.0..=20.0).speed(0.02).max_decimals(2)))
-                .on_hover_text("Multiplies the muscles' strength while they hold the pose");
+            number(ui, g, s, keys::STRENGTH, 1.0, |ui, v| {
+                ui.add(
+                    DragValue::new(v)
+                        .range(0.0..=20.0)
+                        .speed(0.02)
+                        .max_decimals(2),
+                )
+            })
+            .on_hover_text("Multiplies the muscles' strength while they hold the pose");
             ui.end_row();
             ui.label("Ease in");
-            number(ui, g, s, keys::ENTRY_BLEND, 0.0, |ui, v| ui.add(DragValue::new(v).range(0.0..=10.0).speed(0.01).max_decimals(2).suffix(" s")))
-                .on_hover_text("Seconds the muscles take to reach full strength");
+            number(ui, g, s, keys::ENTRY_BLEND, 0.0, |ui, v| {
+                ui.add(
+                    DragValue::new(v)
+                        .range(0.0..=10.0)
+                        .speed(0.01)
+                        .max_decimals(2)
+                        .suffix(" s"),
+                )
+            })
+            .on_hover_text("Seconds the muscles take to reach full strength");
             ui.end_row();
             ui.label("Joints held");
             let mut joints: Vec<&str> = clip.channels.iter().map(|c| c.joint.as_str()).collect();
@@ -147,7 +220,11 @@ fn active_pose(ui: &mut Ui, s: &mut Settings, g: &mut Gesture, clip: &Clip, acti
             ui.label(joints.len().to_string());
             ui.end_row();
         });
-        if ui.button("Capture pose at playhead").on_hover_text("Hold the pose the viewport shows now").clicked() {
+        if ui
+            .button("Capture pose at playhead")
+            .on_hover_text("Hold the pose the viewport shows now")
+            .clicked()
+        {
             actions.push(Action::CapturePose(clip.id));
         }
         ui.weak("While the character is simulated, its muscles pull towards this pose.");
@@ -156,20 +233,26 @@ fn active_pose(ui: &mut Ui, s: &mut Settings, g: &mut Gesture, clip: &Clip, acti
 
 fn constraint(ui: &mut Ui, s: &mut Settings, g: &mut Gesture, project: &Project) {
     section(ui, "Constraint", |ui| {
-        let current = s.get(keys::LOCK_TYPE).and_then(|v| LockType::from_endorphin(v));
+        let current = s
+            .get(keys::LOCK_TYPE)
+            .and_then(|v| LockType::from_endorphin(v));
         let mut lock = current.unwrap_or(LockType::Lock);
         let original = lock;
         grid(ui, "event_constraint", |ui| {
             ui.label("Type");
-            egui::ComboBox::from_id_salt("lock_type").selected_text(lock.label()).show_ui(ui, |ui| {
-                for option in LockType::ALL {
-                    ui.selectable_value(&mut lock, option, option.label());
-                }
-            });
+            egui::ComboBox::from_id_salt("lock_type")
+                .selected_text(lock.label())
+                .show_ui(ui, |ui| {
+                    for option in LockType::ALL {
+                        ui.selectable_value(&mut lock, option, option.label());
+                    }
+                });
             ui.end_row();
             ui.label("Position strength");
             let uses_position = lock != LockType::LockOrientation;
-            ui.add_enabled_ui(uses_position, |ui| vector(ui, g, s, keys::POSITION_STRENGTH));
+            ui.add_enabled_ui(uses_position, |ui| {
+                vector(ui, g, s, keys::POSITION_STRENGTH)
+            });
             ui.end_row();
             ui.label("Rotation strength");
             let uses_rotation = lock != LockType::LockPosition;
@@ -186,24 +269,37 @@ fn constraint(ui: &mut Ui, s: &mut Settings, g: &mut Gesture, project: &Project)
         let mut remove = None;
         for (i, target) in targets.iter().enumerate() {
             ui.horizontal(|ui| {
-                if ui.small_button("−").on_hover_text("Remove from the constraint").clicked() {
+                if ui
+                    .small_button("−")
+                    .on_hover_text("Remove from the constraint")
+                    .clicked()
+                {
                     remove = Some(i);
                 }
                 ui.label(target.label());
             });
         }
         let mut add = None;
-        egui::ComboBox::from_id_salt("constraint_add_body").selected_text("Add body…").height(320.0).show_ui(ui, |ui| {
-            for character in project.characters.iter().filter(|c| c.physics.is_some()) {
-                for body in character.physics.iter().flat_map(|r| &r.bodies) {
-                    let candidate = BodyRef { character: character.name.clone(), body: body.name.clone() };
-                    let listed = targets.contains(&candidate);
-                    if ui.add_enabled(!listed, egui::Button::new(candidate.label()).frame(false)).clicked() {
-                        add = Some(candidate);
+        egui::ComboBox::from_id_salt("constraint_add_body")
+            .selected_text("Add body…")
+            .height(320.0)
+            .show_ui(ui, |ui| {
+                for character in project.characters.iter().filter(|c| c.physics.is_some()) {
+                    for body in character.physics.iter().flat_map(|r| &r.bodies) {
+                        let candidate = BodyRef {
+                            character: character.name.clone(),
+                            body: body.name.clone(),
+                        };
+                        let listed = targets.contains(&candidate);
+                        if ui
+                            .add_enabled(!listed, egui::Button::new(candidate.label()).frame(false))
+                            .clicked()
+                        {
+                            add = Some(candidate);
+                        }
                     }
                 }
-            }
-        });
+            });
         if let Some(i) = remove {
             targets.remove(i);
         }
@@ -212,10 +308,14 @@ fn constraint(ui: &mut Ui, s: &mut Settings, g: &mut Gesture, project: &Project)
             events::set_targets(s, &targets);
         }
         ui.weak(match lock {
-            LockType::Join => "Each body is held to the last one in the list, as they are when the clip starts.",
+            LockType::Join => {
+                "Each body is held to the last one in the list, as they are when the clip starts."
+            }
             _ => "Each body is held where it is when the clip starts, until the clip ends.",
         });
-        ui.weak("Strengths are springs along each world axis (N/m and N·m/rad); 0 leaves an axis free.");
+        ui.weak(
+            "Strengths are springs along each world axis (N/m and N·m/rad); 0 leaves an axis free.",
+        );
     });
 }
 
@@ -237,20 +337,26 @@ fn behaviour(ui: &mut Ui, s: &mut Settings, g: &mut Gesture) {
 
 /// Settings the controls above don't cover, read-only.
 fn other_settings(ui: &mut Ui, source: &Settings, edited: &[&str]) {
-    let rest: Vec<(&String, &String)> = source.iter().filter(|(k, _)| !edited.contains(&k.as_str())).collect();
+    let rest: Vec<(&String, &String)> = source
+        .iter()
+        .filter(|(k, _)| !edited.contains(&k.as_str()))
+        .collect();
     if rest.is_empty() {
         return;
     }
     egui::CollapsingHeader::new(RichText::new("Other imported settings").strong())
         .default_open(false)
         .show(ui, |ui| {
-            egui::Grid::new("event_other_settings").striped(true).num_columns(2).show(ui, |ui| {
-                for (key, value) in rest {
-                    ui.label(key);
-                    ui.label(RichText::new(value).monospace());
-                    ui.end_row();
-                }
-            });
+            egui::Grid::new("event_other_settings")
+                .striped(true)
+                .num_columns(2)
+                .show(ui, |ui| {
+                    for (key, value) in rest {
+                        ui.label(key);
+                        ui.label(RichText::new(value).monospace());
+                        ui.end_row();
+                    }
+                });
         });
 }
 
@@ -258,11 +364,13 @@ fn other_settings(ui: &mut Ui, source: &Settings, edited: &[&str]) {
 fn level_combo(ui: &mut Ui, id: &str, s: &mut Settings, key: &str, default: SimLevel) {
     let original = events::level(s, key).unwrap_or(default);
     let mut level = original;
-    egui::ComboBox::from_id_salt(id).selected_text(level.label()).show_ui(ui, |ui| {
-        for option in SimLevel::ALL {
-            ui.selectable_value(&mut level, option, option.label());
-        }
-    });
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(level.label())
+        .show_ui(ui, |ui| {
+            for option in SimLevel::ALL {
+                ui.selectable_value(&mut level, option, option.label());
+            }
+        });
     if level != original {
         events::set_level(s, key, level);
     }
@@ -293,7 +401,12 @@ fn vector(ui: &mut Ui, g: &mut Gesture, s: &mut Settings, key: &str) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         for (axis, label) in ["X", "Y", "Z"].into_iter().enumerate() {
-            let r = ui.add(DragValue::new(&mut v[axis]).range(0.0..=1e6).speed(50.0).max_decimals(0));
+            let r = ui.add(
+                DragValue::new(&mut v[axis])
+                    .range(0.0..=1e6)
+                    .speed(50.0)
+                    .max_decimals(0),
+            );
             changed |= r.changed();
             g.drag(&r.on_hover_text(format!("Along world {label}")));
         }

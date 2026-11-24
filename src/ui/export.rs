@@ -57,12 +57,22 @@ impl NeuroMotionApp {
             return;
         };
         // Remember the last choices while the app runs.
-        let (units, encoding) = self.export.as_ref().map_or_else(Default::default, |d| (d.units, d.encoding));
-        self.export = Some(ExportDialog { format, character, units, encoding });
+        let (units, encoding) = self
+            .export
+            .as_ref()
+            .map_or_else(Default::default, |d| (d.units, d.encoding));
+        self.export = Some(ExportDialog {
+            format,
+            character,
+            units,
+            encoding,
+        });
     }
 
     pub(super) fn export_window(&mut self, ctx: &egui::Context) {
-        let Some(dialog) = &mut self.export else { return };
+        let Some(dialog) = &mut self.export else {
+            return;
+        };
         let project = &self.doc.project;
         let (mut export, mut cancel) = (false, false);
         let physics = Simulation::is_needed(project);
@@ -73,19 +83,35 @@ impl NeuroMotionApp {
             .show(ctx, |ui| {
                 grid(ui, "export_options", |ui| {
                     ui.label("Character");
-                    let current = project.character(dialog.character).map_or("—", |c| c.name.as_str());
-                    egui::ComboBox::from_id_salt("export_character").selected_text(current).show_ui(ui, |ui| {
-                        for c in &project.characters {
-                            ui.selectable_value(&mut dialog.character, c.id, format!("{}  ·  {}", c.name, c.kind.label().to_lowercase()));
-                        }
-                    });
+                    let current = project
+                        .character(dialog.character)
+                        .map_or("—", |c| c.name.as_str());
+                    egui::ComboBox::from_id_salt("export_character")
+                        .selected_text(current)
+                        .show_ui(ui, |ui| {
+                            for c in &project.characters {
+                                ui.selectable_value(
+                                    &mut dialog.character,
+                                    c.id,
+                                    format!("{}  ·  {}", c.name, c.kind.label().to_lowercase()),
+                                );
+                            }
+                        });
                     ui.end_row();
                     let range = project.settings.range;
                     ui.label("Frames");
-                    ui.label(format!("{} – {}  ({} frames at {:.0} fps)", range.start, range.end, range.len() + 1, project.settings.fps));
+                    ui.label(format!(
+                        "{} – {}  ({} frames at {:.0} fps)",
+                        range.start,
+                        range.end,
+                        range.len() + 1,
+                        project.settings.fps
+                    ));
                     ui.end_row();
                     ui.label("Motion");
-                    let rigged = project.character(dialog.character).is_some_and(|c| c.physics.is_some());
+                    let rigged = project
+                        .character(dialog.character)
+                        .is_some_and(|c| c.physics.is_some());
                     ui.label(match (physics, rigged) {
                         (true, true) => "Simulation",
                         (true, false) => "Keys (this character has no physics body)",
@@ -93,24 +119,34 @@ impl NeuroMotionApp {
                     });
                     ui.end_row();
                     ui.label("Units");
-                    egui::ComboBox::from_id_salt("export_units").selected_text(dialog.units.label()).show_ui(ui, |ui| {
-                        for units in Units::ALL {
-                            ui.selectable_value(&mut dialog.units, units, units.label());
-                        }
-                    });
+                    egui::ComboBox::from_id_salt("export_units")
+                        .selected_text(dialog.units.label())
+                        .show_ui(ui, |ui| {
+                            for units in Units::ALL {
+                                ui.selectable_value(&mut dialog.units, units, units.label());
+                            }
+                        });
                     ui.end_row();
                     if dialog.format == Format::Fbx {
                         ui.label("Encoding");
-                        egui::ComboBox::from_id_salt("export_encoding").selected_text(dialog.encoding.label()).show_ui(ui, |ui| {
-                            for encoding in Encoding::ALL {
-                                ui.selectable_value(&mut dialog.encoding, encoding, encoding.label());
-                            }
-                        });
+                        egui::ComboBox::from_id_salt("export_encoding")
+                            .selected_text(dialog.encoding.label())
+                            .show_ui(ui, |ui| {
+                                for encoding in Encoding::ALL {
+                                    ui.selectable_value(
+                                        &mut dialog.encoding,
+                                        encoding,
+                                        encoding.label(),
+                                    );
+                                }
+                            });
                         ui.end_row();
                     }
                 });
                 ui.add_space(6.0);
-                ui.weak("The project's frame range and frame rate are used; change them under Project.");
+                ui.weak(
+                    "The project's frame range and frame rate are used; change them under Project.",
+                );
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     export = ui.button(RichText::new("Export…").strong()).clicked();
@@ -129,9 +165,16 @@ impl NeuroMotionApp {
         let Some(dialog) = &self.export else { return };
         let (format, units, encoding) = (dialog.format, dialog.units, dialog.encoding);
         let project = &self.doc.project;
-        let Some(index) = project.character_index(dialog.character) else { return };
+        let Some(index) = project.character_index(dialog.character) else {
+            return;
+        };
         let character = &project.characters[index];
-        let suggested = format!("{} {}.{}", project.settings.name, character.name, format.extension());
+        let suggested = format!(
+            "{} {}.{}",
+            project.settings.name,
+            character.name,
+            format.extension()
+        );
         let Some(path) = rfd::FileDialog::new()
             .add_filter(format.label(), &[format.extension()])
             .set_file_name(suggested)
@@ -158,7 +201,11 @@ impl NeuroMotionApp {
                 "Exported {} frames of {} ({}) to {}",
                 motion.frames.len(),
                 character.name,
-                if motion.simulated { "simulated" } else { "keys" },
+                if motion.simulated {
+                    "simulated"
+                } else {
+                    "keys"
+                },
                 path.display()
             ),
             Err(e) => format!("Couldn't export {}: {e}", path.display()),

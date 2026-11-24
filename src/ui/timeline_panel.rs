@@ -56,8 +56,18 @@ impl Default for TimelineState {
 /// An in-progress pointer drag. `travel` accumulates pixels so slow drags still move
 /// by whole frames.
 enum Drag {
-    Clip { id: ClipId, origin: i32, travel: f32 },
-    Key { clip: ClipId, channel: usize, origin: i32, current: i32, travel: f32 },
+    Clip {
+        id: ClipId,
+        origin: i32,
+        travel: f32,
+    },
+    Key {
+        clip: ClipId,
+        channel: usize,
+        origin: i32,
+        current: i32,
+        travel: f32,
+    },
 }
 
 enum Row {
@@ -102,7 +112,10 @@ pub fn show(
     }
     state.last_width = lane_width;
 
-    let ruler = Rect::from_min_max(pos2(lanes_left, rect.top()), pos2(rect.right(), rect.top() + RULER_H));
+    let ruler = Rect::from_min_max(
+        pos2(lanes_left, rect.top()),
+        pos2(rect.right(), rect.top() + RULER_H),
+    );
     let body = Rect::from_min_max(pos2(rect.left(), ruler.bottom()), rect.max);
     let lanes = Rect::from_min_max(pos2(lanes_left, body.top()), body.max);
 
@@ -113,7 +126,9 @@ pub fn show(
 
     let rows = build_rows(doc, *selection);
     let content_h: f32 = rows.iter().map(Row::height).sum();
-    state.scroll_y = state.scroll_y.clamp(0.0, (content_h - body.height()).max(0.0));
+    state.scroll_y = state
+        .scroll_y
+        .clamp(0.0, (content_h - body.height()).max(0.0));
 
     let view = state.view.clone();
     let to_x = |frame: f32| view.frame_to_x(frame, lanes_left);
@@ -123,7 +138,10 @@ pub fn show(
     let grid_painter = painter.with_clip_rect(lanes);
     for frame in visible_ticks(&view, lanes_left, lane_width, step) {
         let x = to_x(frame as f32);
-        grid_painter.line_segment([pos2(x, lanes.top()), pos2(x, lanes.bottom())], Stroke::new(1.0_f32, theme::GRID));
+        grid_painter.line_segment(
+            [pos2(x, lanes.top()), pos2(x, lanes.bottom())],
+            Stroke::new(1.0_f32, theme::GRID),
+        );
     }
 
     let mut y = body.top() - state.scroll_y;
@@ -155,10 +173,22 @@ pub fn show(
                 if lane_response.clicked() {
                     *selection = Selection::None;
                 }
-                character_header(ui, &header_painter, header.intersect(body), header, doc, selection, id);
+                character_header(
+                    ui,
+                    &header_painter,
+                    header.intersect(body),
+                    header,
+                    doc,
+                    selection,
+                    id,
+                );
             }
             Row::Track { index, id } => {
-                let fill = if stripe % 2 == 0 { theme::LANE_BG } else { theme::LANE_ALT };
+                let fill = if stripe % 2 == 0 {
+                    theme::LANE_BG
+                } else {
+                    theme::LANE_ALT
+                };
                 stripe += 1;
                 lane_painter.rect_filled(lane, 0.0, fill);
                 if lane_response.clicked() {
@@ -174,14 +204,60 @@ pub fn show(
                     }
                 }
                 let frame = state.menu_frame;
-                lane_response.context_menu(|ui| track_menu(ui, doc, selection, actions, id, Some(frame)));
-                track_header(ui, &header_painter, header.intersect(body), header, doc, selection, actions, index, id);
-                track_lane(ui, &lane_painter, lane, lanes, &view, lanes_left, state, doc, selection, actions, index, id);
+                lane_response
+                    .context_menu(|ui| track_menu(ui, doc, selection, actions, id, Some(frame)));
+                track_header(
+                    ui,
+                    &header_painter,
+                    header.intersect(body),
+                    header,
+                    doc,
+                    selection,
+                    actions,
+                    index,
+                    id,
+                );
+                track_lane(
+                    ui,
+                    &lane_painter,
+                    lane,
+                    lanes,
+                    &view,
+                    lanes_left,
+                    state,
+                    doc,
+                    selection,
+                    actions,
+                    index,
+                    id,
+                );
             }
             Row::Channel { clip, channel } => {
                 lane_painter.rect_filled(lane, 0.0, theme::CHANNEL_BG);
-                channel_header(ui, &header_painter, header.intersect(body), header, doc, selection, clip, channel);
-                channel_lane(ui, &lane_painter, &lane_response, lane, lanes, &view, lanes_left, state, doc, selection, clip, channel);
+                channel_header(
+                    ui,
+                    &header_painter,
+                    header.intersect(body),
+                    header,
+                    doc,
+                    selection,
+                    clip,
+                    channel,
+                );
+                channel_lane(
+                    ui,
+                    &lane_painter,
+                    &lane_response,
+                    lane,
+                    lanes,
+                    &view,
+                    lanes_left,
+                    state,
+                    doc,
+                    selection,
+                    clip,
+                    channel,
+                );
             }
         }
         painter.with_clip_rect(body).line_segment(
@@ -191,17 +267,43 @@ pub fn show(
     }
 
     // Header column divider, out-of-range shading, ruler, then the playhead on top.
-    painter.line_segment([pos2(lanes_left, rect.top()), pos2(lanes_left, rect.bottom())], Stroke::new(1.0_f32, Color32::from_black_alpha(120)));
+    painter.line_segment(
+        [
+            pos2(lanes_left, rect.top()),
+            pos2(lanes_left, rect.bottom()),
+        ],
+        Stroke::new(1.0_f32, Color32::from_black_alpha(120)),
+    );
     for shade in [
-        Rect::from_min_max(pos2(lanes_left, ruler.top()), pos2(to_x(range.start as f32).clamp(lanes_left, rect.right()), rect.bottom())),
-        Rect::from_min_max(pos2(to_x(range.end as f32).clamp(lanes_left, rect.right()), ruler.top()), rect.max),
+        Rect::from_min_max(
+            pos2(lanes_left, ruler.top()),
+            pos2(
+                to_x(range.start as f32).clamp(lanes_left, rect.right()),
+                rect.bottom(),
+            ),
+        ),
+        Rect::from_min_max(
+            pos2(
+                to_x(range.end as f32).clamp(lanes_left, rect.right()),
+                ruler.top(),
+            ),
+            rect.max,
+        ),
     ] {
         if shade.width() > 0.0 {
             painter.rect_filled(shade, 0.0, theme::OUT_OF_RANGE);
         }
     }
-    draw_ruler(ui, &painter, rect, ruler, &view, lanes_left, lane_width, playback, range);
-    draw_playhead(&painter, rect, ruler, to_x(playback.playhead() as f32), playback.frame());
+    draw_ruler(
+        ui, &painter, rect, ruler, &view, lanes_left, lane_width, playback, range,
+    );
+    draw_playhead(
+        &painter,
+        rect,
+        ruler,
+        to_x(playback.playhead() as f32),
+        playback.frame(),
+    );
 }
 
 /// Characters in project order, each followed by its tracks; the selected clip's
@@ -216,9 +318,15 @@ fn build_rows(doc: &Document, selection: Selection) -> Vec<Row> {
             if track.character != character.id {
                 continue;
             }
-            rows.push(Row::Track { index, id: track.id });
+            rows.push(Row::Track {
+                index,
+                id: track.id,
+            });
             if let Some(clip) = selected_clip.filter(|c| c.props.track == track.id) {
-                rows.extend((0..clip.channels.len()).map(|channel| Row::Channel { clip: clip.id, channel }));
+                rows.extend((0..clip.channels.len()).map(|channel| Row::Channel {
+                    clip: clip.id,
+                    channel,
+                }));
             }
         }
     }
@@ -237,7 +345,11 @@ fn transport_bar(
     let ctx = ui.ctx().clone();
     let tip = |action: Action| {
         let keys = shortcuts::text_for(&ctx, action);
-        if keys.is_empty() { action.label().to_owned() } else { format!("{} ({keys})", action.label()) }
+        if keys.is_empty() {
+            action.label().to_owned()
+        } else {
+            format!("{} ({keys})", action.label())
+        }
     };
 
     ui.horizontal(|ui| {
@@ -245,7 +357,11 @@ fn transport_bar(
         let buttons = [
             (Icon::ToStart, Action::GoToStart, false),
             (Icon::StepBack, Action::StepBackward, false),
-            (if playing { Icon::Pause } else { Icon::Play }, Action::PlayPause, playing),
+            (
+                if playing { Icon::Pause } else { Icon::Play },
+                Action::PlayPause,
+                playing,
+            ),
             (Icon::Stop, Action::Stop, false),
             (Icon::StepForward, Action::StepForward, false),
             (Icon::ToEnd, Action::GoToEnd, false),
@@ -258,14 +374,22 @@ fn transport_bar(
         ui.separator();
 
         let mut frame = playback.frame();
-        let field = ui.add(DragValue::new(&mut frame).range(range.start..=range.end).prefix("frame "));
+        let field = ui.add(
+            DragValue::new(&mut frame)
+                .range(range.start..=range.end)
+                .prefix("frame "),
+        );
         if field.changed() {
             playback.seek(frame as f64, range);
         }
         // The scene's last frame, editable here as well as on the project page.
         let mut end = range.end;
         let end_field = ui
-            .add(DragValue::new(&mut end).range(range.start + 1..=100_000).prefix("/ "))
+            .add(
+                DragValue::new(&mut end)
+                    .range(range.start + 1..=100_000)
+                    .prefix("/ "),
+            )
             .on_hover_text("Last frame of the scene: drag or type to change it");
         let mut gesture = Gesture::default();
         gesture.drag(&end_field);
@@ -287,15 +411,27 @@ fn transport_bar(
         ui.weak(format!("{fps:.0} fps"));
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.small_button("Fit").on_hover_text(tip(Action::FitTimeline)).clicked() {
+            if ui
+                .small_button("Fit")
+                .on_hover_text(tip(Action::FitTimeline))
+                .clicked()
+            {
                 actions.push(Action::FitTimeline);
             }
             let anchor = playback.playhead() as f32;
-            if ui.small_button("+").on_hover_text("Zoom in (Ctrl+wheel)").clicked() {
+            if ui
+                .small_button("+")
+                .on_hover_text("Zoom in (Ctrl+wheel)")
+                .clicked()
+            {
                 state.view.zoom_at(1.25, anchor);
                 state.auto_fit = false;
             }
-            if ui.small_button("−").on_hover_text("Zoom out (Ctrl+wheel)").clicked() {
+            if ui
+                .small_button("−")
+                .on_hover_text("Zoom out (Ctrl+wheel)")
+                .clicked()
+            {
                 state.view.zoom_at(0.8, anchor);
                 state.auto_fit = false;
             }
@@ -306,7 +442,11 @@ fn transport_bar(
 
 fn timecode(playhead: f64, fps: f32) -> String {
     let seconds = playhead / fps.max(1.0) as f64;
-    format!("{:02}:{:05.2}", (seconds / 60.0).floor() as i64, seconds % 60.0)
+    format!(
+        "{:02}:{:05.2}",
+        (seconds / 60.0).floor() as i64,
+        seconds % 60.0
+    )
 }
 
 /// Wheel: scroll rows. Shift+wheel: pan time. Ctrl+wheel: zoom around the pointer.
@@ -314,23 +454,34 @@ fn handle_wheel(ui: &Ui, state: &mut TimelineState, rect: Rect, lanes_left: f32)
     if !ui.rect_contains_pointer(rect) {
         return;
     }
-    let (scroll, modifiers, pointer) = ui.input(|i| (i.raw_scroll_delta, i.modifiers, i.pointer.hover_pos()));
+    let (scroll, modifiers, pointer) =
+        ui.input(|i| (i.raw_scroll_delta, i.modifiers, i.pointer.hover_pos()));
     if scroll == egui::Vec2::ZERO {
         return;
     }
     if modifiers.command {
-        let anchor = pointer.map_or(state.view.first_frame, |p| state.view.x_to_frame(p.x, lanes_left));
+        let anchor = pointer.map_or(state.view.first_frame, |p| {
+            state.view.x_to_frame(p.x, lanes_left)
+        });
         state.view.zoom_at((scroll.y * 0.003).exp(), anchor);
         state.auto_fit = false;
     } else if modifiers.shift || scroll.x != 0.0 {
-        state.view.pan_px(scroll.x + if modifiers.shift { scroll.y } else { 0.0 });
+        state
+            .view
+            .pan_px(scroll.x + if modifiers.shift { scroll.y } else { 0.0 });
         state.auto_fit = false;
     } else {
         state.scroll_y -= scroll.y;
     }
 }
 
-fn scrub(response: &Response, view: &TimelineView, lanes_left: f32, playback: &mut Playback, range: crate::document::FrameRange) {
+fn scrub(
+    response: &Response,
+    view: &TimelineView,
+    lanes_left: f32,
+    playback: &mut Playback,
+    range: crate::document::FrameRange,
+) {
     if response.is_pointer_button_down_on() {
         if let Some(pos) = response.interact_pointer_pos() {
             playback.pause();
@@ -339,7 +490,12 @@ fn scrub(response: &Response, view: &TimelineView, lanes_left: f32, playback: &m
     }
 }
 
-fn visible_ticks(view: &TimelineView, lanes_left: f32, width: f32, step: i32) -> impl Iterator<Item = i32> {
+fn visible_ticks(
+    view: &TimelineView,
+    lanes_left: f32,
+    width: f32,
+    step: i32,
+) -> impl Iterator<Item = i32> {
     let first = view.x_to_frame(lanes_left, lanes_left).floor() as i32;
     let last = view.x_to_frame(lanes_left + width, lanes_left).ceil() as i32;
     let start = first.div_euclid(step) * step;
@@ -355,10 +511,24 @@ fn character_header(
     selection: &mut Selection,
     id: CharacterId,
 ) {
-    let Some(character) = doc.project.character(id) else { return };
+    let Some(character) = doc.project.character(id) else {
+        return;
+    };
     let selected = *selection == Selection::Character(id);
-    let title = format!("{}  ·  {}", character.name, character.kind.label().to_lowercase());
-    painter.rect_filled(header, 0.0, if selected { theme::ACCENT.gamma_multiply(0.25) } else { theme::CHARACTER_BG });
+    let title = format!(
+        "{}  ·  {}",
+        character.name,
+        character.kind.label().to_lowercase()
+    );
+    painter.rect_filled(
+        header,
+        0.0,
+        if selected {
+            theme::ACCENT.gamma_multiply(0.25)
+        } else {
+            theme::CHARACTER_BG
+        },
+    );
     painter.text(
         pos2(header.left() + 8.0, header.center().y),
         Align2::LEFT_CENTER,
@@ -366,7 +536,11 @@ fn character_header(
         FontId::proportional(11.5),
         theme::ACCENT,
     );
-    let response = ui.interact(visible, ui.id().with(("character_header", id)), Sense::click());
+    let response = ui.interact(
+        visible,
+        ui.id().with(("character_header", id)),
+        Sense::click(),
+    );
     if response.clicked() {
         *selection = Selection::Character(id);
     }
@@ -386,11 +560,25 @@ fn add_track(doc: &mut Document, character: CharacterId) -> TrackId {
 
 /// Right-click menu of a track: add a clip of any kind at `frame` (if given), add a
 /// track, delete this one.
-fn track_menu(ui: &mut Ui, doc: &mut Document, selection: &mut Selection, actions: &mut Vec<Action>, track: TrackId, frame: Option<i32>) {
-    let Some(character) = doc.project.track(track).map(|t| t.character) else { return };
+fn track_menu(
+    ui: &mut Ui,
+    doc: &mut Document,
+    selection: &mut Selection,
+    actions: &mut Vec<Action>,
+    track: TrackId,
+    frame: Option<i32>,
+) {
+    let Some(character) = doc.project.track(track).map(|t| t.character) else {
+        return;
+    };
     if let Some(frame) = frame {
         ui.weak(format!("Add at frame {frame}"));
-        add_clip_items(ui, actions, doc.project.character(character), Some((track, frame)));
+        add_clip_items(
+            ui,
+            actions,
+            doc.project.character(character),
+            Some((track, frame)),
+        );
         ui.separator();
     }
     if ui.button("Add Track").clicked() {
@@ -416,19 +604,54 @@ fn track_header(
     index: usize,
     id: TrackId,
 ) {
-    let Some(track) = doc.project.track(id).cloned() else { return };
+    let Some(track) = doc.project.track(id).cloned() else {
+        return;
+    };
     let selected = *selection == Selection::Track(id);
-    painter.rect_filled(header, 0.0, if selected { theme::ACCENT.gamma_multiply(0.18) } else { theme::HEADER_BG });
-    painter.rect_filled(Rect::from_min_size(header.min, vec2(4.0, header.height())), 0.0, theme::track_color(index));
+    painter.rect_filled(
+        header,
+        0.0,
+        if selected {
+            theme::ACCENT.gamma_multiply(0.18)
+        } else {
+            theme::HEADER_BG
+        },
+    );
+    painter.rect_filled(
+        Rect::from_min_size(header.min, vec2(4.0, header.height())),
+        0.0,
+        theme::track_color(index),
+    );
 
-    let mute_rect = Rect::from_center_size(pos2(header.right() - 18.0, header.center().y), vec2(20.0, 18.0));
+    let mute_rect = Rect::from_center_size(
+        pos2(header.right() - 18.0, header.center().y),
+        vec2(20.0, 18.0),
+    );
     let header_response = ui.interact(visible, ui.id().with(("track_header", id)), Sense::click());
     let mute_response = ui
-        .interact(mute_rect.intersect(visible), ui.id().with(("track_mute", id)), Sense::click())
-        .on_hover_text(if track.muted { "Unmute track" } else { "Mute track" });
+        .interact(
+            mute_rect.intersect(visible),
+            ui.id().with(("track_mute", id)),
+            Sense::click(),
+        )
+        .on_hover_text(if track.muted {
+            "Unmute track"
+        } else {
+            "Mute track"
+        });
 
-    let name_color = if track.muted { theme::DIM_TEXT } else { theme::TEXT };
-    painter.text(pos2(header.left() + 16.0, header.center().y), Align2::LEFT_CENTER, &track.name, FontId::proportional(13.0), name_color);
+    let name_color = if track.muted {
+        theme::DIM_TEXT
+    } else {
+        theme::TEXT
+    };
+    painter.text(
+        pos2(header.left() + 16.0, header.center().y),
+        Align2::LEFT_CENTER,
+        &track.name,
+        FontId::proportional(13.0),
+        name_color,
+    );
     let mute_fill = if track.muted {
         theme::PLAYHEAD.gamma_multiply(0.8)
     } else if mute_response.hovered() {
@@ -437,13 +660,31 @@ fn track_header(
         Color32::from_white_alpha(10)
     };
     painter.rect_filled(mute_rect, 3.0, mute_fill);
-    painter.text(mute_rect.center(), Align2::CENTER_CENTER, "M", FontId::proportional(11.0), theme::TEXT);
+    painter.text(
+        mute_rect.center(),
+        Align2::CENTER_CENTER,
+        "M",
+        FontId::proportional(11.0),
+        theme::TEXT,
+    );
 
     if mute_response.clicked() {
         let mut after = track.clone();
         after.muted = !after.muted;
-        let label = if after.muted { "Mute track" } else { "Unmute track" };
-        doc.apply(label, Edit::Track { id, before: track, after }, false);
+        let label = if after.muted {
+            "Mute track"
+        } else {
+            "Unmute track"
+        };
+        doc.apply(
+            label,
+            Edit::Track {
+                id,
+                before: track,
+                after,
+            },
+            false,
+        );
     } else if header_response.clicked() {
         *selection = Selection::Track(id);
     }
@@ -487,9 +728,17 @@ fn track_lane(
         // Motion clips are solid with their blend envelope; imported events are drawn as
         // an outlined band since they don't (yet) change the pose.
         let base = theme::track_color(track_index);
-        let fill = if props.enabled { base } else { base.gamma_multiply(0.3) };
+        let fill = if props.enabled {
+            base
+        } else {
+            base.gamma_multiply(0.3)
+        };
         if is_motion {
-            painter.rect_filled(r, 4.0, fill.gamma_multiply(if selected { 0.95 } else { 0.7 }));
+            painter.rect_filled(
+                r,
+                4.0,
+                fill.gamma_multiply(if selected { 0.95 } else { 0.7 }),
+            );
             let (top, bottom) = (r.top() + 3.0, r.bottom() - 2.0);
             let held = bottom - (bottom - top) * props.weight.clamp(0.0, 1.0);
             let envelope = vec![
@@ -498,7 +747,10 @@ fn track_lane(
                 pos2(to_x((props.end() - props.blend_out) as f32), held),
                 pos2(x1, bottom),
             ];
-            painter.add(Shape::line(envelope, Stroke::new(1.5_f32, Color32::from_white_alpha(120))));
+            painter.add(Shape::line(
+                envelope,
+                Stroke::new(1.5_f32, Color32::from_white_alpha(120)),
+            ));
         } else {
             painter.rect_filled(r, 4.0, fill.gamma_multiply(0.22));
             painter.rect_stroke(r, 4.0, Stroke::new(1.0_f32, fill), StrokeKind::Inside);
@@ -508,12 +760,26 @@ fn track_lane(
             Align2::LEFT_CENTER,
             &props.name,
             FontId::proportional(12.0),
-            if props.enabled { Color32::WHITE } else { theme::DIM_TEXT },
+            if props.enabled {
+                Color32::WHITE
+            } else {
+                theme::DIM_TEXT
+            },
         );
         if selected {
-            painter.rect_stroke(r, 4.0, Stroke::new(2.0_f32, theme::SELECTED), StrokeKind::Inside);
+            painter.rect_stroke(
+                r,
+                4.0,
+                Stroke::new(2.0_f32, theme::SELECTED),
+                StrokeKind::Inside,
+            );
         } else if response.hovered() {
-            painter.rect_stroke(r, 4.0, Stroke::new(1.0_f32, Color32::from_white_alpha(80)), StrokeKind::Inside);
+            painter.rect_stroke(
+                r,
+                4.0,
+                Stroke::new(1.0_f32, Color32::from_white_alpha(80)),
+                StrokeKind::Inside,
+            );
         }
 
         if response.hovered() {
@@ -525,17 +791,37 @@ fn track_lane(
             }
         }
         if response.drag_started() {
-            state.drag = Some(Drag::Clip { id, origin: props.start, travel: 0.0 });
+            state.drag = Some(Drag::Clip {
+                id,
+                origin: props.start,
+                travel: 0.0,
+            });
         }
         if response.dragged() {
             ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
-            if let Some(Drag::Clip { id: dragged, origin, travel }) = &mut state.drag {
+            if let Some(Drag::Clip {
+                id: dragged,
+                origin,
+                travel,
+            }) = &mut state.drag
+            {
                 if *dragged == id {
                     *travel += response.drag_delta().x;
                     let start = *origin + (*travel / view.px_per_frame).round() as i32;
                     if start != props.start {
-                        let after = ClipProps { start, ..props.clone() };
-                        doc.apply("Move clip", Edit::ClipProps { clip: id, before: props.clone(), after }, true);
+                        let after = ClipProps {
+                            start,
+                            ..props.clone()
+                        };
+                        doc.apply(
+                            "Move clip",
+                            Edit::ClipProps {
+                                clip: id,
+                                before: props.clone(),
+                                after,
+                            },
+                            true,
+                        );
                     }
                 }
             }
@@ -550,10 +836,32 @@ fn track_lane(
                 actions.push(Action::DuplicateClip);
                 ui.close_menu();
             }
-            if ui.button(if props.enabled { "Disable Clip" } else { "Enable Clip" }).clicked() {
-                let after = ClipProps { enabled: !props.enabled, ..props.clone() };
-                let label = if after.enabled { "Enable clip" } else { "Disable clip" };
-                doc.apply(label, Edit::ClipProps { clip: id, before: props.clone(), after }, false);
+            if ui
+                .button(if props.enabled {
+                    "Disable Clip"
+                } else {
+                    "Enable Clip"
+                })
+                .clicked()
+            {
+                let after = ClipProps {
+                    enabled: !props.enabled,
+                    ..props.clone()
+                };
+                let label = if after.enabled {
+                    "Enable clip"
+                } else {
+                    "Disable clip"
+                };
+                doc.apply(
+                    label,
+                    Edit::ClipProps {
+                        clip: id,
+                        before: props.clone(),
+                        after,
+                    },
+                    false,
+                );
                 ui.close_menu();
             }
             if ui.button("Delete Clip").clicked() {
@@ -576,17 +884,38 @@ fn channel_header(
     clip: ClipId,
     channel: usize,
 ) {
-    let Some(ch) = doc.project.clip(clip).and_then(|c| c.channels.get(channel)) else { return };
+    let Some(ch) = doc.project.clip(clip).and_then(|c| c.channels.get(channel)) else {
+        return;
+    };
     let selected = selection.channel() == Some((clip, channel));
-    painter.rect_filled(header, 0.0, if selected { theme::ACCENT.gamma_multiply(0.18) } else { theme::CHANNEL_BG });
+    painter.rect_filled(
+        header,
+        0.0,
+        if selected {
+            theme::ACCENT.gamma_multiply(0.18)
+        } else {
+            theme::CHANNEL_BG
+        },
+    );
     painter.text(
         pos2(header.left() + 22.0, header.center().y),
         Align2::LEFT_CENTER,
         format!("{} · {}", ch.joint, ch.property.label()),
         FontId::proportional(11.5),
-        if selected { theme::TEXT } else { theme::DIM_TEXT },
+        if selected {
+            theme::TEXT
+        } else {
+            theme::DIM_TEXT
+        },
     );
-    if ui.interact(visible, ui.id().with(("channel_header", clip, channel)), Sense::click()).clicked() {
+    if ui
+        .interact(
+            visible,
+            ui.id().with(("channel_header", clip, channel)),
+            Sense::click(),
+        )
+        .clicked()
+    {
         *selection = Selection::Channel { clip, channel };
     }
 }
@@ -606,25 +935,39 @@ fn channel_lane(
     clip_id: ClipId,
     channel: usize,
 ) {
-    let Some(clip) = doc.project.clip(clip_id) else { return };
-    let Some(ch) = clip.channels.get(channel) else { return };
+    let Some(clip) = doc.project.clip(clip_id) else {
+        return;
+    };
+    let Some(ch) = clip.channels.get(channel) else {
+        return;
+    };
     let start = clip.props.start;
     let keys: Vec<Keyframe> = ch.keys.clone();
     let to_x = |frame: f32| view.frame_to_x(frame, lanes_left);
 
     // Faint band showing the clip's extent on this row.
-    let band = Rect::from_x_y_ranges(to_x(start as f32)..=to_x(clip.props.end() as f32), (lane.top() + 3.0)..=(lane.bottom() - 3.0));
+    let band = Rect::from_x_y_ranges(
+        to_x(start as f32)..=to_x(clip.props.end() as f32),
+        (lane.top() + 3.0)..=(lane.bottom() - 3.0),
+    );
     painter.rect_filled(band, 2.0, Color32::from_white_alpha(8));
 
     if lane_response.double_clicked() {
         if let Some(pos) = lane_response.interact_pointer_pos() {
             let local = view.x_to_frame(pos.x, lanes_left).round() as i32 - start;
             if doc.insert_key(clip_id, channel, local) {
-                *selection = Selection::Key { clip: clip_id, channel, frame: local };
+                *selection = Selection::Key {
+                    clip: clip_id,
+                    channel,
+                    frame: local,
+                };
             }
         }
     } else if lane_response.clicked() {
-        *selection = Selection::Channel { clip: clip_id, channel };
+        *selection = Selection::Channel {
+            clip: clip_id,
+            channel,
+        };
     }
 
     for key in keys {
@@ -636,34 +979,91 @@ fn channel_lane(
         // A dragged key keeps the widget id it started with, so egui doesn't lose the
         // drag when the key's frame changes underneath it.
         let id_frame = match &state.drag {
-            Some(Drag::Key { clip, channel: c, origin, current, .. })
-                if *clip == clip_id && *c == channel && *current == key.frame => *origin,
+            Some(Drag::Key {
+                clip,
+                channel: c,
+                origin,
+                current,
+                ..
+            }) if *clip == clip_id && *c == channel && *current == key.frame => *origin,
             _ => key.frame,
         };
         let response = ui
-            .interact(hit, ui.id().with(("key", clip_id, channel, id_frame)), Sense::click_and_drag())
+            .interact(
+                hit,
+                ui.id().with(("key", clip_id, channel, id_frame)),
+                Sense::click_and_drag(),
+            )
             .on_hover_text(format!("frame {} · {:.3}", key.frame, key.value));
-        let selected = *selection == Selection::Key { clip: clip_id, channel, frame: key.frame };
-        let s = if response.hovered() || selected { KEY_SIZE + 1.0 } else { KEY_SIZE };
-        let diamond = vec![center + vec2(0.0, -s), center + vec2(s, 0.0), center + vec2(0.0, s), center + vec2(-s, 0.0)];
-        let fill = if selected { theme::SELECTED } else { theme::KEY };
-        painter.add(Shape::convex_polygon(diamond, fill, Stroke::new(1.0_f32, Color32::from_black_alpha(160))));
+        let selected = *selection
+            == Selection::Key {
+                clip: clip_id,
+                channel,
+                frame: key.frame,
+            };
+        let s = if response.hovered() || selected {
+            KEY_SIZE + 1.0
+        } else {
+            KEY_SIZE
+        };
+        let diamond = vec![
+            center + vec2(0.0, -s),
+            center + vec2(s, 0.0),
+            center + vec2(0.0, s),
+            center + vec2(-s, 0.0),
+        ];
+        let fill = if selected {
+            theme::SELECTED
+        } else {
+            theme::KEY
+        };
+        painter.add(Shape::convex_polygon(
+            diamond,
+            fill,
+            Stroke::new(1.0_f32, Color32::from_black_alpha(160)),
+        ));
 
         if response.clicked() || response.drag_started() {
-            *selection = Selection::Key { clip: clip_id, channel, frame: key.frame };
+            *selection = Selection::Key {
+                clip: clip_id,
+                channel,
+                frame: key.frame,
+            };
         }
         if response.drag_started() {
-            state.drag = Some(Drag::Key { clip: clip_id, channel, origin: key.frame, current: key.frame, travel: 0.0 });
+            state.drag = Some(Drag::Key {
+                clip: clip_id,
+                channel,
+                origin: key.frame,
+                current: key.frame,
+                travel: 0.0,
+            });
         }
         if response.dragged() {
-            if let Some(Drag::Key { clip, channel: ch_index, origin, current, travel }) = &mut state.drag {
+            if let Some(Drag::Key {
+                clip,
+                channel: ch_index,
+                origin,
+                current,
+                travel,
+            }) = &mut state.drag
+            {
                 if *clip == clip_id && *ch_index == channel && *current == key.frame {
                     *travel += response.drag_delta().x;
                     let target = *origin + (*travel / view.px_per_frame).round() as i32;
-                    let moved = Keyframe { frame: target, ..key.clone() };
-                    if target != *current && doc.replace_key(clip_id, channel, *current, moved, "Move key", true) {
+                    let moved = Keyframe {
+                        frame: target,
+                        ..key.clone()
+                    };
+                    if target != *current
+                        && doc.replace_key(clip_id, channel, *current, moved, "Move key", true)
+                    {
                         *current = target;
-                        *selection = Selection::Key { clip: clip_id, channel, frame: target };
+                        *selection = Selection::Key {
+                            clip: clip_id,
+                            channel,
+                            frame: target,
+                        };
                     }
                 }
             }
@@ -689,24 +1089,49 @@ fn draw_ruler(
 ) {
     let corner = Rect::from_min_max(rect.min, pos2(lanes_left, ruler.bottom()));
     painter.rect_filled(corner, 0.0, theme::RULER_BG);
-    painter.text(pos2(corner.left() + 10.0, corner.center().y), Align2::LEFT_CENTER, "TRACKS", FontId::proportional(10.5), theme::DIM_TEXT);
+    painter.text(
+        pos2(corner.left() + 10.0, corner.center().y),
+        Align2::LEFT_CENTER,
+        "TRACKS",
+        FontId::proportional(10.5),
+        theme::DIM_TEXT,
+    );
     painter.rect_filled(ruler, 0.0, theme::RULER_BG);
 
     let ruler_painter = painter.with_clip_rect(ruler);
     let step = view.tick_step(64.0);
-    let minor = if step >= 5 && step % 5 == 0 { step / 5 } else { (step / 2).max(1) };
+    let minor = if step >= 5 && step % 5 == 0 {
+        step / 5
+    } else {
+        (step / 2).max(1)
+    };
     if minor as f32 * view.px_per_frame >= 5.0 {
         for frame in visible_ticks(view, lanes_left, lane_width, minor) {
             let x = view.frame_to_x(frame as f32, lanes_left);
-            ruler_painter.line_segment([pos2(x, ruler.bottom() - 4.0), pos2(x, ruler.bottom())], Stroke::new(1.0_f32, theme::DIM_TEXT.gamma_multiply(0.5)));
+            ruler_painter.line_segment(
+                [pos2(x, ruler.bottom() - 4.0), pos2(x, ruler.bottom())],
+                Stroke::new(1.0_f32, theme::DIM_TEXT.gamma_multiply(0.5)),
+            );
         }
     }
     for frame in visible_ticks(view, lanes_left, lane_width, step) {
         let x = view.frame_to_x(frame as f32, lanes_left);
-        ruler_painter.line_segment([pos2(x, ruler.bottom() - 9.0), pos2(x, ruler.bottom())], Stroke::new(1.0_f32, theme::DIM_TEXT));
-        ruler_painter.text(pos2(x + 3.0, ruler.top() + 3.0), Align2::LEFT_TOP, frame.to_string(), FontId::monospace(10.5), theme::DIM_TEXT);
+        ruler_painter.line_segment(
+            [pos2(x, ruler.bottom() - 9.0), pos2(x, ruler.bottom())],
+            Stroke::new(1.0_f32, theme::DIM_TEXT),
+        );
+        ruler_painter.text(
+            pos2(x + 3.0, ruler.top() + 3.0),
+            Align2::LEFT_TOP,
+            frame.to_string(),
+            FontId::monospace(10.5),
+            theme::DIM_TEXT,
+        );
     }
-    painter.line_segment([ruler.left_bottom(), ruler.right_bottom()], Stroke::new(1.0_f32, Color32::from_black_alpha(140)));
+    painter.line_segment(
+        [ruler.left_bottom(), ruler.right_bottom()],
+        Stroke::new(1.0_f32, Color32::from_black_alpha(140)),
+    );
 
     let response = ui.interact(ruler, ui.id().with("ruler"), Sense::click_and_drag());
     if response.hovered() {
@@ -719,11 +1144,21 @@ fn draw_playhead(painter: &Painter, rect: Rect, ruler: Rect, x: f32, frame: i32)
     if x < ruler.left() || x > ruler.right() {
         return;
     }
-    let painter = painter.with_clip_rect(Rect::from_min_max(pos2(ruler.left(), rect.top()), rect.max));
-    painter.line_segment([pos2(x, ruler.top()), pos2(x, rect.bottom())], Stroke::new(1.5_f32, theme::PLAYHEAD));
+    let painter =
+        painter.with_clip_rect(Rect::from_min_max(pos2(ruler.left(), rect.top()), rect.max));
+    painter.line_segment(
+        [pos2(x, ruler.top()), pos2(x, rect.bottom())],
+        Stroke::new(1.5_f32, theme::PLAYHEAD),
+    );
     let label = frame.to_string();
     let width = 10.0 + 7.0 * label.len() as f32;
     let tag = Rect::from_min_size(pos2(x - width / 2.0, ruler.top() + 2.0), vec2(width, 15.0));
     painter.rect_filled(tag, 3.0, theme::PLAYHEAD);
-    painter.text(tag.center(), Align2::CENTER_CENTER, label, FontId::monospace(10.5), Color32::BLACK);
+    painter.text(
+        tag.center(),
+        Align2::CENTER_CENTER,
+        label,
+        FontId::monospace(10.5),
+        Color32::BLACK,
+    );
 }

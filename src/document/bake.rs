@@ -14,7 +14,10 @@ const OFFSET_TOLERANCE: f32 = 1e-3;
 /// rest orientation, the position of each root, and the offset of any other joint that
 /// moves. Every frame is keyed, linearly, and rotations stay continuous frame to frame.
 pub fn bake_channels(skeleton: &SkeletonRef, frames: &[Vec<(Quat, Vec3)>]) -> Vec<Channel> {
-    let locals: Vec<Vec<(Quat, Vec3)>> = frames.iter().map(|world| local_transforms(skeleton, world)).collect();
+    let locals: Vec<Vec<(Quat, Vec3)>> = frames
+        .iter()
+        .map(|world| local_transforms(skeleton, world))
+        .collect();
     let rotations = [Property::RotX, Property::RotY, Property::RotZ];
     let positions = [Property::PosX, Property::PosY, Property::PosZ];
     let mut channels = Vec::new();
@@ -32,11 +35,18 @@ pub fn bake_channels(skeleton: &SkeletonRef, frames: &[Vec<(Quat, Vec3)>]) -> Ve
             channels.push(keyed(&joint.name, property, euler.iter().map(|e| e[axis])));
         }
 
-        let offsets: Vec<Vec3> = locals.iter().map(|l| l[j].1 - Vec3::from(joint.offset)).collect();
+        let offsets: Vec<Vec3> = locals
+            .iter()
+            .map(|l| l[j].1 - Vec3::from(joint.offset))
+            .collect();
         let is_root = joint.parent.filter(|&p| p < j).is_none();
         if is_root || offsets.iter().any(|o| o.length() > OFFSET_TOLERANCE) {
             for (axis, property) in positions.into_iter().enumerate() {
-                channels.push(keyed(&joint.name, property, offsets.iter().map(|o| o[axis])));
+                channels.push(keyed(
+                    &joint.name,
+                    property,
+                    offsets.iter().map(|o| o[axis]),
+                ));
             }
         }
     }
@@ -49,7 +59,11 @@ fn keyed(joint: &str, property: Property, values: impl Iterator<Item = f32>) -> 
         property,
         keys: values
             .enumerate()
-            .map(|(frame, value)| Keyframe { frame: frame as i32, value, interp: Interp::Linear })
+            .map(|(frame, value)| Keyframe {
+                frame: frame as i32,
+                value,
+                interp: Interp::Linear,
+            })
             .collect(),
     }
 }
