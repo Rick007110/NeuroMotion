@@ -110,6 +110,7 @@ Some tests are `#[ignore]`d because they need something not in the repository:
 | `export_samples` | Blender, to check the written files | see [docs/export.md](docs/export.md#checking-exports-in-blender) |
 | `trace_stand_in` | nothing; prints a frame-by-frame trace of a physics test scene or an `.ens` file | `NM_TRACE=<name or path> cargo test --release trace_stand_in -- --ignored --nocapture` |
 | `push_sweep` | nothing; prints which chest pushes (1-3 m/s, four ways) a behaviour survives | `NM_SWEEP=<behaviour> cargo test --release push_sweep -- --ignored --nocapture` |
+| `nudge_survey` | nothing; prints how far the numbers the stepping and Car carry tests assert on move when the scenes' speeds are nudged by about 1e-4, as another platform's rounding might | `cargo test --release nudge_survey -- --ignored --nocapture` (`NM_SURVEY=car\|balance\|stagger`, `NM_NUDGES`, `NM_NUDGE_STEP`) |
 
 If you change the physics and have endorphin, please run the ignored tests and say in
 your pull request what changed.
@@ -150,6 +151,9 @@ the solver.
   `physics` never depend on `ui`.
 - Comment *why*, not *what*. Units go in names or comments (N, N·m, kg, radians, frames).
 - Simulation must stay deterministic: the same project gives the same result on every
-  run and every platform. No randomness, no wall-clock time in the physics, no
-  iteration over hash maps where order matters.
+  run of the same build on the same machine. No randomness, no wall-clock time in the
+  physics, no iteration over hash maps where order matters. Other platforms can differ
+  in the last bits (their maths libraries round differently), and a chaotic moment
+  can make that a visibly different outcome, so a test mustn't depend on one exact
+  number near a limit (see `nudge_survey` below).
 - Text the user sees is plain, short English, in NeuroMotion's own words.
