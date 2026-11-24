@@ -346,7 +346,7 @@ simulate as if the character went limp.
 
 ## Not yet
 
-- Behaviours beyond Balance and CatchFall (stagger, writhe, …), and stepping.
+- Behaviours beyond Balance, CatchFall, BodyFoetal and Writhe (stagger, …), and stepping.
   endorphin's are vendor-protected, so these need original designs.
 - Sever events are in (cut a joint, or switch its muscle off; `events.md`), but
   endorphin's own option names for them are unverified (`endorphin-formats.md`), and

@@ -110,7 +110,7 @@ Research on how endorphin behaves is in [docs/endorphin-physics.md](docs/endorph
 
 | You want to... | Start in |
 |---|---|
-| Add a behaviour (stagger, writhe, ...) | `physics/behaviour.rs`, `docs/behaviours.md`, a stand-in test in `physics/scenes.rs` |
+| Add a behaviour (stagger, ...) | `physics/behaviour.rs`, `docs/behaviours.md`, a stand-in test in `physics/scenes.rs` |
 | Add a physics event type | `document/events.rs`, `physics/sim.rs`, `ui/event_inspector.rs`, `docs/events.md` |
 | Fix how an endorphin file imports | `io/endorphin.rs`, `docs/endorphin-formats.md` |
 | Add an export format | `io/motion.rs` and a new module next to `bvh.rs` |
