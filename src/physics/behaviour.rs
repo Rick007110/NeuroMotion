@@ -1,5 +1,6 @@
 //! Behaviours: controllers that read a simulated character's state every physics tick
-//! and set its muscle targets and strengths, like endorphin's balance and catch fall.
+//! and set its muscle targets and strengths, like endorphin's balance, stagger and catch
+//! fall.
 //! endorphin's own behaviours are vendor-protected; these are original designs, run for
 //! imported behaviour events of the same name. Design notes: docs/behaviours.md.
 //!
@@ -10,12 +11,13 @@ use glam::{Quat, Vec3};
 
 use super::sim::rig_bodies;
 use super::world::{Body, Joint, World};
-use crate::document::physics::{Gains, MuscleGains, PhysicsRig};
+use crate::document::physics::{Gains, Geometry, MuscleGains, PhysicsRig};
 use crate::document::{Pose, SkeletonRef, world_transforms};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Behaviour {
-    /// Keep the centre of mass over the feet (ankle strategy), pelvis upright.
+    /// Keep the centre of mass over the feet (ankle strategy), stepping when they
+    /// can't hold it; pelvis upright.
     Balance,
     /// Reach both arms towards where the chest will land; let the legs give.
     CatchFall,
@@ -23,6 +25,8 @@ pub enum Behaviour {
     BodyFoetal,
     /// Struggle weakly around a half-curled pose, with slowly wandering targets.
     Writhe,
+    /// Balance that steps to keep up with a push, with a looser trunk.
+    Stagger,
 }
 
 impl Behaviour {
@@ -39,6 +43,7 @@ impl Behaviour {
             "catchfall" => Some(Behaviour::CatchFall),
             "bodyfoetal" | "bodyfetal" | "foetal" | "fetal" => Some(Behaviour::BodyFoetal),
             "writhe" => Some(Behaviour::Writhe),
+            "stagger" => Some(Behaviour::Stagger),
             _ => None,
         }
     }
@@ -49,6 +54,7 @@ impl Behaviour {
             Behaviour::CatchFall => catch_fall(d),
             Behaviour::BodyFoetal => body_foetal(d),
             Behaviour::Writhe => writhe(d),
+            Behaviour::Stagger => stagger(d),
         }
     }
 }
@@ -69,9 +75,15 @@ pub struct Layout {
     /// The pelvis's up and sideways directions in its own frame (world up and X at rest).
     pelvis_up: Vec3,
     pelvis_side: Vec3,
+    /// The direction the character faces, in the pelvis's frame (where the toes point).
+    pelvis_forward: Vec3,
     /// The trunk body the arms hang from.
     chest: Option<usize>,
     legs: Vec<Limb>,
+    /// The sole of each leg's foot, in the same order.
+    feet: Vec<Foot>,
+    /// Each leg's side, flat, in the pelvis's frame: from the pelvis out to its hip.
+    outward: Vec<Vec3>,
     arms: Vec<Limb>,
     /// Rig joint moving each body.
     joint_of: Vec<Option<usize>>,
@@ -207,13 +219,72 @@ impl Layout {
         }
         let pelvis_up = rest[pelvis].0.inverse() * Vec3::Y;
         let pelvis_side = rest[pelvis].0.inverse() * Vec3::X;
-        // Forwards is where the feet point: from each ankle to its foot's centre.
-        let fwd = legs
+
+        // Each foot's sole: the lowest points of its collision shapes and those of the
+        // bodies beyond it (toes), within 2 cm of the lowest, in the foot's own frame.
+        let (mut feet, toes): (Vec<Foot>, Vec<Vec3>) = legs
             .iter()
-            .map(|l| flat(at(l.end) - pivot(l.end)))
-            .sum::<Vec3>()
-            .try_normalize()
-            .unwrap_or(Vec3::Z);
+            .map(|leg| {
+                let mut bodies = vec![leg.end];
+                let mut i = 0;
+                while i < bodies.len() && bodies.len() <= n {
+                    for &c in &children[bodies[i]] {
+                        if !bodies.contains(&c) {
+                            bodies.push(c);
+                        }
+                    }
+                    i += 1;
+                }
+                let mut points: Vec<Vec3> = bodies
+                    .iter()
+                    .flat_map(|&b| {
+                        let (r, p) = rest[b];
+                        rig.bodies[b].shapes.iter().flat_map(move |s| {
+                            let sr = r * Quat::from_array(s.frame.rotation).normalize();
+                            let sp = p + r * Vec3::from(s.frame.position);
+                            shape_bottom(s.geometry, sr, sp)
+                        })
+                    })
+                    .collect();
+                if points.is_empty() {
+                    points.push(at(leg.end));
+                }
+                let lowest = points.iter().map(|p| p.y).fold(f32::MAX, f32::min);
+                points.retain(|p| p.y < lowest + 0.02);
+                let (fr, fp) = rest[leg.end];
+                let ankle = pivot(leg.end);
+                let centre = points.iter().sum::<Vec3>() / points.len() as f32;
+                let foot = Foot {
+                    sole: points.iter().map(|&q| fr.inverse() * (q - fp)).collect(),
+                    bodies,
+                    up: fr.inverse() * Vec3::Y,
+                    ankle_height: ankle.y - lowest,
+                    forward: Vec3::ZERO,
+                };
+                (foot, flat(centre - ankle))
+            })
+            .unzip();
+        // Which way the character faces: where its toes point (both feet together), so
+        // it doesn't depend on how the rig is turned at rest. Feet centred under their
+        // ankles don't say; then the rig is taken to face +Z with its left at +X, as
+        // the pelvis's sideways direction already assumes.
+        let toes = toes.iter().sum::<Vec3>();
+        let forward = if toes.length() > 0.02 {
+            toes.normalize()
+        } else {
+            (rest[pelvis].0 * pelvis_side)
+                .cross(Vec3::Y)
+                .normalize_or(Vec3::Z)
+        };
+        let pelvis_forward = rest[pelvis].0.inverse() * forward;
+        for (foot, leg) in feet.iter_mut().zip(&legs) {
+            foot.forward = rest[leg.end].0.inverse() * forward;
+        }
+        let outward = legs
+            .iter()
+            .map(|l| rest[pelvis].0.inverse() * flat(pivot(l.upper) - at(pelvis)))
+            .collect();
+        let fwd = forward;
         let bend = Vec3::Y.cross(fwd);
         let rest_rel = (0..n)
             .map(|b| {
@@ -232,12 +303,63 @@ impl Layout {
             pelvis,
             pelvis_up,
             pelvis_side,
+            pelvis_forward,
             chest,
             legs,
+            feet,
+            outward,
             arms,
             joint_of,
         })
     }
+
+    /// Every body of the rig except the legs and feet (toes included): pelvis, trunk,
+    /// head and arms.
+    fn upper_body(&self, n: usize) -> impl Iterator<Item = usize> + '_ {
+        (0..n).filter(|b| {
+            !self.legs.iter().any(|l| [l.upper, l.lower].contains(b))
+                && !self.feet.iter().any(|f| f.bodies.contains(b))
+        })
+    }
+}
+
+/// The points of a collision shape that could touch the ground below it (at rest).
+fn shape_bottom(geometry: Geometry, rotation: Quat, at: Vec3) -> Vec<Vec3> {
+    match geometry {
+        Geometry::Sphere { radius } => vec![at - Vec3::Y * radius],
+        Geometry::Capsule { radius, length } | Geometry::Cylinder { radius, length } => {
+            let half = rotation * Vec3::Z * (length * 0.5);
+            vec![at + half - Vec3::Y * radius, at - half - Vec3::Y * radius]
+        }
+        Geometry::Box { size } => {
+            let h = Vec3::from(size) * 0.5;
+            let mut corners = Vec::with_capacity(8);
+            for x in [-h.x, h.x] {
+                for y in [-h.y, h.y] {
+                    for z in [-h.z, h.z] {
+                        corners.push(at + rotation * Vec3::new(x, y, z));
+                    }
+                }
+            }
+            corners
+        }
+    }
+}
+
+/// A foot's shape, for stepping: where it touches the ground, measured at rest.
+#[derive(Clone, Debug)]
+struct Foot {
+    /// Sole points in the foot body's frame.
+    sole: Vec<Vec3>,
+    /// The foot body and those beyond it (toes).
+    bodies: Vec<usize>,
+    /// World up in the foot's frame at rest (the foot is flat then).
+    up: Vec3,
+    /// Height of the ankle above the sole, standing flat, m.
+    ankle_height: f32,
+    /// The way the character faces, in the foot's frame (at rest, it stands with its
+    /// feet pointing that way).
+    forward: Vec3,
 }
 
 /// A behaviour's view of one character for one tick: its bodies and joints in the world,
@@ -354,6 +476,204 @@ impl Drive<'_> {
     fn all_bodies(&self) -> std::ops::Range<usize> {
         0..self.rig.bodies.len()
     }
+
+    /// Where leg `i`'s sole points are in the world.
+    fn sole(&self, i: usize) -> Vec<Vec3> {
+        let foot = self.body(self.layout.legs[i].end);
+        self.layout.feet[i]
+            .sole
+            .iter()
+            .map(|&p| foot.position + foot.rotation * p)
+            .collect()
+    }
+
+    /// The upright pelvis's facing and leg `i`'s outward direction, flat.
+    fn facing(&self, upright: Quat, i: usize) -> (Vec3, Vec3) {
+        let forward = flat(upright * self.layout.pelvis_forward).normalize_or_zero();
+        let outward = flat(upright * self.layout.outward[i]);
+        (forward, outward)
+    }
+
+    fn upright_pelvis(&self) -> Quat {
+        let pelvis = self.body(self.layout.pelvis).rotation;
+        Quat::from_rotation_arc((pelvis * self.layout.pelvis_up).normalize(), Vec3::Y) * pelvis
+    }
+
+    /// The pelvis upright and facing the way foot `i` points. On one leg nothing else
+    /// holds the pelvis's heading: kept as it is, it spins about the stance leg as the
+    /// other swings.
+    fn upright_over_foot(&self, i: usize) -> Quat {
+        let upright = self.upright_pelvis();
+        let foot = self.body(self.layout.legs[i].end).rotation;
+        let toes = flat(foot * self.layout.feet[i].forward);
+        let facing = flat(upright * self.layout.pelvis_forward);
+        match (toes.try_normalize(), facing.try_normalize()) {
+            (Some(toes), Some(facing)) => Quat::from_rotation_arc(facing, toes) * upright,
+            _ => upright,
+        }
+    }
+
+    /// Where leg `i` should put the middle of its foot down (flat), standing on the
+    /// other foot (`stance`, its sole flat), with its own foot's middle now at `from`.
+    ///
+    /// On one foot the body tips about the edge of that foot nearest the capture point,
+    /// and the capture point runs away from that edge exponentially, with time constant
+    /// `fall` (√(height / g)). So the foot aims where the capture point will be when it
+    /// gets there, estimated from how far it has to go, and a little past it. Never
+    /// across the other foot (at least 0.6 hips' width outside it), and within reach.
+    fn step_target(
+        &self,
+        i: usize,
+        stance: &[Vec3],
+        capture: Vec3,
+        from: Vec3,
+        fall: f32,
+        gait: &Gait,
+    ) -> Vec3 {
+        let (_, outward) = self.facing(self.upright_pelvis(), i);
+        let hips = 2.0 * outward.length();
+        let outward = outward.normalize_or_zero();
+        let middle = stance.iter().sum::<Vec3>() / stance.len().max(1) as f32;
+        let edge = closest(stance, capture);
+        let mut target = capture;
+        for _ in 0..2 {
+            let eta = (STEP_TIME + from.distance(target) / FOOT_SPEED).min(MAX_AHEAD);
+            let ahead = edge + (capture - edge) * (eta / fall.max(0.05)).exp();
+            target = ahead + (ahead - middle).normalize_or_zero() * gait.overshoot;
+        }
+        let across = (target - middle).dot(outward);
+        target += outward * (0.6 * hips - across).max(0.0);
+        let hip = flat(self.pivot(self.layout.legs[i].upper));
+        hip + (target - hip).clamp_length_max(0.6 * self.leg_length(i))
+    }
+
+    /// World rotations of leg `i`'s thigh and shin that put its ankle at `ankle_at`, as
+    /// near as the leg reaches from the hip, the knee bending forwards: the triangle of
+    /// thigh, shin and hip-to-ankle.
+    fn bend_leg(&self, i: usize, upright: Quat, ankle_at: Vec3) -> (Quat, Quat) {
+        let leg = self.layout.legs[i];
+        let (hip, knee, ankle) = (
+            self.pivot(leg.upper),
+            self.pivot(leg.lower),
+            self.pivot(leg.end),
+        );
+        let (thigh_len, shin_len) = (hip.distance(knee), knee.distance(ankle));
+        let reach = ankle_at - hip;
+        let span = reach
+            .length()
+            .clamp(0.3 * (thigh_len + shin_len), thigh_len + shin_len);
+        let along = reach.normalize_or(Vec3::NEG_Y);
+        let cos = ((thigh_len.powi(2) + span.powi(2) - shin_len.powi(2))
+            / (2.0 * thigh_len * span))
+            .clamp(-1.0, 1.0);
+        let (forward, _) = self.facing(upright, i);
+        let bend = (forward - along * forward.dot(along)).normalize_or(forward);
+        let knee_at = hip + (along * cos + bend * (1.0 - cos * cos).sqrt()) * thigh_len;
+        let ankle_at = hip + along * span;
+        let thigh = arc(knee - hip, knee_at - hip) * self.body(leg.upper).rotation;
+        let shin = arc(ankle - knee, ankle_at - knee_at) * self.body(leg.lower).rotation;
+        (thigh, shin)
+    }
+
+    fn leg_length(&self, i: usize) -> f32 {
+        let leg = self.layout.legs[i];
+        let (hip, knee, ankle) = (
+            self.pivot(leg.upper),
+            self.pivot(leg.lower),
+            self.pivot(leg.end),
+        );
+        hip.distance(knee) + knee.distance(ankle)
+    }
+
+    /// Damps the muscle moving `b` critically for the limb it swings (`limb`, the bodies
+    /// beyond the joint). The rig's presets are tuned to hold poses against the ground,
+    /// and are several times overdamped for a leg in the air, which then swings too
+    /// slowly to step.
+    fn damp_for_swing(&mut self, b: usize, limb: &[usize]) {
+        let Some(j) = self.layout.joint_of[b] else {
+            return;
+        };
+        let pivot = self.pivot(b);
+        let inertia: f32 = limb
+            .iter()
+            .map(|&l| self.rig.bodies[l].mass * self.body(l).position.distance_squared(pivot))
+            .sum::<f32>()
+            .max(1e-3);
+        let critical = |g: Gains| Gains {
+            damping: g.damping.min(2.0 * (g.stiffness * inertia).sqrt()),
+            ..g
+        };
+        self.gains[j] = MuscleGains {
+            twist: critical(self.gains[j].twist),
+            swing: critical(self.gains[j].swing),
+        };
+    }
+
+    /// Swings leg `i` to put the middle of its foot (now at `sole`, flat) down at
+    /// `target` (flat), on the ground at height `floor`. The foot is lifted
+    /// `CLEARANCE` while it's away from the target and lowered as it gets there, kept
+    /// level. The hip aims the thigh with the pelvis `upright`.
+    fn swing(
+        &mut self,
+        i: usize,
+        upright: Quat,
+        target: Vec3,
+        floor: f32,
+        sole: Vec3,
+        phase: Phase,
+    ) {
+        let leg = self.layout.legs[i];
+        if matches!(phase, Phase::Lift) {
+            // Snatched up hard: the body often still leans on this foot, and a gentle
+            // lift only sinks the hips onto it.
+            self.preset("Strong", 1.0, [leg.upper, leg.lower, leg.end].into_iter());
+        }
+        self.damp_for_swing(leg.upper, &[leg.upper, leg.lower, leg.end]);
+        self.damp_for_swing(leg.lower, &[leg.lower, leg.end]);
+        self.damp_for_swing(leg.end, &[leg.end]);
+        let foot = &self.layout.feet[i];
+        let (hip, ankle) = (self.pivot(leg.upper), self.pivot(leg.end));
+        let length = self.leg_length(i);
+        // Where the ankle goes for the middle of the foot to be over the target.
+        let mut goal = target - (sole - flat(ankle));
+        let away = flat(ankle).distance(goal);
+        let mut lift = CLEARANCE * length * ((away - 0.02) / 0.06).clamp(0.0, 1.0);
+        match phase {
+            // Still on the ground: lift it first, straight up, rather than drag it.
+            Phase::Lift => {
+                goal = flat(ankle);
+                lift = LIFT_OFF * length;
+            }
+            Phase::Carry => {}
+            Phase::Land => {
+                goal = flat(ankle);
+                lift = 0.0;
+            }
+        }
+        // Heights are to the lowest point of the sole, so a tilted foot clears the
+        // ground too; the foot is aimed a centimetre into it so it lands firmly.
+        let low = self.sole(i).iter().map(|p| p.y).fold(f32::MAX, f32::min);
+        let y = floor + (ankle.y - low).max(foot.ankle_height) + lift - 0.01;
+        if matches!(phase, Phase::Land) {
+            // Landing, no further from the hip than the leg reaches the ground, or the
+            // foot hangs in the air short of it.
+            let reach = (length * length - (hip.y - y).powi(2)).max(0.0).sqrt();
+            goal = flat(hip) + (goal - flat(hip)).clamp_length_max(reach);
+        }
+        let (thigh, shin) = self.bend_leg(i, upright, goal.with_y(y));
+        // The foot level, aimed from the shin as it is: aimed from where the shin should
+        // be, the toes drop while the shin lags behind and catch the ground.
+        let (shin_now, foot_now) = (self.body(leg.lower).rotation, self.body(leg.end).rotation);
+        let level = arc(foot_now * foot.up, Vec3::Y) * foot_now;
+        self.aim(leg.upper, upright, thigh);
+        self.aim(leg.lower, thigh, shin);
+        self.aim(leg.end, shin_now, level);
+    }
+}
+
+/// The shortest rotation taking direction `from` to direction `to`.
+fn arc(from: Vec3, to: Vec3) -> Quat {
+    Quat::from_rotation_arc(from.normalize_or(Vec3::NEG_Y), to.normalize_or(Vec3::NEG_Y))
 }
 
 /// Used when a rig has no muscle presets.
@@ -377,34 +697,298 @@ fn flat(v: Vec3) -> Vec3 {
 /// Furthest the centre of mass is asked to lean away from straight over the feet, m.
 const MAX_SHIFT: f32 = 0.15;
 
-/// Balance: an ankle strategy on the capture point, the point where the centre of mass
-/// would come to rest, given its speed (position + velocity × √(height / g)). Both
-/// legs are swung about the ankles to carry the hips back over the middle of the feet,
-/// twice as hard against where the body is heading as against where it is, and the
-/// ankle muscles push the body back. The pelvis is held upright. Sideways, the two legs
-/// and the pelvis make a parallelogram, so the hips aim for the same lean as the ankles
-/// to keep it from folding; fore and aft they only keep the pelvis level, or they'd tip
-/// it. Every muscle is tensed to the rig's "Normal" preset; the knees, trunk and arms
-/// keep the pose the timeline asks for.
+/// What a swinging leg is doing.
+#[derive(Clone, Copy, Debug)]
+enum Phase {
+    /// The foot is still on the ground: lift it.
+    Lift,
+    /// Carry it towards where it should go.
+    Carry,
+    /// Put it down where it is.
+    Land,
+}
+
+/// Least time a step takes, s: lifting the foot and putting it down.
+const STEP_TIME: f32 = 0.1;
+/// How fast a swinging foot travels, m/s, to estimate when it will land.
+const FOOT_SPEED: f32 = 2.0;
+/// Furthest ahead (s) a step looks for where the capture point will be. Looking
+/// further makes long steps that the body then sways back from.
+const MAX_AHEAD: f32 = 0.25;
+
+/// How a balancing behaviour steps.
+struct Gait {
+    /// How far (m) the capture point may leave the planted feet before a step starts.
+    margin: f32,
+    /// How far past where the capture point will be the swing foot is aimed, m.
+    overshoot: f32,
+    /// Strength of the trunk, head and arms, as a fraction of the "Normal" preset.
+    trunk: f32,
+}
+
+/// Balance stands its ground while the ankles can hold it, and steps a little past
+/// the capture point when they can't.
+const BALANCE: Gait = Gait {
+    margin: 0.02,
+    overshoot: 0.05,
+    trunk: 1.0,
+};
+
+/// Stagger steps as soon as the capture point leaves the feet, only as far as it, so
+/// it keeps stepping to keep up with a push, with a looser trunk.
+const STAGGER: Gait = Gait {
+    margin: 0.0,
+    overshoot: 0.0,
+    trunk: 0.35,
+};
+
+/// A foot whose sole is within this height (m) of the lowest sole carries weight.
+const PLANTED: f32 = 0.02;
+
+/// How high a swing foot is carried, as a fraction of the leg's length.
+const CLEARANCE: f32 = 0.1;
+
+/// How high a foot still on the ground is asked to lift, as a fraction of the leg's
+/// length: higher than it is carried, so it comes off the ground quickly.
+const LIFT_OFF: f32 = 0.15;
+
+/// A swinging foot whose step would leave the capture point more than this far (m)
+/// outside the feet can't help: it is put straight down, so the other leg can step.
+const USELESS: f32 = 0.05;
+
+/// Balance: the ankle strategy while the capture point stays over the feet, stepping
+/// when it doesn't (`keep_balance`).
 fn balance(d: &mut Drive) {
-    let legs = d.layout.legs.clone();
-    if legs.len() < 2 {
+    keep_balance(d, &BALANCE);
+}
+
+/// Stagger: balance whose support moves. It steps whenever the capture point leaves
+/// the feet, puts the foot down just where the capture point will be, and lets the
+/// trunk sway.
+fn stagger(d: &mut Drive) {
+    keep_balance(d, &STAGGER);
+}
+
+/// Balance on the capture point (position + velocity × √(height / g)), the point where
+/// the centre of mass would come to rest given its speed.
+///
+/// While it is over the planted feet, the ankle strategy (`ankle_strategy`) pulls the
+/// body back over them, exactly as Balance did before it could step. When it leaves
+/// them by more than the gait's margin, the leg whose step would best cover it swings
+/// (`step_target`, `swing`), while the other leg keeps the ankle strategy over its own
+/// foot. A swinging foot is put down where it is as soon as that would hold the
+/// capture point, or if its step can't. Then it starts again, with another step if the
+/// capture point is still outside the feet. Standing safely on one foot, the other is
+/// put down beside it.
+///
+/// Nothing is remembered between ticks: a foot more than `PLANTED` above the other is
+/// in the air, and the leg in the air is the one stepping. Where a step goes, and
+/// whether one is needed, is worked out afresh from the bodies each tick.
+fn keep_balance(d: &mut Drive, gait: &Gait) {
+    let layout = d.layout;
+    let legs = layout.legs.clone();
+    if legs.len() < 2 || layout.feet.len() < 2 {
         return;
     }
     d.preset("Normal", 1.0, d.all_bodies());
+    if gait.trunk != 1.0 {
+        d.preset("Normal", gait.trunk, layout.upper_body(d.rig.bodies.len()));
+    }
+
+    let soles: Vec<Vec<Vec3>> = (0..2).map(|i| d.sole(i)).collect();
+    let low = |s: &[Vec3]| s.iter().map(|p| p.y).fold(f32::MAX, f32::min);
+    let floor = low(&soles[0]).min(low(&soles[1]));
+    let lift = [low(&soles[0]) - floor, low(&soles[1]) - floor];
+    let planted = lift.map(|l| l < PLANTED);
+    let flat_sole = |i: usize| flats(&soles[i]);
+    let centre = |i: usize| flat(soles[i].iter().sum::<Vec3>() / soles[i].len() as f32);
+
     let g = d.world.gravity.length().max(1.0);
-    let support = d.support();
+    let (com, vel) = d.centre_of_mass();
+    let fall = ((com.y - floor).max(0.3) / g).sqrt();
+    let capture = flat(com + vel * fall);
+    let support: Vec<Vec3> = (0..2).filter(|&i| planted[i]).flat_map(flat_sole).collect();
+
+    if outside(&support, capture) <= gait.margin {
+        if planted[0] == planted[1] {
+            ankle_strategy(d, &legs, d.support());
+            return;
+        }
+        // Safe on one foot: put the other down beside it, hips' width apart.
+        let (swing, stance) = if planted[0] { (1, 0) } else { (0, 1) };
+        let upright = d.upright_over_foot(stance);
+        let (_, out) = d.facing(upright, swing);
+        lean_legs_to(
+            d,
+            &legs[stance..=stance],
+            hip_shift(d, centre(stance)),
+            upright,
+        );
+        let home = centre(stance) + out * 2.0;
+        d.swing(swing, upright, home, floor, centre(swing), Phase::Carry);
+        return;
+    }
+
+    // How far outside the feet the capture point would be after leg `i` stepped to
+    // `target`, the other standing.
+    let miss = |i: usize, target: Vec3| {
+        let moved = target - centre(i);
+        let after: Vec<Vec3> = flat_sole(1 - i)
+            .into_iter()
+            .chain(flat_sole(i).into_iter().map(|p| p + moved))
+            .collect();
+        outside(&after, capture)
+    };
+    let target = |i: usize| d.step_target(i, &flat_sole(1 - i), capture, centre(i), fall, gait);
+    let swing = if planted[0] != planted[1] {
+        usize::from(planted[0])
+    } else {
+        // The leg whose step would cover the capture point; between legs that both
+        // would (to within 3 cm), the one carrying less weight (further from the centre
+        // of mass) or already lifting.
+        let cost = |i: usize| {
+            10.0 * (miss(i, target(i)) - 0.03).max(0.0)
+                - 0.2 * centre(i).distance(flat(com))
+                - lift[i]
+        };
+        usize::from(cost(1) < cost(0))
+    };
+    let stance = 1 - swing;
+    let to = target(swing);
+    let phase = if planted[swing] {
+        Phase::Lift
+    } else {
+        let here: Vec<Vec3> = flat_sole(0).into_iter().chain(flat_sole(1)).collect();
+        if outside(&here, capture) < 0.0 || miss(swing, to) > USELESS {
+            Phase::Land
+        } else {
+            Phase::Carry
+        }
+    };
+    let upright = d.upright_over_foot(stance);
+    lean_legs_to(
+        d,
+        &legs[stance..=stance],
+        hip_shift(d, centre(stance)),
+        upright,
+    );
+    d.swing(swing, upright, to, floor, centre(swing), phase);
+}
+
+/// How far a point (flat) lies outside the convex hull of some points (flat), m;
+/// negative inside.
+fn outside(points: &[Vec3], p: Vec3) -> f32 {
+    let hull = hull(points);
+    match hull.len() {
+        0 => f32::MAX,
+        1 => p.distance(hull[0]),
+        2 => {
+            let (a, b) = (hull[0], hull[1]);
+            let t = ((p - a).dot(b - a) / (b - a).length_squared()).clamp(0.0, 1.0);
+            p.distance(a + (b - a) * t)
+        }
+        n => (0..n)
+            .map(|i| {
+                let (a, b) = (hull[i], hull[(i + 1) % n]);
+                // Anticlockwise in (x, z), the outside is to the right of each edge.
+                let e = b - a;
+                let out = Vec3::new(e.z, 0.0, -e.x).normalize_or_zero();
+                (p - a).dot(out)
+            })
+            .fold(f32::MIN, f32::max),
+    }
+}
+
+/// The point of the convex hull of some points (flat) nearest `p` (flat): `p` itself
+/// if it is inside.
+fn closest(points: &[Vec3], p: Vec3) -> Vec3 {
+    let hull = hull(points);
+    let on_segment = |a: Vec3, b: Vec3| {
+        let t = ((p - a).dot(b - a) / (b - a).length_squared().max(1e-12)).clamp(0.0, 1.0);
+        a + (b - a) * t
+    };
+    match hull.len() {
+        0 => p,
+        1 => hull[0],
+        2 => on_segment(hull[0], hull[1]),
+        _ if outside(&hull, p) <= 0.0 => p,
+        n => (0..n)
+            .map(|i| on_segment(hull[i], hull[(i + 1) % n]))
+            .min_by(|a, b| a.distance(p).total_cmp(&b.distance(p)))
+            .unwrap_or(p),
+    }
+}
+
+fn flats(points: &[Vec3]) -> Vec<Vec3> {
+    points.iter().map(|&p| flat(p)).collect()
+}
+
+/// Convex hull of flat points, in order around it (Andrew's monotone chain).
+fn hull(points: &[Vec3]) -> Vec<Vec3> {
+    let mut sorted = points.to_vec();
+    sorted.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.z.total_cmp(&b.z)));
+    sorted.dedup_by(|a, b| a.distance(*b) < 1e-5);
+    if sorted.len() < 3 {
+        return sorted;
+    }
+    let turn = |o: Vec3, a: Vec3, b: Vec3| (a.x - o.x) * (b.z - o.z) - (a.z - o.z) * (b.x - o.x);
+    let mut hull: Vec<Vec3> = Vec::with_capacity(sorted.len() * 2);
+    for pass in [sorted.clone(), sorted.into_iter().rev().collect()] {
+        let start = hull.len();
+        for p in pass {
+            while hull.len() >= start + 2
+                && turn(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.0
+            {
+                hull.pop();
+            }
+            hull.push(p);
+        }
+        hull.pop();
+    }
+    hull
+}
+
+/// The ankle strategy: both legs (or the stance leg) are swung about the ankles to
+/// carry the hips back over `support`, twice as hard against where the body is heading
+/// as against where it is, and the ankle muscles push the body back. The pelvis is held
+/// upright. Sideways, the two legs and the pelvis make a parallelogram, so the hips aim
+/// for the same lean as the ankles to keep it from folding; fore and aft they only keep
+/// the pelvis level, or they'd tip it. The knees keep the pose the timeline asks for.
+/// Returns the upright pelvis rotation it aims for.
+fn ankle_strategy(d: &mut Drive, legs: &[Limb], support: Vec3) -> Quat {
+    let shift = hip_shift(d, support);
+    lean_legs(d, legs, shift)
+}
+
+/// How far the ankle strategy wants to move the hips to bring the body to rest over
+/// `support`.
+fn hip_shift(d: &Drive, support: Vec3) -> Vec3 {
+    let g = d.world.gravity.length().max(1.0);
     let (com, vel) = d.centre_of_mass();
     let height = (com.y - d.ground()).max(0.3);
     let heading = flat(vel) * (height / g).sqrt();
-    let shift = (support - flat(com) - heading * 2.0).clamp_length_max(MAX_SHIFT);
+    (support - flat(com) - heading * 2.0).clamp_length_max(MAX_SHIFT)
+}
 
-    let pelvis = d.body(d.layout.pelvis).rotation;
-    let upright =
-        Quat::from_rotation_arc((pelvis * d.layout.pelvis_up).normalize(), Vec3::Y) * pelvis;
+/// Leans the legs about the ankles to move the hips by `shift`, pelvis upright.
+fn lean_legs(d: &mut Drive, legs: &[Limb], shift: Vec3) -> Quat {
+    let upright = d.upright_pelvis();
+    lean_legs_to(d, legs, shift, upright);
+    upright
+}
+
+/// Leans the legs about the ankles to move the hips by `shift`, the hips aiming the
+/// pelvis at `upright`.
+fn lean_legs_to(d: &mut Drive, legs: &[Limb], shift: Vec3, upright: Quat) {
     let side = flat(upright * d.layout.pelvis_side).normalize_or_zero();
-    let sideways = side * shift.dot(side);
-    for leg in legs {
+    // On one leg there is no parallelogram, and leaning the thigh would only roll the
+    // pelvis.
+    let sideways = if legs.len() > 1 {
+        side * shift.dot(side)
+    } else {
+        Vec3::ZERO
+    };
+    for &leg in legs {
         let (hip, ankle) = (d.pivot(leg.upper), d.pivot(leg.end));
         let lean = |by: Vec3| {
             Quat::from_rotation_arc((hip - ankle).normalize(), (hip + by - ankle).normalize())
@@ -663,7 +1247,7 @@ mod tests {
         for name in ["BodyFoetal", "body foetal", "Foetal", "fetal", "BodyFetal"] {
             assert_eq!(Behaviour::from_name(name), Some(Behaviour::BodyFoetal));
         }
-        assert_eq!(Behaviour::from_name("Stagger"), None);
+        assert_eq!(Behaviour::from_name("Stagger"), Some(Behaviour::Stagger));
     }
 
     /// A rig whose joints loop (only possible from a malformed file) must not hang.
@@ -679,6 +1263,34 @@ mod tests {
         (back.body, back.parent_body) = (knee, ankle);
         rig.joints.push(back);
         Layout::new(&rig, &skeleton);
+    }
+
+    #[test]
+    fn finds_the_placeholders_feet() {
+        let skeleton = humanoid_skeleton();
+        let rig = humanoid_rig(&skeleton);
+        let layout = Layout::new(&rig, &skeleton).unwrap();
+        // Facing +Z with the left hip at +X: forward is side × up (in the pelvis's frame).
+        let (up, side) = (layout.pelvis_up, layout.pelvis_side);
+        assert!(layout.pelvis_forward.abs_diff_eq(side.cross(up), 1e-4));
+        let left = layout
+            .legs
+            .iter()
+            .position(|l| rig.bodies[l.upper].name == "l_hip")
+            .unwrap();
+        assert!(layout.outward[left].dot(side) > 0.09);
+        assert!(layout.outward[1 - left].dot(side) < -0.09);
+        for foot in &layout.feet {
+            // The foot box's four bottom corners: heel 6 cm behind the ankle, toes
+            // 18 cm ahead, 7 cm below it.
+            assert_eq!(foot.sole.len(), 4);
+            let (heel, toe) = foot
+                .sole
+                .iter()
+                .fold((f32::MAX, f32::MIN), |(h, t), p| (h.min(p.z), t.max(p.z)));
+            assert!((toe - heel - 0.24).abs() < 1e-4, "{heel} {toe}");
+            assert!((foot.ankle_height - 0.07).abs() < 1e-4);
+        }
     }
 
     #[test]
