@@ -19,6 +19,10 @@ pub enum Behaviour {
     Balance,
     /// Reach both arms towards where the chest will land; let the legs give.
     CatchFall,
+    /// Curl up on the side of the trunk: spine, hips and knees folded, arms over the head.
+    BodyFoetal,
+    /// Struggle weakly around a half-curled pose, with slowly wandering targets.
+    Writhe,
 }
 
 impl Behaviour {
@@ -33,6 +37,8 @@ impl Behaviour {
         match key.as_str() {
             "balance" => Some(Behaviour::Balance),
             "catchfall" => Some(Behaviour::CatchFall),
+            "bodyfoetal" | "bodyfetal" | "foetal" | "fetal" => Some(Behaviour::BodyFoetal),
+            "writhe" => Some(Behaviour::Writhe),
             _ => None,
         }
     }
@@ -41,6 +47,8 @@ impl Behaviour {
         match self {
             Behaviour::Balance => balance(d),
             Behaviour::CatchFall => catch_fall(d),
+            Behaviour::BodyFoetal => body_foetal(d),
+            Behaviour::Writhe => writhe(d),
         }
     }
 }
@@ -67,6 +75,16 @@ pub struct Layout {
     arms: Vec<Limb>,
     /// Rig joint moving each body.
     joint_of: Vec<Option<usize>>,
+    /// The trunk chain from the pelvis's trunk branch upwards: spine, chest, neck, head.
+    spine: Vec<usize>,
+    /// Each body's rest rotation relative to the body its joint hangs from.
+    rest_rel: Vec<Quat>,
+    /// Each body's bend axis, up and forward directions in its own frame at rest. Turning
+    /// about the bend axis by +θ moves up towards forward: it bends a trunk forwards, and
+    /// bends a hanging shin's knee; -θ swings a hanging thigh forwards (hip flexion).
+    bend_local: Vec<Vec3>,
+    up_local: Vec<Vec3>,
+    fwd_local: Vec<Vec3>,
 }
 
 impl Layout {
@@ -148,8 +166,10 @@ impl Layout {
             .max_by(|&a, &b| extreme(a, &high).total_cmp(&extreme(b, &high)));
         let mut arms = Vec::new();
         let mut chest = None;
+        let mut trunk_chain = Vec::new();
         if let Some(trunk) = trunk {
             let spine = follow(trunk, &high);
+            trunk_chain = spine.clone();
             let axis = at(pelvis);
             let side = |b: usize| (at(b) - axis).with_y(0.0).length();
             let mut off: Vec<(f32, usize, usize)> = spine
@@ -187,7 +207,28 @@ impl Layout {
         }
         let pelvis_up = rest[pelvis].0.inverse() * Vec3::Y;
         let pelvis_side = rest[pelvis].0.inverse() * Vec3::X;
+        // Forwards is where the feet point: from each ankle to its foot's centre.
+        let fwd = legs
+            .iter()
+            .map(|l| flat(at(l.end) - pivot(l.end)))
+            .sum::<Vec3>()
+            .try_normalize()
+            .unwrap_or(Vec3::Z);
+        let bend = Vec3::Y.cross(fwd);
+        let rest_rel = (0..n)
+            .map(|b| {
+                joint_of[b].map_or(Quat::IDENTITY, |j| {
+                    rest[rig.joints[j].parent_body].0.inverse() * rest[b].0
+                })
+            })
+            .collect();
+        let local = |v: Vec3| (0..n).map(|b| rest[b].0.inverse() * v).collect::<Vec<_>>();
         Some(Layout {
+            spine: trunk_chain,
+            rest_rel,
+            bend_local: local(bend),
+            up_local: local(Vec3::Y),
+            fwd_local: local(fwd),
             pelvis,
             pelvis_up,
             pelvis_side,
@@ -210,6 +251,8 @@ pub struct Drive<'a> {
     pub layout: &'a Layout,
     pub targets: &'a mut [Quat],
     pub gains: &'a mut [MuscleGains],
+    /// Seconds since the behaviour event started.
+    pub elapsed: f32,
 }
 
 impl Drive<'_> {
@@ -248,9 +291,14 @@ impl Drive<'_> {
 
     /// Gains from a named muscle preset (falling back to the rig's first), scaled.
     fn preset(&mut self, name: &str, scale: f32, bodies: impl Iterator<Item = usize>) {
-        let set = self
-            .rig
-            .muscle_set(name)
+        self.preset_of(&[name], scale, bodies);
+    }
+
+    /// Like `preset`, with the first of several names the rig has.
+    fn preset_of(&mut self, names: &[&str], scale: f32, bodies: impl Iterator<Item = usize>) {
+        let set = names
+            .iter()
+            .find_map(|n| self.rig.muscle_set(n))
             .or_else(|| self.rig.muscle_sets.first());
         let scaled = |g: Gains| Gains {
             stiffness: g.stiffness * scale,
@@ -426,6 +474,174 @@ fn catch_fall(d: &mut Drive) {
     }
 }
 
+/// How far the trunk is bent forwards when curled up, in total over all of its joints
+/// (the neck and head included, so the head bows), rad.
+const CURL_SPINE: f32 = 0.9;
+/// Hip flexion and knee bend when curled up, rad (the engine clamps them to the limits).
+const CURL_HIP: f32 = -1.6;
+const CURL_KNEE: f32 = 2.0;
+
+/// How one joint of a chain is turned from its rest pose, in rad: about the character's
+/// bend axis (fore and aft), its forward axis (sideways) and its up axis (twist).
+#[derive(Clone, Copy, Default)]
+struct Turn {
+    bend: f32,
+    side: f32,
+    twist: f32,
+}
+
+impl Drive<'_> {
+    /// Aims a chain of bodies (each hanging from the one before, the first from a body
+    /// with rotation `parent`) at their rest pose turned by `turn` at each joint,
+    /// measured about the rest bend, forward and up axes. Works from the rig's rest
+    /// frames, so it doesn't assume any rest pose.
+    fn pose_chain(&mut self, mut parent: Quat, links: &[(usize, Turn)]) {
+        let layout = self.layout;
+        for &(s, turn) in links {
+            let Some(j) = layout.joint_of[s] else { break };
+            let p = self.rig.joints[j].parent_body;
+            let about = |local: Vec3, angle: f32| {
+                Quat::from_axis_angle((parent * local).normalize_or_zero(), angle)
+            };
+            let child = about(layout.bend_local[p], turn.bend)
+                * about(layout.fwd_local[p], turn.side)
+                * about(layout.up_local[p], turn.twist)
+                * parent
+                * layout.rest_rel[s];
+            self.aim(s, parent, child);
+            parent = child;
+        }
+    }
+
+    /// Aims an arm's segments along directions given as (up, forward, out) weights in
+    /// the chest's frame, one for the upper arm and one for the forearm.
+    fn point_arm(&mut self, arm: Limb, frame: (Vec3, Vec3, Vec3), upper: Vec3, lower: Vec3) {
+        let (up, fwd, out) = frame;
+        let dir = |w: Vec3| (up * w.x + fwd * w.y + out * w.z).try_normalize();
+        let (shoulder, elbow) = (self.pivot(arm.upper), self.pivot(arm.lower));
+        let upper = dir(upper).map_or(self.body(arm.upper).rotation, |want| {
+            Quat::from_rotation_arc((elbow - shoulder).normalize(), want)
+                * self.body(arm.upper).rotation
+        });
+        let lower = dir(lower).map_or(self.body(arm.lower).rotation, |want| {
+            Quat::from_rotation_arc((self.pivot(arm.end) - elbow).normalize(), want)
+                * self.body(arm.lower).rotation
+        });
+        let parent = self.parent_rotation(arm.upper);
+        self.aim(arm.upper, parent, upper);
+        self.aim(arm.lower, upper, lower);
+    }
+
+    /// The chest's up, forward and outwards (towards `arm`'s side) directions now.
+    fn chest_frame(&self, chest: usize, arm: Limb) -> (Vec3, Vec3, Vec3) {
+        let rot = self.body(chest).rotation;
+        let up = (rot * self.layout.up_local[chest]).normalize();
+        let fwd = (rot * self.layout.fwd_local[chest]).normalize();
+        let left = up.cross(fwd);
+        let sign = (self.pivot(arm.upper) - self.body(chest).position).dot(left);
+        (up, fwd, if sign < 0.0 { -left } else { left })
+    }
+
+    /// Aims the whole body at the curled-up pose scaled by `k` (1: fully curled), with
+    /// `wander` added to the targets.
+    fn curl(&mut self, k: f32, wander: Option<Wander>) {
+        let layout = self.layout;
+        let w = |i: usize, amount: f32| wander.map_or(0.0, |w| w.at(i) * amount);
+        let pelvis = self.body(layout.pelvis).rotation;
+        let spine: Vec<(usize, Turn)> = layout
+            .spine
+            .iter()
+            .enumerate()
+            .map(|(i, &s)| {
+                let turn = Turn {
+                    bend: k * CURL_SPINE / layout.spine.len() as f32 + w(i, 0.25),
+                    side: w(i + 8, 0.3),
+                    twist: w(i + 16, 0.2),
+                };
+                (s, turn)
+            })
+            .collect();
+        self.pose_chain(pelvis, &spine);
+        for (l, leg) in layout.legs.iter().enumerate() {
+            let at = 24 + 8 * l;
+            let hip = Turn {
+                bend: k * CURL_HIP + w(at, 0.5),
+                side: w(at + 1, 0.35),
+                twist: 0.0,
+            };
+            let knee = Turn {
+                bend: k * CURL_KNEE + w(at + 2, 0.5),
+                ..Turn::default()
+            };
+            let links = [
+                (leg.upper, hip),
+                (leg.lower, knee),
+                (leg.end, Turn::default()),
+            ];
+            self.pose_chain(pelvis, &links);
+        }
+        let Some(chest) = layout.chest else { return };
+        for (a, &arm) in layout.arms.iter().enumerate() {
+            let at = 48 + 8 * a;
+            let frame = self.chest_frame(chest, arm);
+            // Between hanging down (k = 0) and over the head with the forearm folded
+            // back towards it (k = 1), as (up, forward, out) weights.
+            let sway = |i: usize| Vec3::new(w(i, 0.5), w(i + 1, 0.5), w(i + 2, 0.5));
+            let hang = Vec3::new(-1.0, 0.0, 0.0);
+            let upper = hang.lerp(Vec3::new(0.7, 0.6, 0.4), k) + sway(at);
+            let lower = hang.lerp(Vec3::new(0.2, -0.5, -0.6), k) + sway(at + 3);
+            self.point_arm(arm, frame, upper, lower);
+        }
+    }
+}
+
+/// Slow, deterministic wandering: sines of 0.5 to 1.5 rad/s, a different rate and phase
+/// for each numbered joint motion.
+#[derive(Clone, Copy)]
+struct Wander {
+    elapsed: f32,
+}
+
+impl Wander {
+    fn at(self, i: usize) -> f32 {
+        let rate = 0.5 + ((i * 7) % 11) as f32 * 0.1;
+        (rate * self.elapsed + i as f32 * 2.4).sin()
+    }
+}
+
+/// Body foetal: curl up. The trunk bends forwards by `CURL_SPINE` in all, shared by its
+/// joints so the head bows too; the hips flex by `CURL_HIP` and the knees by `CURL_KNEE`;
+/// the arms go over the head, upper arms forwards, up and out, forearms folded back
+/// towards it. The trunk and hips use the rig's "Strong" preset (else "Normal"), the
+/// rest "Normal". Joint limits clamp the targets, so a rig that can't curl so far
+/// curls as far as it can.
+fn body_foetal(d: &mut Drive) {
+    let layout = d.layout;
+    d.preset("Normal", 1.0, d.all_bodies());
+    d.preset_of(
+        &["Strong", "Normal"],
+        1.0,
+        layout
+            .spine
+            .iter()
+            .copied()
+            .chain(layout.legs.iter().map(|l| l.upper)),
+    );
+    d.curl(1.0, None);
+}
+
+/// Writhe: low-strength targets wandering around a half-curled pose. Every joint motion
+/// follows a slow sine of its own rate and phase of the time since the behaviour began,
+/// so it keeps moving without any randomness. The trunk uses 0.6 of "Normal" and the
+/// limbs 0.3, so the trunk leads and the limbs flail along.
+fn writhe(d: &mut Drive) {
+    let layout = d.layout;
+    d.preset("Normal", 0.3, d.all_bodies());
+    d.preset("Normal", 0.6, layout.spine.iter().copied());
+    let elapsed = d.elapsed;
+    d.curl(0.5, Some(Wander { elapsed }));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -442,7 +658,12 @@ mod tests {
             Behaviour::from_name("catch fall"),
             Some(Behaviour::CatchFall)
         );
-        assert_eq!(Behaviour::from_name("Writhe"), None);
+        assert_eq!(Behaviour::from_name("Writhe"), Some(Behaviour::Writhe));
+        assert_eq!(Behaviour::from_name("writhe"), Some(Behaviour::Writhe));
+        for name in ["BodyFoetal", "body foetal", "Foetal", "fetal", "BodyFetal"] {
+            assert_eq!(Behaviour::from_name(name), Some(Behaviour::BodyFoetal));
+        }
+        assert_eq!(Behaviour::from_name("Stagger"), None);
     }
 
     /// A rig whose joints loop (only possible from a malformed file) must not hang.
