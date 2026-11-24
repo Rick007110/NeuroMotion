@@ -483,6 +483,27 @@ catch, and hold that offset. Heli Leap's jump (a squat, downward pushes on the p
 then a legs-out pose at frames 58-62) doesn't lift its jumper either: the pelvis sinks
 from 0.90 m to 0.52 m over frames 54-62 and the jumper steps off the roof's edge.
 
+19. **(Number to be assigned at integration; "transition end".) A transition's blend
+    includes its last frame.** In Car Hit's 90-112 transition the drawn pose jumped
+    for exactly one frame: the root was at x = -0.65 m at frame 111 (blended), -1.94 m
+    at 112 (the raw simulated pose, lying on the road) and -0.62 m at 113 (animated).
+    The blend covered `start <= frame < end`, but the level only changes to animated
+    after frame `end` is recorded (the step from `end` to `end + 1` is the first
+    with the level animated), so frame `end` was recorded with neither: the full
+    simulated pose, between a blend that had nearly finished and the animation.
+    The blend now covers `start <= frame <= end`; its weight is 1 at `end`, so that
+    frame is the animation, and the bodies still switch one frame later as before.
+    Only recorded joints change, so what undo, the timeline, the viewport and the
+    exports (`io/motion.rs` reads the recorded joints) show is the fixed frames; the
+    solver, the bodies and every other number are untouched.
+
+    `transition_ends_on_the_animation_without_a_pop` uses the Curl hand-back stand-in
+    (a curled character against a standing animation, so a pop is metres): the
+    largest joint move from frame 179 to 180 was 2.35 m against a blend pace of 6.4
+    cm per frame, now 6.5 cm; from 180 to 181, now 0.0, and frame 180 is within 1 mm
+    of the animation. `transition_keeps_bones_whole` still holds (0.04 cm in the
+    transition).
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over
