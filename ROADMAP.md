@@ -81,9 +81,10 @@ NeuroMotion, and we need numbers to prove it.
   arms, crouch, hip and spine bends come within endorphin's uncertainty (10 of 18
   rows, 2 before) and it lands on the floor at 329 (330). Still short: it jumps to
   3.61 m at 233 (3.745 m at 242) because its take-off starts earlier and pushes less,
-  passes the box top at 284 (296), turns further (655° by frame 297, endorphin 523°,
-  466° before), its knees bend 6.5° less in the crouch, and its combo jumps reach
-  0.52 m (1.67 m)
+  passes the box top at 289 (296) and lands at 326 (330), its knees bend 6.5° less in
+  the crouch, and its combo jumps reach 0.93 m (1.67 m). Its flip now turns as
+  endorphin's to frame 297 (524°, endorphin 523°): endorphin's drive fades as the body
+  turns and is shared by the bodies it names (lesson 47)
 - ✅ **Reference measurements**: scenes measured in endorphin (frames, positions,
   angles) and scored against NeuroMotion by a test, `reference_scores`, so "behaves
   like endorphin" is checked, not eyeballed. 71 measurements in eight scenes: Car Hit,
@@ -288,10 +289,10 @@ What moves NeuroMotion closest to endorphin quality now, in order:
    the take-off (swing axes at a sixteenth of the preset, lesson 46) and springs up,
    but 0.13 m too low and 9 frames early: under the legs' first, weaker take-off event
    its knees and ankles straighten more than endorphin's, leaving less for the strong
-   one. Next: why endorphin's knees and ankles hold back there (the rough knee torque
-   in its run stays near 350 N·m), why its knees bend 6.5° further in the crouch, and
-   how it reads the flip drive's negative strength (the trunk now turns 655° by frame
-   297, endorphin's 523°).
+   one. Next: why endorphin's knees hold back there (their torque stays near 350 N·m
+   from frame 192 to 198, like a force limit at 0.44 of the preset's) and its ankles
+   don't push until the feet's own event (lesson 47), and why its knees bend 6.5°
+   further in the crouch.
 3. **The other missing behaviours** in the inventory's order (JumpDive, Jump,
    LandCrouch; Look and Reach and Explosion are done).
 4. **Stepping on endorphin's characters** (Stagger Walk steps and stays up since
