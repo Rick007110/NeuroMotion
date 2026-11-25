@@ -13,7 +13,10 @@ use std::collections::HashMap;
 use glam::{Mat3, Quat, Vec3};
 
 use super::collide::{self, Placed};
+
+mod limb;
 use crate::document::physics::{ContactModel, Gains, Geometry, Interaction, Limits, SpringCap};
+use limb::Articulation;
 
 pub const SUBSTEPS: usize = 4;
 const ITERATIONS: usize = 4;
@@ -40,12 +43,15 @@ const MAX_SPRING_HERTZ: f32 = 30.0;
 
 /// With `SpringCap::Limbs`, a muscle may also be as stiff as this natural frequency on the
 /// whole limb it moves against the rest of the body, if that allows more: a clavicle
-/// holding an arm out, a knee in a crouch holding the body above it. Sequential impulses
-/// solve a muscle with only its joint's two bodies, so this stays well under
-/// `MAX_SPRING_HERTZ`: at 30 Hz Car Hit's pedestrian, curled up on the bonnet, opened a
-/// knee by 6.2 cm; at 10 Hz 2.7 cm, at 5 Hz 2.2 cm (2.9 cm with the two-body cap alone).
-/// Back-Flip-To-Combo crouches as endorphin's does at anything from 3 Hz up.
-const MAX_LIMB_HERTZ: f32 = 5.0;
+/// holding an arm out, a knee in a crouch holding the body above it. Such characters are
+/// solved whole (`limb::Articulation`, lesson N), so the muscle does move the whole limb.
+/// Solved by sequential impulses, which see only a joint's two bodies, the cap had to stay
+/// at 5 Hz: at 30 Hz Car Hit's pedestrian, curled up on the bonnet, opened a knee by
+/// 6.2 cm, and Multi Martial's fingers came 6-28 cm out of their joints. Solved whole,
+/// 30 Hz keeps every sample scene's joints within a centimetre or so; with no cap at all
+/// light bodies the solve leaves to locks and contacts (a gymnast's hands on the rings, a
+/// sword in a hand) come apart, because those are still solved after it, one by one.
+const MAX_LIMB_HERTZ: f32 = 30.0;
 
 /// Stiffest spring (N·m/rad) with a natural frequency of `hertz` on an effective inverse
 /// mass `inv_mass`.
@@ -385,6 +391,9 @@ struct JointRows {
     limb_schur: Option<Mat3>,
     limits: Vec<AngularRow>,
     muscle: Option<MuscleBlock>,
+    /// Solved with the rest of its jointed group as one system (`limb::Articulation`),
+    /// not by sequential impulses.
+    direct: bool,
 }
 
 /// A joint's muscle solved together with its anchor as one 6x6 system, so the muscle
@@ -768,27 +777,31 @@ impl World {
                 }
             }
         }
+        // With whole-limb muscles, every jointed group's joints, muscles and stops are
+        // solved as one system (lesson N).
+        let mut articulations = if self.spring_cap == SpringCap::Limbs {
+            Articulation::build(&sb, &mut joints, joint_soft.bias_rate, h)
+        } else {
+            Vec::new()
+        };
         // Direct solves of the groups, then the contacts, then the direct solves of the
         // groups whose locks close a loop: those have the last word (lesson 25).
         for _ in 0..ITERATIONS {
             solve_drives(&mut sb, &mut drives);
             self.solve_joints(&mut sb, &mut joints, joint_soft, h, true);
-            solve_locks(&mut sb, &mut locks, joint_soft.bias_rate);
-            for late in [false, true] {
-                if late {
-                    self.solve_contacts(&mut sb, &mut contacts, &held, contact_soft, h, true);
-                }
-                solve_groups(
-                    &mut sb,
-                    &mut groups,
-                    &mut joints,
-                    &mut locks,
-                    &mut contacts,
-                    &mut held,
-                    late,
-                    true,
-                );
-            }
+            self.iterate(
+                &mut sb,
+                &mut joints,
+                &mut locks,
+                &mut groups,
+                &mut articulations,
+                &mut contacts,
+                &mut held,
+                joint_soft.bias_rate,
+                contact_soft,
+                h,
+                true,
+            );
         }
         // A lock axis still at its strength after position correction can't keep up: it
         // pulls with all of it, and relaxing leaves it there (lesson 20).
@@ -816,22 +829,19 @@ impl World {
         for _ in 0..RELAX_ITERATIONS {
             solve_drives(&mut sb, &mut drives);
             self.solve_joints(&mut sb, &mut joints, joint_soft, h, false);
-            solve_locks(&mut sb, &mut locks, 0.0);
-            for late in [false, true] {
-                if late {
-                    self.solve_contacts(&mut sb, &mut contacts, &held, contact_soft, h, false);
-                }
-                solve_groups(
-                    &mut sb,
-                    &mut groups,
-                    &mut joints,
-                    &mut locks,
-                    &mut contacts,
-                    &mut held,
-                    late,
-                    false,
-                );
-            }
+            self.iterate(
+                &mut sb,
+                &mut joints,
+                &mut locks,
+                &mut groups,
+                &mut articulations,
+                &mut contacts,
+                &mut held,
+                0.0,
+                contact_soft,
+                h,
+                false,
+            );
         }
         apply_restitution(&mut sb, &mut contacts);
         self.write_velocities(&sb);
@@ -875,6 +885,42 @@ impl World {
         for l in &locks {
             self.lock_cache.insert(l.key, l.impulse);
         }
+    }
+
+    /// One iteration after the joints' sequential impulses: the articulations, the
+    /// locks, the direct solves of the groups, then the contacts, then the
+    /// articulations again, so the joints and muscles of a character have the last
+    /// word over its contacts (lesson N), and last the direct solves of the groups whose
+    /// locks close a loop (lesson 25). Groups solved before the contacts are solved
+    /// again after the articulations, so the locks hold too.
+    #[allow(clippy::too_many_arguments)]
+    fn iterate(
+        &self,
+        sb: &mut [SolverBody],
+        joints: &mut [JointRows],
+        locks: &mut [LockBlock],
+        groups: &mut [LockGroup],
+        articulations: &mut [Articulation],
+        contacts: &mut [ContactRow],
+        held: &mut [bool],
+        lock_bias_rate: f32,
+        contact_soft: Softness,
+        h: f32,
+        use_bias: bool,
+    ) {
+        for a in articulations.iter_mut() {
+            a.solve(sb, joints, use_bias);
+        }
+        solve_locks(sb, locks, lock_bias_rate);
+        solve_groups(sb, groups, joints, locks, contacts, held, false, use_bias);
+        self.solve_contacts(sb, contacts, held, contact_soft, h, use_bias);
+        if !articulations.is_empty() {
+            for a in articulations.iter_mut() {
+                a.solve(sb, joints, use_bias);
+            }
+            solve_groups(sb, groups, joints, locks, contacts, held, false, use_bias);
+        }
+        solve_groups(sb, groups, joints, locks, contacts, held, true, use_bias);
     }
 
     /// A lock axis with a negative strength drives instead of holding: a steady force (N)
@@ -1022,6 +1068,7 @@ impl World {
                 limb_schur,
                 limits: Vec::new(),
                 muscle: None,
+                direct: false,
             };
             self.prepare_limits(joint, h, &mut rows);
             rows.muscle = self.prepare_muscle(joint, h, &rows);
@@ -1170,7 +1217,7 @@ impl World {
         h: f32,
         use_bias: bool,
     ) {
-        for j in joints.iter_mut() {
+        for j in joints.iter_mut().filter(|j| !j.direct) {
             let (a, b) = (j.a, j.b);
             let point_bias = if use_bias {
                 (j.point_error * soft_params.bias_rate).clamp_length_max(MAX_PUSH_SPEED)
