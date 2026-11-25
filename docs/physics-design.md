@@ -2216,6 +2216,114 @@ recordings. That gave two more lessons.
     takes 29-38 steps in all (26-37), its feet moving 2.21-3.48 times Balance's
     (2.15-3.54). The pivoting cap changes none of them.
 
+Measured joint by joint against Back-Flip-To-Combo's export, the trunk gave one more.
+
+46. **endorphin's active poses drive a joint's swing axes as if at a sixteenth of their
+    preset, its twist axis at all of it.** (Number to be assigned at integration.)
+    Back-Flip-To-Combo's trunk and hips bent 9-16° less than endorphin's in the crouch
+    (lesson 41). Compared joint by joint with endorphin's own run (its local rotations
+    against the pose targets NeuroMotion computes), at frame 100, the end of the first
+    pose (strength 0.55; targets: spine 0°, neck 12°), endorphin's lower spine is 7.8°
+    off its target, the upper spine 6.9°, the neck 4.8° (all forward), NeuroMotion's
+    0.1-0.3°. The trunk leans back there, so gravity pulls the other way on it; the
+    pose isn't wrong, the joints give. Fitted by inverse dynamics of everything beyond
+    each joint (point masses; nothing beyond these joints touches anything) as torque
+    = k θ + c θ' against the deflection from the target:
+
+    | Joint, frames | endorphin k / c | NeuroMotion, fitted the same way | Preset × strength |
+    |---|---|---|---|
+    | Spine1, 60-100 | 342 / 38 | 5382 / 540 | 5500 / 550 |
+    | Spine2, 60-100 | 347 / 38 | 5195 / 485 | 5500 / 550 |
+    | Neck, 60-100 | 351 / 31 | 5553 / 540 | 5500 / 550 |
+    | Head, 60-100 | 340 / 32 | (capped at 30 Hz) | 5500 / 550 |
+    | Spine1, 140-188 | 507 / 104 | 6432 / 757 | 8000 / 800 |
+
+    5500 / 16 = 344 and 550 / 16 = 34: four joints with very different inertia beyond
+    them (a 47 kg trunk to a 1.4 kg head) give the same stiffness, so it is a factor,
+    not a frequency cap. These joints bend on their swing axes. The elbows, hinges
+    that turn only about their twist axis, deflect as NeuroMotion's do at the preset
+    (16.7° / 19.9° at frame 120, 10.7° / 9.4° at 160, 7.6° / 7.1° at 185). Nothing in
+    the files says why: the effectors' `Calibration` blocks and both presets give swing
+    and twist the same numbers.
+
+    So imported scenes now drive the swing axes of active poses' muscles with a
+    sixteenth of the preset's stiffness and damping (`pose_swing_share`, a project
+    setting; NeuroMotion's own projects keep 1 and don't change). Other readings, on
+    the six exported scenes plus Trapeze and Balcony (rows within / error sum, each row
+    counted up to 4 uncertainties; Back-Flip-To-Combo's rows within):
+
+    | Reading | All 68 rows | Back-Flip-To-Combo |
+    |---|---|---|
+    | as read (before) | 21 / 159.9 | 2 of 18 |
+    | swing at 1/16 (now) | 29 / 140.1 | 10 of 18 |
+    | swing at 1/8, at 1/32 | | 5, 7 of 18 (the lean or the crouch's guard falls out) |
+    | swing at 1/16, its force limit too | | 3 of 18 |
+    | swing and twist at 1/16 | | 2 of 18: the knees bend 29° too far |
+    | swing at 1/16, twist at 1/2 or 1/4 | | 7 of 18: the crouch's guard fails (0.25, 0.32 m behind the heels) |
+    | swing at 1/16, ball joints' twist too | 29 | 10 of 18, the jump lower (3.57 m at 231) |
+    | swing at 1/16, the base preset's swing too | 27 | Tackle 4 → 2 of 9, Stagger Walk 1 → 0 of 4 |
+
+    With 1/16, the character's pose at frame 100 is endorphin's to about a centimetre
+    (pelvis, chest, neck, head and hands, relative to the heel), its lean -1.6 / -5.4 /
+    -7.0° at frames 44 / 72 / 100 (endorphin -2.3 / -5.3 / -6.4; -3.7 / -6.7 / -7.9
+    before), its left arm -4.3° at 96 (-2.9; +23.9 before), the hip bend 92.6° at 170
+    (90.3; 74.8) and the spine 45.9° at 185 (48.2; 39.0). It jumps to 3.61 m at frame
+    233 (3.745 m at 242; 3.54 m at 224 before), falls past the box top at 284 (296;
+    270) and reaches the floor at 329 (330; 314). Shares of 0.060 and 0.065 move each
+    row by under 0.03 m, 3° and 2 frames (the arm 2.4°).
+
+    What is still open:
+    - **The knees** bend 105° in the crouch, as the pose says; endorphin's 112°, with
+      its shins further forward (the knee 5 cm further over the toes at frame 170). Its
+      ankles reach their dorsiflexion target where NeuroMotion's, now as soft as the
+      other swing joints, sag 6° short of it; the crouch's centre of mass is 0.21 m
+      behind the heels' middle at 192 (endorphin 0.164 ± 0.05, a guard, near its edge).
+      A rough fit of the stance knee (half the torque on everything above both knees)
+      gives endorphin's about 1200 N·m/rad against the preset's 4500, but softer knees
+      put the character further back, not forward (table above).
+    - **The take-off** starts earlier and pushes less. The centre of mass rises at
+      0.75 / 1.68 / 2.68 m/s at frames 196 / 202 / 208 in endorphin's run, 1.64 / 1.64 /
+      2.05 in NeuroMotion's (at most 2.28, at 205). Under the legs' strength-0.8 event
+      (frames 190-205) NeuroMotion's knees straighten from 106° to 79° by 202 and its
+      ankles from 73° to 60°; endorphin's from 109° to 93° and 76° to 71°. The
+      strength-2.5 event at 202 then has less of a stroke left to push through. Tried
+      and not kept: a shortest ease-in of 3, 6 or 10 frames for every pose (3.57-3.63 m,
+      the floor rows worse); the twist's force limit at 0.5 or 0.35 times (3.62 m; the
+      crouch's guard fails). The rough knee torque in endorphin's run sits near 350 N·m
+      from 192 to 198 (NeuroMotion's peaks at 765), which no reading found so far gives.
+    - **Which of two poses on a joint wins.** NeuroMotion takes the one that started
+      last. Letting the higher `priority` number win instead raises the jump to 3.73 m,
+      but it lets the trunk's event (priority 2) take the arms from the arm events
+      (priority 1) at 141-196, and endorphin's elbow at frame 165 is 7° from the arm
+      event's target and 50° from the trunk event's: endorphin's arm events do drive
+      the arms. Letting the lower number win only between poses starting on the same
+      frame (frames 217-243's arms) brings the arms-overhead row within (56.7°,
+      endorphin 60.6 ± 4) but on its edge; not kept.
+    - **The spin.** The trunk now turns -135 / -362 / -655° by frames 240 / 270 / 297
+      (endorphin -118 / -326 / -523; -109 / -297 / -466 before). It turns faster than
+      endorphin's while the flip's -100 N·m drive acts (246-297), though it is less
+      tucked (hips 80° and spine 38° at 270, endorphin's 90° and 50°). How endorphin
+      reads the drive's negative strength (lesson 13) is still the open question; no
+      row measures the turn.
+
+    Stand-in `bent_over` (`a_pose_bends_swing_joints_with_a_sixteenth`): hung by the
+    hips, the placeholder bends spine and chest 12° each and the knees 90° with
+    endorphin's pose preset at strength 0.55. Its trunk leans 18.1° at the full preset
+    and 25.6° at a sixteenth; the knees bend 89.9° either way.
+
+    `reference_scores` (`NM_NUDGES=2`): every guard holds; only Back-Flip-To-Combo moves
+    (21 → 29 of 68 within, the error sum 159.9 → 140.1). Its crouch's height at frame
+    192, the lean at 72, the hip bend at 170 and the spine bend at 185 are now guards.
+    The sample sweep stays 17 of 17 clean, 51 of 51 with gravity scaled by 1 ± 1e-4;
+    the scenes with active poses moved (lowest body / largest stretch / fastest, before
+    → after): Balcony 0.015 → -0.001 m / 0.41 → 0.43 cm / 15.0 → 17.9 m/s, Bridge Escape
+    1.56 → 0.59 m / 0.38 cm / 24.3 → 22.2 m/s (its truck's 22 kg hitch link now ends
+    up with its centre 8 cm inside the bridge at frame 520, touching it, as lesson 45
+    saw in a nudged run), Car Crash 0.18 → 0.23 cm stretch, Gymnast Rings 0.81 → 0.15
+    cm, Heli Leap 0.38 → 0.29 cm, Trapeze -0.007 → 0.015 m, Walk With Gun 0.09 → 0.06
+    cm. NeuroMotion's own projects (stand-ins, `simulations_are_bit_identical_everywhere`,
+    `nudge_survey`, the push tests) are unchanged.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over
@@ -2323,6 +2431,7 @@ What each stand-in reproduces:
 | Arms out | Back-Flip-To-Combo's first pose: a character with clavicles, hung by the hips, poses its arms straight forward over 0.5 s (lesson 27) | arms stay hanging (-89° at frame 120) with the two-body muscle cap | -32° at frame 30, holding at -9° with the limb cap |
 | Virtual reach | A character with clavicles, hung by the hips, poses its arms straight forward at strength 10 with the two-body muscle cap, too weak to hold them; chest-to-hand virtual muscles at 20 N/m, 2 N·s/m and 20 N per unit of strength (lesson 35) | hands 0.28 m from the pose on average over frames 60-120 | 0.05 m, no joint stretched over 0.1 mm; a pose that doesn't name them gives exactly the run without them |
 | Unnamed ankles | Back-Flip-To-Combo's crouch: an event names only the knees and stores the ankles bent 30° (lesson 27) | ankles don't move (0°), knees 59° | ankles 21°, knees 59° |
+| Bent over | Back-Flip-To-Combo's crouch, the trunk's part: hung by the hips, the placeholder bends spine and chest 12° each and the knees 90° with the scene's pose preset (10 000 N·m/rad) at strength 0.55 (lesson 46) | the trunk leans 18.1° (spine to neck) with the preset as read, the knees 89.9° | at a sixteenth for swing axes: 25.6°, the knees 89.9° |
 | Legacy pose | A pose stored as muscle targets (endorphin's `dp.nma` format; a hand-written one) imported and held as an active pose from frame 10 by the placeholder, hung by the hips ([endorphin-formats.md](endorphin-formats.md#muscle-target-poses)) | didn't import | knees 57°, elbows 45°, hips 28° at frame 150 (targets 57°, 46°, 29°) |
 | Head on neck | A head shape that may collide with its parent, inside the neck at rest (lesson 19) | turned 44° against the neck in 1 s | 2.6° |
 | Curl hand-back | Car Hit's hand-back: a character with clavicles curls up on the ground (BodyFoetal), then a 0.75 s transition, overlapping the curl's end, blends it back onto its standing animation (lesson 18) | 16.6 cm (knee) mid-transition | 0.09 cm |
@@ -2377,9 +2486,11 @@ hasn't been re-run against endorphin's scene since.
   lesson 21, or made in NeuroMotion before lesson 26, keeps force-capped friction
   until it is imported again or its `contact` is edited; the app has no setting for
   it yet.
-- Back-Flip-To-Combo's jump and flip: its character crouches as endorphin's does but
-  arches back over the box's edge instead of springing up, and turns about 1.6 times as
-  far as endorphin's by frame 297 (lesson 27).
+- Back-Flip-To-Combo's jump: its character crouches as endorphin's does and springs
+  up and over, but to 3.61 m at frame 233 where endorphin's reaches 3.745 m at 242:
+  its take-off starts earlier and pushes less (lesson 46). Its knees bend 6.5° less
+  in the crouch, and why endorphin's swing muscles act at a sixteenth of their preset
+  is measured, not understood.
 
 ## Improvements planned beyond endorphin
 

@@ -75,16 +75,20 @@ NeuroMotion, and we need numbers to prove it.
   crouch (centre of mass 3.19 m up and 0.155 m behind the heels at frame 192,
   endorphin 3.16 m and 0.164 m; it used to fall back off the box at 213) and it
   springs up and flips, its trunk turning as endorphin's (469° by frame 297, endorphin
-  523°). Still short: it jumps to 3.54 m at 224, 0.2 m lower and 18 frames earlier,
-  lands at 314 (330), and its combo jumps reach 0.56 m (1.67 m). The exact curves
-  show its knees, elbows and ankles following their poses as endorphin's do, but
-  endorphin's trunk and hips bend 9-16° further in the crouch and its take-off
-  starts 3-8 frames later; nothing in the files explains either yet (lesson 41)
+  523°). Measured joint by joint, endorphin's active poses drive swing axes (measured
+  on the spine, neck and head) as if at a sixteenth of their preset and hinges
+  (knees, elbows) at all of it; imported scenes now do the same (lesson 46): the lean,
+  arms, crouch, hip and spine bends come within endorphin's uncertainty (10 of 18
+  rows, 2 before) and it lands on the floor at 329 (330). Still short: it jumps to
+  3.61 m at 233 (3.745 m at 242) because its take-off starts earlier and pushes less,
+  passes the box top at 284 (296), turns further (655° by frame 297, endorphin 523°,
+  466° before), its knees bend 6.5° less in the crouch, and its combo jumps reach
+  0.52 m (1.67 m)
 - ✅ **Reference measurements**: scenes measured in endorphin (frames, positions,
   angles) and scored against NeuroMotion by a test, `reference_scores`, so "behaves
   like endorphin" is checked, not eyeballed. 68 measurements in eight scenes: Car Hit,
   Back-Flip-To-Combo, Tackle, Stagger Walk, Trapeze, Balcony and the Look and Reach
-  and Explosion behaviour scenes; 21 are within endorphin's uncertainty, 10 of them
+  and Explosion behaviour scenes; 29 are within endorphin's uncertainty, 14 of them
   guarded against regressions, and the known gaps print their error so progress shows
   ([details](docs/reference-measurements.md)). 66 are read from endorphin's own runs
   exported as FBX (every joint at every frame, lesson 40; `tools/fbx_motion.py`
@@ -280,19 +284,14 @@ What moves NeuroMotion closest to endorphin quality now, in order:
    (docs/reference-measurements.md). Next: exports (BVH/FBX) of endorphin's own
    results instead of recordings, and more scenes (Tackle, the other sample and
    behaviour scenes).
-2. **Back-Flip-To-Combo's jump** ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)): active poses now apply as endorphin's do and
-   the character crouches; what's left is why endorphin's crouch stays balanced on 25 N
-   toe locks and why its legs straighten in ~8 frames where NeuroMotion's muscles take
-   0.1 s (fitting half the damping and stronger toe locks reproduces the jump, lesson
-   33), and how endorphin reads the negative lock strength of the flip's drive.
-   Imported characters' muscles are now solved with the whole limb they move (lesson
-   38): it takes off and lands on time but still doesn't spring up. On that solve the
-   crouch needs toe locks at least three times their strength in newtons, and the
-   take-off legs that straighten as fast as the trunk (lesson 39). Raising the limb
-   cap now keeps the joints together but moves Car Hit and Stagger Walk away from
-   endorphin, so the next step is finding how endorphin scales its muscle presets
-   (its arms sag far more than the presets allow), not putting locks and contacts
-   into the characters' solve.
+2. **Back-Flip-To-Combo's jump** ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)): it now holds its poses as endorphin's does up to
+   the take-off (swing axes at a sixteenth of the preset, lesson 46) and springs up,
+   but 0.13 m too low and 9 frames early: under the legs' first, weaker take-off event
+   its knees and ankles straighten more than endorphin's, leaving less for the strong
+   one. Next: why endorphin's knees and ankles hold back there (the rough knee torque
+   in its run stays near 350 N·m), why its knees bend 6.5° further in the crouch, and
+   how it reads the flip drive's negative strength (the trunk now turns 655° by frame
+   297, endorphin's 523°).
 3. **The other missing behaviours** in the inventory's order (JumpDive, Jump,
    LandCrouch; Look and Reach and Explosion are done).
 4. **Stepping on endorphin's characters** (Stagger Walk steps and stays up since

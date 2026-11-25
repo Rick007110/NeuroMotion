@@ -150,20 +150,20 @@ repository.
 
 ## What is covered
 
-Run with a level switch acting on the step into its frame (physics-design.md, lesson
-42), 2026-11-25, with `NM_NUDGES=2`:
+Run with active poses bending swing joints at a sixteenth of their preset
+(physics-design.md, lesson 46), 2026-11-25, with `NM_NUDGES=2`:
 
 | Scene | Rows | Within | Guards | Mean error (× uncertainty) |
 |---|---|---|---|---|
 | Car Hit | 20 | 9 | 5 | 1.7 |
-| Back-Flip-To-Combo (#6, the user's own scene) | 18 | 2 | 1 | 2.7 |
+| Back-Flip-To-Combo (#6, the user's own scene) | 18 | 10 | 5 | 1.6 |
 | Tackle (the tackled character) | 9 | 4 | 0 | 1.9 |
 | Hands reach and look at 2.5 (Look and Reach) | 3 | 2 | 1 | 1.4 |
 | Writhe in mid-air 2.5 (Explosion) | 5 | 3 | 3 | 1.2 |
 | Stagger Walk | 4 | 1 | 0 | 3.0 |
 | Trapeze (lesson 43) | 6 | 0 | 0 | 4.0 |
 | Balcony (character01, lesson 43) | 3 | 0 | 0 | 4.0 |
-| In all | 68 | 21 | 10 | |
+| In all | 68 | 29 | 14 | |
 
 66 rows come from endorphin's own runs exported as FBX (lessons 40 and 43); character02's two
 rows in Hands reach and look at still come from a recording (the export holds
@@ -173,12 +173,13 @@ among them a Stagger Walk guard. With locks read in newtons the first 59 rows sc
 within too, with Back-Flip-To-Combo 1 of 18 (3.2) and Tackle 4 of 9 (1.5); before
 lesson 42, Car Hit 10 of 20 (1.9) and Tackle 3 of 9 (2.3). Summed over the six first
 scenes, each row's error in uncertainties (up to 4) went from 129.7 to 123.2 with
-lesson 42. Ways of
+lesson 42; over all eight, lesson 46 took it from 159.9 to 140.1 (21 to 29 rows
+within, all of them Back-Flip-To-Combo's). Ways of
 reading endorphin's numbers scored on the recordings are in lessons 34 and 39. The
 baselines are this run's values; every guard holds over `NM_NUDGES=2`, where every
 row's nudged range is within a frame, 0.1° or 2 cm except Stagger Walk's feet (0.15 to
 0.51 m along x by frame 96) and the top of its neck (-0.08 to -0.02 m by 108), and
-Back-Flip-To-Combo's combo (0.53 to 0.99 m).
+Back-Flip-To-Combo's combo (0.47 to 0.88 m).
 
 The known gaps, with their errors on that run:
 
@@ -187,13 +188,15 @@ The known gaps, with their errors on that run:
   foot sticks to the windscreen's face where endorphin's slides up it (lesson 44); it
   flies 4 cm higher (1.83 m at 70, endorphin 1.79 m at 68; 1.73 m before lesson 42)
   and folds 20° less at the hips.
-- **Back-Flip-To-Combo**: it now crouches as endorphin's does (its centre of mass
-  3.19 m up and 0.155 m behind the heels at frame 192, endorphin 3.16 m and 0.164 m)
-  and springs up off the box, but to 3.54 m at frame 224 where endorphin's reaches
-  3.745 m at 242, with the hips 15° and the arms 28° short at the take-off; it falls
-  past the box top at 270 (296) and reaches the floor at 314 (330). It leans back
-  1.5° more by frame 100, bends its trunk and hips 9-16° less in the crouch, and its
-  combo jump reaches 0.56 m where endorphin's reaches 1.67 m.
+- **Back-Flip-To-Combo**: since lesson 46 it holds its poses as endorphin's does
+  until the take-off (its lean, arms, crouch height, hip and spine bends all within)
+  and springs up off the box, but to 3.61 m at frame 233 where endorphin's reaches
+  3.745 m at 242: its take-off starts earlier and pushes less, with the hips 15° and
+  the arms 10° short of endorphin's reach. It falls past the box top at 284 (296) and
+  reaches the floor at 329 (330). Its knees bend 6.5° less in the crouch, which
+  leaves the crouch's centre of mass 0.21 m behind the heels (0.164 m, a guard near
+  its edge), and its combo jump reaches 0.52 m where endorphin's reaches 1.67 m. No
+  row measures the spin: the trunk turns -655° by frame 297, endorphin's -523°.
 - **Tackle**: the tackled runner goes down later and slower (centre of mass 0.83 m at
   frame 55, endorphin 0.70; head 0.70 m over it at 60, 0.46) and ends up 0.28 m
   further along z (0.53 m before lesson 42). The tackler runs endorphin's Tackle
