@@ -1417,6 +1417,11 @@ fn read_physics_settings(project: &mut Project, scene: Node, engine: Node) {
     // Its feet don't sink into what they stand on: contacts as stiff as the substep
     // allows (lesson 48).
     settings.contact_hertz = 120.0;
+    // Its planted feet don't sink at all: contacts that carry a load are solved rigidly
+    // with the character (lesson 50).
+    settings.rigid_contacts = true;
+    // Its knees push about 400 N·m whatever the pose's strength (lesson 50).
+    settings.pose_twist_limit = Some(0.4);
     settings.ground = (scene.attribute("useDefaultGround") != Some("false")).then(|| Ground {
         height: 0.0,
         material: "tarmac".into(),
@@ -2565,6 +2570,8 @@ mod tests {
         assert_eq!(project.physics.spring_cap, SpringCap::Limbs);
         assert_eq!(project.physics.pose_swing_share, 1.0 / 16.0);
         assert_eq!(project.physics.contact_hertz, 120.0);
+        assert!(project.physics.rigid_contacts);
+        assert_eq!(project.physics.pose_twist_limit, Some(0.4));
     }
 
     /// A virtual muscle (pelvis to heel here) becomes a spring in the rig: the body it

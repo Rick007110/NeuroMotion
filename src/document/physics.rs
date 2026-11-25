@@ -288,9 +288,12 @@ pub struct PhysicsSettings {
     pub spring_cap: SpringCap,
     /// The share of their preset's stiffness and damping active poses drive a joint's
     /// swing axes with (its bend, as opposed to the twist about the bone). endorphin's
-    /// own runs bend their swing joints as if driven at a sixteenth of the preset, its
-    /// hinges (knees, elbows: twist only) at all of it, so imported scenes use 1/16
-    /// (docs/physics-design.md, lesson 46). NeuroMotion's own projects use 1.
+    /// own runs bend their swing joints as if driven at a sixteenth of the preset, so
+    /// imported scenes use 1/16 (docs/physics-design.md, lesson 46). NeuroMotion's own
+    /// projects use 1. The twist axis (all a knee or elbow has) keeps the whole preset
+    /// here, although endorphin's knees and elbows measure at about a quarter of it
+    /// (lesson 49): with a quarter Back-Flip-To-Combo's knees bend as endorphin's but
+    /// its jump falls 0.17 m short, so not yet (lesson 50).
     #[serde(default = "full_share")]
     pub pose_swing_share: f32,
     /// Natural frequency (Hz) of contacts as springs on the bodies they touch, capped at
@@ -301,6 +304,21 @@ pub struct PhysicsSettings {
     /// own projects use 60.
     #[serde(default = "contact_hertz")]
     pub contact_hertz: f32,
+    /// With `SpringCap::Limbs`, solve a character's contacts that carry a load against
+    /// the ground and fixed scenery rigidly, with the rest of its body, instead of as
+    /// springs on the body that touches: a planted foot then doesn't sink at all where
+    /// at 120 Hz it still sank a millimetre or two and tipped the body back. Imported
+    /// scenes use it (lesson 50); NeuroMotion's own projects don't (no whole-body
+    /// solve).
+    #[serde(default)]
+    pub rigid_contacts: bool,
+    /// The force limit of an active pose's twist muscles (a knee's or elbow's only
+    /// axis), as a share of the pose preset's, whatever the pose's strength. endorphin's
+    /// knees push about 400 N·m at strengths 0.63, 0.8 and 2.5 alike (preset 1000 N·m);
+    /// imported scenes use 0.4 (lesson 50). None: the preset's times the strength, as
+    /// for every other muscle (NeuroMotion's own projects).
+    #[serde(default)]
+    pub pose_twist_limit: Option<f32>,
     pub interactions: BTreeMap<String, Interaction>,
     /// `(material, material) -> interaction name`, order-insensitive.
     pub pairs: Vec<(String, String, String)>,
@@ -390,6 +408,8 @@ impl Default for PhysicsSettings {
             spring_cap: SpringCap::Bodies,
             pose_swing_share: 1.0,
             contact_hertz: CONTACT_HERTZ,
+            rigid_contacts: false,
+            pose_twist_limit: None,
             interactions,
             pairs: vec![
                 ("rubber".into(), "tarmac".into(), "Grippy".into()),

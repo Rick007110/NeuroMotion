@@ -151,20 +151,22 @@ repository.
 ## What is covered
 
 Run with active poses bending swing joints at a sixteenth of their preset
-(physics-design.md, lesson 46), drives fading as cos(θ/2) (lesson 47) and imported
-scenes' contacts at 120 Hz (lesson 48), 2026-11-25, with `NM_NUDGES=2`:
+(physics-design.md, lesson 46), drives fading as cos(θ/2) (lesson 47), imported
+scenes' contacts at 120 Hz (lesson 48) and those that carry a load rigid in the
+character's own solve, with active poses' twist muscles limited to 0.4 of their preset
+at any strength (lesson 50), 2026-11-25, with `NM_NUDGES=2`:
 
 | Scene | Rows | Within | Guards | Mean error (× uncertainty) |
 |---|---|---|---|---|
 | Car Hit | 20 | 9 | 5 | 1.8 |
-| Back-Flip-To-Combo (#6, the user's own scene) | 21 | 10 | 5 | 1.3 |
-| Tackle (the tackled character) | 9 | 4 | 0 | 2.1 |
+| Back-Flip-To-Combo (#6, the user's own scene) | 21 | 14 | 5 | 1.3 |
+| Tackle (the tackled character) | 9 | 4 | 0 | 1.9 |
 | Hands reach and look at 2.5 (Look and Reach) | 3 | 2 | 1 | 1.4 |
 | Writhe in mid-air 2.5 (Explosion) | 5 | 3 | 3 | 1.2 |
-| Stagger Walk | 4 | 1 | 0 | 2.9 |
+| Stagger Walk | 4 | 0 | 0 | 3.2 |
 | Trapeze (lesson 43) | 6 | 0 | 0 | 4.0 |
 | Balcony (character01, lesson 43) | 3 | 0 | 0 | 4.0 |
-| In all | 71 | 29 | 14 | |
+| In all | 71 | 32 | 14 | |
 
 69 rows come from endorphin's own runs exported as FBX (lessons 40 and 43); character02's two
 rows in Hands reach and look at still come from a recording (the export holds
@@ -178,14 +180,15 @@ lesson 42; over all eight, lesson 46 took it from 159.9 to 140.1 (21 to 29 rows
 within, all of them Back-Flip-To-Combo's). Three rows on the flip's turn came after
 it (71 rows, the sum 150.4; it would have been 171.0 before lesson 46, where the flip
 turned too little: those rows count at most 4 each either way); lesson 47's drive
-reading took it to 145.0, and lesson 48's stiffer contacts to 140.6. Ways of
+reading took it to 145.0, lesson 48's stiffer contacts to 140.6 and lesson 50's rigid footing to 138.5. Ways of
 reading endorphin's numbers scored on the recordings are in lessons 34 and 39. The
 baselines are this run's values; every guard holds over `NM_NUDGES=2`, where every
-row's nudged range is within a frame, 0.1° or 2 cm except Stagger Walk's feet (-0.67 to
--0.50 m along z and 0.06 to 0.11 m along x by frame 96) and the top of its neck (-0.13
-to -0.02 m by 108), Tackle's lying x (0.79 to 0.82 m), Trapeze's landing and standing
+row's nudged range is within a frame, 0.1° or 2 cm except Stagger Walk's feet (-0.75 to
+-0.49 m along z and 0.02 to 0.23 m along x by frame 96) and the top of its neck (-0.31
+to -0.05 m by 108), Tackle's lying x and z (0.73 to 0.76 m, 1.95 to 2.01 m), the flip's
+turn (within 2°), Trapeze's landing and standing
 (frames 362 to 433, 0.26 to 4.10 m high at 400, 0.19 to 0.34 m at 600: it stays on
-the platform or falls off it) and Back-Flip-To-Combo's combo (0.62 to 0.70 m).
+the platform or falls off it) and Back-Flip-To-Combo's combo (1.00 to 1.10 m).
 
 The known gaps, with their errors on that run:
 
@@ -196,31 +199,33 @@ The known gaps, with their errors on that run:
   and folds 20° less at the hips.
 - **Back-Flip-To-Combo**: since lesson 46 it holds its poses as endorphin's does
   until the take-off (its lean, arms, crouch height, hip and spine bends all within)
-  and springs up off the box; since lesson 48 its feet stay on the box top and the
-  crouch keeps its centre of mass 0.17 m behind the heels (endorphin 0.164 m; 0.21
-  before). It jumps to 3.69 m at frame 236 where endorphin's reaches 3.745 m at 242
-  (3.61 m at 233 before): its take-off pushes in a spike where endorphin's pushes a
-  steady 2.9 kN, with the hips 15° and the arms 10° short of endorphin's reach, and
-  its ankles push where endorphin's are limp (lesson 49). It falls past the box top at
-  292 (296) and reaches the floor at 328 (330). Its knees bend 6.5° less in the
-  crouch, and its combo jump reaches 0.70 m where endorphin's reaches 1.67 m (0.93 m
-  before lesson 48, inside the nudged spread of 0.47 to 0.88 m that row had). With
-  the flip's drive read as lesson 47 found it, the trunk turns -263 / -527 / -655°
-  by frames 260 / 297 / 330 since 190 (endorphin -247 / -523 / -689; -270 / -655 /
-  -863 after lesson 46, -216 / -466 / -593 before it): on time to frame 297, then
-  34° short by 330, where endorphin's flip gains angular momentum with nothing
-  touching it (lesson 49).
+  and springs up off the box; since lesson 50 its planted feet are held rigidly on the
+  box top. It jumps to 3.74 m at frame 239 where endorphin's reaches 3.745 m at 242
+  (3.69 m at 236 with lesson 48's contacts, 3.61 m at 233 before), its lowest body
+  3.58 m up at the top (3.60), falls past the box top at 294 (296) and reaches the
+  floor at 332 (330), all within endorphin's uncertainty. The crouch's height at frame
+  192 is 3.186 m against a bound of 3.188 m (endorphin 3.158 ± 0.03), a guard near its
+  edge: rigid feet hold the crouch 1 cm higher than lesson 48's contacts did. Its
+  knees bend 6.6° less in the crouch, its hips stay 15° and its arms 9° short of
+  endorphin's at the take-off, and its combo jump reaches 1.10 m where endorphin's
+  reaches 1.67 m. The trunk turns -264 / -525 / -653° by frames 260 / 297 / 330
+  since 190 (endorphin -247 / -523 / -689): on time to frame 297, then 35° short by
+  330, where endorphin's flip gains angular momentum with nothing touching it (lessons
+  49 and 50).
 - **Tackle**: the tackled runner goes down later and slower (centre of mass 0.83 m at
-  frame 55, endorphin 0.70; head 0.70 m over it at 60, 0.46) and ends up 0.40 m
-  further along z (0.28 m before lesson 48's contacts, 0.53 m before lesson 42). The tackler runs endorphin's Tackle
+  frame 55, endorphin 0.70; head 0.70 m over it at 60, 0.46) and ends up 0.30 m
+  further along z (0.40 m before lesson 50, 0.28 m before lesson 48's contacts, 0.53 m
+  before lesson 42). The tackler runs endorphin's Tackle
   behaviour, which NeuroMotion doesn't have.
 - **Look and Reach**: character01's arms reach the box at frame 17 (endorphin 14);
   character02's far arm points at the box by frame 29, where endorphin's waits and
   gets there at about 55 (recording).
 - **Explosion**: the arms are highest at frame 16 (endorphin 28) and lowest at 42 (47).
-- **Stagger Walk**: the feet go 0.41 m back by frame 36 (endorphin 0.26 m; 0.59 m
-  before lesson 48) and by 96 only 0.65 m back and 0.07 m along +x (endorphin 1.03 m
-  back, 0.58 m along -x).
+- **Stagger Walk**: the feet go 0.36 m back by frame 36 (endorphin 0.26 m; 0.41 m
+  before lesson 50, 0.59 m before lesson 48) and by 96 only 0.74 m back and 0.02 m
+  along +x (endorphin 1.03 m back, 0.58 m along -x); since lesson 50 the top of its
+  neck ends 0.29 m lower at frame 108 (endorphin 0.04 m, 0.02 m before; -0.31 to
+  -0.05 m over the nudged runs).
   endorphin's steps one foot at a time, five steps from frame 12; NeuroMotion's
   shuffles both feet from the first frame (lesson 44).
 - **Trapeze**: endorphin's acrobat jumps off the platform (JumpDive, which NeuroMotion

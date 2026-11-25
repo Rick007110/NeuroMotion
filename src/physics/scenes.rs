@@ -4295,6 +4295,45 @@ mod tests {
         );
     }
 
+    /// endorphin's knees push about 400 N·m under poses of strength 0.63, 0.8 and 2.5
+    /// alike, a preset of 1000 N·m (lesson 50). The bent-over placeholder held by its
+    /// shins instead of its hips, so its knees carry everything above them, bends them
+    /// towards 90° from frame 10 at strength 2.5: with the limit at the preset times
+    /// the strength (2500 N·m, NeuroMotion's own projects) the knees are bent much
+    /// further four frames later than with 0.4 of the preset (400 N·m, imported scenes).
+    #[test]
+    fn a_pose_twist_limit_does_not_grow_with_strength() {
+        let measure = |limit: Option<f32>| {
+            let mut project = bent_over(1.0 / 16.0);
+            project.physics.pose_twist_limit = limit;
+            for clip in &mut project.clips {
+                if let Some(targets) = clip.source.get_mut("targets") {
+                    *targets = "poser.MetaBodies.l_knee, poser.MetaBodies.r_knee".into();
+                }
+            }
+            project
+                .clips
+                .last_mut()
+                .unwrap()
+                .source
+                .insert("strength".into(), "2.5".into());
+            let sim = check(project.clone());
+            let knee = |f: i32| bend(&project, &sim, f, "l_knee", "l_ankle");
+            (knee(10), knee(14))
+        };
+        let (scaled, fixed) = (measure(None), measure(Some(0.4)));
+        println!(
+            "knees at frames 10 / 14: {:.1}° / {:.1}° with the limit times the strength, \
+             {:.1}° / {:.1}° at 0.4 of the preset",
+            scaled.0, scaled.1, fixed.0, fixed.1
+        );
+        let (moved_scaled, moved_fixed) = (scaled.1 - scaled.0, fixed.1 - fixed.0);
+        assert!(
+            moved_fixed < 0.6 * moved_scaled,
+            "{moved_fixed}° against {moved_scaled}°"
+        );
+    }
+
     /// Active poses bend a swing joint with a sixteenth of the preset in imported scenes,
     /// a twist joint (a hinge) with all of it (lesson 46). Hung by the hips, the
     /// placeholder bends its spine and chest 12° forward each and its knees 90°: at the
@@ -4336,60 +4375,87 @@ mod tests {
         );
     }
 
+    /// The deepest corner of a foot's box below the box top over frames 30-200, m: the
+    /// back flip stand-in left standing on its box with its toes locked, contacts at
+    /// `hertz`, rigid in its whole-body solve if `rigid`.
+    fn planted_foot_sink(hertz: f32, rigid: bool) -> f32 {
+        let mut project = backflip(false);
+        project.physics.contact_hertz = hertz;
+        project.physics.rigid_contacts = rigid;
+        project.settings.range.end = 200;
+        let sim = check(project.clone());
+        let ci = project
+            .characters
+            .iter()
+            .position(|c| c.name == "flipper")
+            .unwrap();
+        let rig = project.characters[ci].physics.as_ref().unwrap();
+        let mut deepest = 0.0f32;
+        for f in 30..=200 {
+            let cf = sim.frame(f).unwrap()[ci].as_ref().unwrap();
+            for (body, &(r, p)) in rig.bodies.iter().zip(&cf.bodies) {
+                if !body.name.contains("ankle") {
+                    continue;
+                }
+                for shape in &body.shapes {
+                    let Geometry::Box { size } = shape.geometry else {
+                        continue;
+                    };
+                    let (sr, sp) = (
+                        Quat::from_array(shape.frame.rotation),
+                        Vec3::from(shape.frame.position),
+                    );
+                    for corner in 0..8 {
+                        let sign = |bit: usize| if corner & bit == 0 { -0.5 } else { 0.5 };
+                        let local =
+                            Vec3::new(size[0] * sign(1), size[1] * sign(2), size[2] * sign(4));
+                        let y = (p + r * (sp + sr * local)).y;
+                        deepest = deepest.max(2.5 - y);
+                    }
+                }
+            }
+        }
+        deepest
+    }
+
     /// A contact is a spring on its body's own mass, so a planted foot carrying the body
     /// sinks into what it stands on: Back-Flip-To-Combo's heels sank 4.5 mm into the box
     /// at 60 Hz, tilting the feet 1.3° about their locked toes and the whole body back
     /// with them, where endorphin's sink 0.5 mm (lesson 48). The back flip stand-in,
     /// left standing on its box with its toes locked: the deepest corner of a foot's box
     /// below the box top over frames 30-200, at 60 Hz (NeuroMotion's own projects) and
-    /// at 120 Hz (imported scenes, as stiff as the substep allows).
+    /// at 120 Hz (as stiff as the substep allows).
     #[test]
     fn stiff_contacts_keep_a_planted_foot_on_top() {
-        let sink = |hertz: f32| {
-            let mut project = backflip(false);
-            project.physics.contact_hertz = hertz;
-            project.settings.range.end = 200;
-            let sim = check(project.clone());
-            let ci = project
-                .characters
-                .iter()
-                .position(|c| c.name == "flipper")
-                .unwrap();
-            let rig = project.characters[ci].physics.as_ref().unwrap();
-            let mut deepest = 0.0f32;
-            for f in 30..=200 {
-                let cf = sim.frame(f).unwrap()[ci].as_ref().unwrap();
-                for (body, &(r, p)) in rig.bodies.iter().zip(&cf.bodies) {
-                    if !body.name.contains("ankle") {
-                        continue;
-                    }
-                    for shape in &body.shapes {
-                        let Geometry::Box { size } = shape.geometry else {
-                            continue;
-                        };
-                        let (sr, sp) = (
-                            Quat::from_array(shape.frame.rotation),
-                            Vec3::from(shape.frame.position),
-                        );
-                        for corner in 0..8 {
-                            let sign = |bit: usize| if corner & bit == 0 { -0.5 } else { 0.5 };
-                            let local =
-                                Vec3::new(size[0] * sign(1), size[1] * sign(2), size[2] * sign(4));
-                            let y = (p + r * (sp + sr * local)).y;
-                            deepest = deepest.max(2.5 - y);
-                        }
-                    }
-                }
-            }
-            deepest
-        };
-        let (soft, stiff) = (sink(60.0), sink(120.0));
+        let (soft, stiff) = (
+            planted_foot_sink(60.0, false),
+            planted_foot_sink(120.0, false),
+        );
         println!(
             "planted foot: deepest {:.1} mm into the box at 60 Hz, {:.1} mm at 120 Hz",
             soft * 1000.0,
             stiff * 1000.0
         );
         assert!(stiff < 0.6 * soft, "{stiff} m against {soft} m");
+    }
+
+    /// At 120 Hz a planted foot still sinks: the contact is a spring on the foot's own
+    /// 1 kg, and the whole-body solve, which has the last word, pushes the foot back in
+    /// after the contact pass (lesson 48). Solved rigidly with the rest of the body
+    /// (imported scenes, lesson 50), the contacts that carry the foot hold it on top.
+    /// The same stand-in as above, at 120 Hz.
+    #[test]
+    fn rigid_contacts_hold_a_planted_foot_on_top() {
+        let (spring, rigid) = (
+            planted_foot_sink(120.0, false),
+            planted_foot_sink(120.0, true),
+        );
+        println!(
+            "planted foot: deepest {:.2} mm into the box as a 120 Hz spring, {:.2} mm rigid",
+            spring * 1000.0,
+            rigid * 1000.0
+        );
+        assert!(rigid < 0.25 * spring, "{rigid} m against {spring} m");
     }
 
     /// A legacy pose's muscle targets drive the joints to their angles as an active

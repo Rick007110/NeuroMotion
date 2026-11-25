@@ -46,6 +46,8 @@ Pretty-printed JSON, chosen over RON because every language and diff tool reads 
       "spring_cap": "bodies",
       "pose_swing_share": 1.0,
       "contact_hertz": 60.0,
+      "rigid_contacts": false,
+      "pose_twist_limit": null,
       "interactions": {
         "Default": { "restitution": 0.2, "friction": 100.0, "adhesion": 0.0, "softness": 0.0 }
       },
@@ -77,7 +79,7 @@ Pretty-printed JSON, chosen over RON because every language and diff tool reads 
   behave; imported scenes get it). A file without it gets `"bodies"`.
 - `physics.pose_swing_share` is the share of their preset's stiffness and damping
   active poses drive a joint's swing (bend) axes with; the twist axis, all a knee or
-  elbow has, always gets the whole preset. `1.0` is the default and what NeuroMotion's
+  elbow has, gets the whole preset. `1.0` is the default and what NeuroMotion's
   own projects use; imported scenes get `0.0625`, as endorphin's own runs bend
   (physics-design.md, lesson 46). A file without it gets `1.0`, so a scene imported and
   saved before keeps simulating as it did; the version stays 2.
@@ -86,6 +88,18 @@ Pretty-printed JSON, chosen over RON because every language and diff tool reads 
   rate (120 Hz at 120 ticks a second). `60.0` is the default and what NeuroMotion's own
   projects use; imported scenes get `120.0`, so a planted foot doesn't sink into what it
   stands on (physics-design.md, lesson 48). A file without it gets `60.0`; the version
+  stays 2.
+- `physics.rigid_contacts`: with `spring_cap` `"limbs"`, a character's contacts that
+  carry a load against the ground and fixed scenery are solved rigidly with the rest of
+  its body instead of as springs, so a planted foot doesn't sink at all
+  (physics-design.md, lesson 50). `false` is the default and what NeuroMotion's own
+  projects use; imported scenes get `true`. A file without it gets `false`; the version
+  stays 2.
+- `physics.pose_twist_limit` is the force limit of an active pose's twist muscles as a
+  share of the pose preset's, whatever the pose's strength, or `null` for the preset's
+  times the strength as every other muscle has. `null` is the default and what
+  NeuroMotion's own projects use; imported scenes get `0.4`, as endorphin's knees push
+  about 400 N·m at any strength (lesson 50). A file without it gets `null`; the version
   stays 2.
 - A character's physics rig may list `virtual_muscles`: springs between two of its
   bodies (endorphin's chest-to-hand and pelvis-to-heel virtual muscles), each with
@@ -105,7 +119,8 @@ Pretty-printed JSON, chosen over RON because every language and diff tool reads 
   file now simulates with Coulomb friction; a file that stores its settings keeps them.
   `rate` is physics ticks per second (each frame is split into `round(rate / fps)` steps,
   at least one); `gravity` is in m/s²; `ground` is `null` for a scene without a ground
-  plane; `contact`, `spring_cap`, `pose_swing_share` and `contact_hertz` are described above; each interaction has `restitution`, `friction`,
+  plane; `contact`, `spring_cap`, `pose_swing_share`, `contact_hertz`, `rigid_contacts`
+  and `pose_twist_limit` are described above; each interaction has `restitution`, `friction`,
   `adhesion` (N) and `softness`; each pair is `[material, material, interaction]`, in
   either order, and unlisted pairs use the `Default` interaction. The editor's Physics
   group on the project page edits all of these (docs/layout.md). Adding the editing needed
