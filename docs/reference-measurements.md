@@ -145,6 +145,13 @@ cap, Look and Reach, Explosion; physics-design.md lessons up to 28), 2026-11-25:
 | Stagger Walk | 4 | 3 | 1 | 0.9 |
 | In all | 36 | 15 | 10 | |
 
+The same numbers again on 2026-11-25 with Back-Flip-To-Combo's take-off lesson added
+(docs only), and over `NM_NUDGES=2`: every row's nudged range is within two frames, 0.1° or
+1 cm of it, except Stagger Walk's. Ways of reading endorphin's numbers that were scored
+on all five scenes (lock strength units, damping, strength as a speed, the drive mode,
+the swing sizes, the limb spring cap) are compared in physics-design.md, the lesson after
+Back-Flip-To-Combo's take-off; none is in yet, so the baselines stay.
+
 The known gaps, with their errors on that run:
 
 - **Car Hit**: the pedestrian flies 0.19 m lower (centre of mass 1.62 m at frame 65,

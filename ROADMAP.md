@@ -66,7 +66,11 @@ NeuroMotion, and we need numbers to prove it.
   lag, so where endorphin's springs up off the box it rotates back over the edge and
   lands behind it at 294, turning too far. Half the damping and three to ten times the
   toe locks' strength make it spring up as endorphin's does, but nothing yet explains
-  either, so neither is in (physics-design.md, lesson N)
+  either, so neither is in (physics-design.md, lesson N). Scored on all five measured
+  scenes, no reading of lock strengths, damping or strength improves every scene; the
+  limb spring cap (a limit of the solver) is the largest lever, lifting Car Hit's flight
+  to 1.74 m at 30 Hz, but tears Multi Martial's fingers, so the solver has to change
+  first (the lesson after it)
 - ✅ **Reference measurements**: scenes measured in endorphin (frames, positions,
   angles) and scored against NeuroMotion by a test, `reference_scores`, so "behaves
   like endorphin" is checked, not eyeballed. 36 measurements in five scenes: Car Hit,
@@ -249,7 +253,10 @@ What moves NeuroMotion closest to endorphin quality now, in order:
    the character crouches; what's left is why endorphin's crouch stays balanced on 25 N
    toe locks and why its legs straighten in ~8 frames where NeuroMotion's muscles take
    0.1 s (fitting half the damping and stronger toe locks reproduces the jump, lesson
-   N), and how endorphin reads the negative lock strength of the flip's drive.
+   N), and how endorphin reads the negative lock strength of the flip's drive. Stiff
+   muscles solved with the whole limb they move, so the limb spring cap can rise
+   without tearing light bodies, would help it and Car Hit's flight together (the
+   lesson after it).
 3. **The other missing behaviours** in the inventory's order (JumpDive, Jump,
    LandCrouch; Look and Reach and Explosion are done).
 4. **Stepping on endorphin's characters** (the spring cap on light pelvises and
