@@ -33,6 +33,13 @@ wheel to zoom, double-click to reset) so the picture isn't cluttered. A small te
 overlay shows the current frame and which clips are contributing and how strongly, so
 you can read the blend without looking away from the motion.
 
+While playing, the playhead is fractional and the viewport draws a pose blended between
+the two neighbouring frames: animated characters are evaluated at the fractional frame,
+and simulated ones blend the cached frames before and after it (positions lerp,
+rotations slerp the short way; `physics::interp`). So a 30 fps scene plays smoothly on a
+60 Hz or faster display. The cache itself is untouched, and clicking or dragging the
+playhead on the timeline still snaps to whole frames, so what you key is a real frame.
+
 **Timeline along the bottom, full width.** Time reads left to right, so the timeline
 benefits more from width than from height. Running it under *both* the viewport and the
 inspector gives the longest possible time axis. Putting it below the viewport also

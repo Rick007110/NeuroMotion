@@ -17,7 +17,7 @@ use crate::document::{
     world_transforms,
 };
 use crate::io::{self, motion};
-use crate::physics::Simulation;
+use crate::physics::{Simulation, interp};
 use crate::timeline::Playback;
 use crate::viewport::{CharacterView, OrbitCamera, Viewport};
 
@@ -146,10 +146,13 @@ impl NeuroMotionApp {
     fn character_views(&self) -> Vec<CharacterView> {
         let project = &self.doc.project;
         let poses = project.evaluate(self.playback.playhead() as f32);
+        // Between whole frames the cached simulation is blended (physics::interp), so
+        // playback on a fast display doesn't step at the scene's frame rate.
         let simulated = self
             .physics_on()
-            .then(|| self.simulation.frame(self.playback.frame()))
+            .then(|| interp::frame_at(&self.simulation, self.playback.playhead()))
             .flatten();
+        let simulated = simulated.as_ref();
         project
             .characters
             .iter()

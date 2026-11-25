@@ -71,6 +71,8 @@ Keep these boundaries: `document`, `timeline` and `physics` must never depend on
   cylinders).
 - `behaviour.rs`: controllers that drive muscles while a character is simulated
   (Balance, Stagger, CatchFall, BodyFoetal, Writhe, Look and Reach, Explosion). New behaviours go here; see [docs/behaviours.md](docs/behaviours.md).
+- `interp.rs`: blends two cached frames for output at a fractional frame (viewport
+  playback, export at a higher rate). Reads the cache, never changes it.
 - `sim.rs`: runs a project through the world frame by frame, following its physics
   events, and caches the results for the timeline.
 - `scenes.rs` (tests only): small test scenes ("stand-ins") that pin down physical

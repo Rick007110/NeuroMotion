@@ -13,6 +13,17 @@ use crate::io::fbx::{self, Encoding};
 use crate::io::motion::{self, Units};
 use crate::physics::Simulation;
 
+/// Output frames per project frame the dialog offers.
+const RATES: [u32; 3] = [1, 2, 4];
+
+fn rate_label(fps: f32, rate: u32) -> String {
+    if rate == 1 {
+        format!("{fps:.0} fps (project rate)")
+    } else {
+        format!("{:.0} fps ({rate}\u{d7}, interpolated)", fps * rate as f32)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
     Bvh,
@@ -40,6 +51,8 @@ pub struct ExportDialog {
     character: CharacterId,
     units: Units,
     encoding: Encoding,
+    /// Output frames per project frame (1, 2 or 4).
+    rate: u32,
 }
 
 impl NeuroMotionApp {
@@ -57,15 +70,18 @@ impl NeuroMotionApp {
             return;
         };
         // Remember the last choices while the app runs.
-        let (units, encoding) = self
+        let (units, encoding, rate) = self
             .export
             .as_ref()
-            .map_or_else(Default::default, |d| (d.units, d.encoding));
+            .map_or((Units::default(), Encoding::default(), 1), |d| {
+                (d.units, d.encoding, d.rate)
+            });
         self.export = Some(ExportDialog {
             format,
             character,
             units,
             encoding,
+            rate,
         });
     }
 
@@ -108,6 +124,16 @@ impl NeuroMotionApp {
                         project.settings.fps
                     ));
                     ui.end_row();
+                    ui.label("Output rate");
+                    let fps = project.settings.fps;
+                    egui::ComboBox::from_id_salt("export_rate")
+                        .selected_text(rate_label(fps, dialog.rate))
+                        .show_ui(ui, |ui| {
+                            for rate in RATES {
+                                ui.selectable_value(&mut dialog.rate, rate, rate_label(fps, rate));
+                            }
+                        });
+                    ui.end_row();
                     ui.label("Motion");
                     let rigged = project
                         .character(dialog.character)
@@ -145,7 +171,8 @@ impl NeuroMotionApp {
                 });
                 ui.add_space(6.0);
                 ui.weak(
-                    "The project's frame range and frame rate are used; change them under Project.",
+                    "The project's frame range and frame rate are used; change them under Project. \
+                     Higher output rates fill in frames between the project's own.",
                 );
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
@@ -163,7 +190,8 @@ impl NeuroMotionApp {
     /// Asks where to save, then writes the file.
     fn export_file(&mut self) {
         let Some(dialog) = &self.export else { return };
-        let (format, units, encoding) = (dialog.format, dialog.units, dialog.encoding);
+        let (format, units, encoding, rate) =
+            (dialog.format, dialog.units, dialog.encoding, dialog.rate);
         let project = &self.doc.project;
         let Some(index) = project.character_index(dialog.character) else {
             return;
@@ -191,7 +219,7 @@ impl NeuroMotionApp {
         } else {
             None
         };
-        let motion = motion::sample(project, index, simulation);
+        let motion = motion::sample_at_rate(project, index, simulation, rate);
         let result = match format {
             Format::Bvh => bvh::save(&path, &character.skeleton, &motion, units),
             Format::Fbx => fbx::save(&path, &character.skeleton, &motion, units, encoding),

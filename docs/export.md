@@ -14,6 +14,17 @@ frame range and frame rate are the project's (Project in the inspector).
 
 The status line says which one was written.
 
+## Output rate
+
+The **Output rate** option writes the project's rate (default), or 2x or 4x it: a 30 fps
+scene can be exported at 60 or 120 fps. The extra frames are the same interpolation the
+viewport plays (`physics::interp`): between two simulated frames positions lerp and
+rotations slerp the short way; keys are evaluated at the fractional frame. Every
+project frame is written unchanged, and the files declare the higher frame rate. It is
+only a resampling: it adds no physics detail, and fast impacts stay as coarse as the
+cached frames. Only whole multiples are offered so project frames stay on the output
+grid.
+
 ## BVH (`.bvh`)
 
 | Part | What NeuroMotion writes |

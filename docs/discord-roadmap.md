@@ -9,7 +9,8 @@
 - Behaviours: **Balance** (with stepping), **Stagger**, **CatchFall**, **BodyFoetal**, **Writhe**, now running in imported scenes too
 - **Look and Reach** (hands reach for a target, the head looks at it) and **Explosion** (writhe in mid-air), compared with endorphin's own runs
 - Sever events, constraints, active poses, forces
-- Export to **FBX** and **BVH**, bake simulation to keys
+- Export to **FBX** and **BVH**, bake simulation to keys, optionally at 2x or 4x the frame rate
+- Smooth playback on 60 Hz+ displays: frames are interpolated between physics frames
 - Edit the scene's **physics settings** (gravity, rate, materials) in the app, and browse the scene's bodies in a **scene tree**
 - **v0.1.0 beta** with downloads for Windows, macOS and Linux, and our new logo
 
