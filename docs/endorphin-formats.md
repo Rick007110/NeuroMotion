@@ -14,13 +14,11 @@ NeuroMotion never writes endorphin files.
 | `.nmb` | Behaviour | Not readable: endorphin stores these in a protected format |
 | `.nmw` | World settings | Not readable: protected format |
 
-Tested against every file bundled with endorphin 2.5.2. 160 scenes, characters, rigs
-and poses import. Three files don't:
-
-- 2 password-protected tutorial scenes. Their contents are encrypted; re-export them
-  from endorphin without a password.
-- 1 legacy pose (`BehaviourPoses/dp.nma`), which stores muscle targets instead of joint
-  transforms. It will be handled once physics exists.
+Tested against every file bundled with endorphin 2.5.2. 161 scenes, characters, rigs
+and poses import, the legacy muscle-target pose `BehaviourPoses/dp.nma` included (see
+[Muscle-target poses](#muscle-target-poses)). Two files don't: password-protected
+tutorial scenes. Their contents are encrypted; re-export them from endorphin without a
+password.
 
 The sweep runs with `cargo test -- --ignored`. Set `ENDORPHIN_DIR` if endorphin isn't
 installed in the default location.
@@ -120,6 +118,73 @@ CatchFall run NeuroMotion's own controllers (see `behaviours.md`); others are ke
 but not simulated.
 
 Overlapping events of the same kind go onto extra tracks ("Animation 2").
+
+## Muscle-target poses
+
+<a id="muscle-target-poses"></a>One bundled pose, `BehaviourPoses/dp.nma` (made for
+endorphin's older `character01`), stores muscle targets instead of joint transforms:
+a `<DesiredPose>` with one `<EffectorParameters name="LKneeZ">` per single-axis
+effector, each holding a `<DesiredAngle>` in radians. No scene refers to it, and no
+other bundled file stores targets this way (`DesiredPose` elsewhere is only the
+`DesiredPoseEvent` of active poses). It imports like any pose: a held clip on the
+character, which an active pose event then drives the muscles towards.
+
+**What's in the file.** Besides the targets, the pose carries its own skeleton
+(`<Skeleton>`): the pelvis, then a chain of single-axis `<Hinge>`s per joint, named
+`<parent body>_<child body>` (`LUpLegYMB_LKneeZMB`), each with its frame in the world
+(`refFrame="World"`), at rest; `<MetaBodies>`, the bodies' world frames, also at rest;
+and `<Relationships>`, reach targets (`RPROMagnet`) the importer doesn't use. The
+posed result isn't stored anywhere, so the convention below comes from the skeleton
+and the targets themselves:
+
+- **Which hinge.** An effector drives the hinge into the body named after it
+  (`LKneeZ` → `…_LKneeZMB`). The hip's third axis has no body of its own: `LHipY`
+  turns the thigh, the hinge `LHipZMB_LUpLegYMB`.
+- **About which axis.** A hinge turns about the first column (`Vi`) of its frame.
+  That column is always the axis the effector's letter names, in the character's
+  own terms: for every `…X` effector the body's forward axis (roll), for every `…Y`
+  one the bone's length (twist: `LUpLegY`'s `Vi` runs down the thigh, `LLoArmY`'s
+  along the forearm), for every `…Z` one the side axis (bend).
+- **Which way.** Right-handed about `Vi`, from the rest frame at zero. With that sign
+  every non-zero target of dp.nma bends its joint the way the joint bends: knees
+  -0.99 rad bend backwards, hips (0.64) and elbows (0.87) forwards, the spine
+  (0.80 + 0.60) forwards, ankles (-0.33) point the toes down, and the hips' `X` and
+  `Y` targets, mirrored left and right, spread the legs symmetrically. With the
+  opposite sign the knees would bend 57° forwards and the elbows 50° backwards.
+  The pose is a deep crouch, hunched forwards, arms raised in front.
+
+**Onto a character.** None of the bundled characters has dp.nma's skeleton (endorphin
+2.x characters have one three-axis joint where it has two or three hinges), so the
+importer maps it, in `io/endorphin.rs`:
+
+1. A hinge's target goes to the character's joint of the same name if it has one,
+   else to the joint whose muscle is the effector (`LKneeZ`) or its joint (`LKnee`).
+   Joints later characters merged are renamed: the outer shoulder (`LOutShoulder`)
+   and the upper arm's twist (`LUpArm`) are the shoulder's (`LShoulder`), the
+   forearm's twist (`LLoArm`) is `LLoArmTwist` (else the elbow), the shin's twist
+   the knee's and the thigh's the hip's. All of a joint's hinge turns combine,
+   parent first, into one rotation.
+2. The pose faces +X, right side towards +Z; it's turned about the vertical so a
+   left-right pair of its joints lines up with the character's.
+3. Each turn is about the hinge's axis in the world at rest, converted into the
+   character's joint frame, so it doesn't matter how the character's own joint
+   axes are set up.
+4. Where the character rests differently from the pose's skeleton by more than
+   0.5 rad (a T-pose's arms against dp.nma's hanging ones), the joint is first turned
+   to the pose's rest by the shortest turn, which its children inherit, so the limb
+   ends up where the pose puts it. Smaller differences are left alone: the Standard
+   Simulation Character's straight forearm comes out about 12° from dp.nma's, which
+   rests its forearm bent 12° forwards.
+
+On the Standard Simulation Character every target but `BaseNeckZ` (zero, and on no
+hinge) lands on a joint; the shoulders are turned down from its T-pose first. The
+import's notes say what was left out or turned. Held as an active pose with the hips
+locked, the character's knees reach the pose to within 2 cm and its feet to within
+5 cm. Its spine bends far less than the pose's: dp.nma bends the lower spine 46° and
+the upper 34° on two joints, past the Standard character's spine limits (19-24°),
+which muscle targets are kept inside, and its middle spine joint gets no target. The
+head ends up 0.8 m from where the pose puts it, and the arms, which hang from the
+spine, follow it. Spreading a bend over the character's extra joints is still to do.
 
 ## Format notes (from the files themselves)
 

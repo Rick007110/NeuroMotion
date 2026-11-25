@@ -2306,6 +2306,32 @@ pub fn split_poses() -> Project {
     p
 }
 
+/// A legacy pose that stores muscle targets instead of joint transforms (endorphin's
+/// `dp.nma` format), imported and used as an active pose. The pose is the importer's
+/// hand-written fixture (hips flexed 0.5 rad, knees -1.0, elbows 0.8, on the pose's own
+/// hinges), the character the placeholder with its muscles named as endorphin's
+/// effectors, hung by the hips so it doesn't fall; the pose drives it from frame 10.
+pub fn legacy_pose() -> Project {
+    use crate::io::endorphin::{legacy_fixture, pose_from_text};
+    let mut p = new_scene("Legacy pose", 3.0);
+    let (skeleton, mut rig) = person_rig();
+    legacy_fixture::effector_names(&mut rig);
+    let at = Vec3::new(0.0, 1.5, 0.0);
+    let id = add_person(&mut p, "poser", (skeleton, rig), at, 0.0, &[]);
+    constrain(
+        &mut p,
+        id,
+        0,
+        180,
+        "Lock",
+        &["poser.MetaBodies.hips"],
+        (STRONG, STRONG),
+    );
+    let pose = pose_from_text(&legacy_fixture::xml(0.0), "dp".into(), &p).unwrap();
+    active_pose(&mut p, id, 10, 180, &[], pose.channels);
+    p
+}
+
 /// A character whose head may collide with its parent (endorphin's `collidesWithParent`)
 /// and already overlaps the neck at rest, like Back-Flip-To-Combo's: the placeholder's
 /// head sphere grown and moved down onto the neck. Hung by the hips, with the soft
@@ -2440,6 +2466,7 @@ mod tests {
             "backflip" => backflip(true),
             "backflip_passive" => backflip(false),
             "curl_hand_back" => curl_hand_back(),
+            "legacy_pose" => legacy_pose(),
             "balance" => balance_push(1.5, Vec3::Z, true),
             "balance_step" => balance_push(1.5, -Vec3::Z, true),
             "balance_steps" => balance_push(HARD_PUSHES[1], Vec3::Z, true),
@@ -3010,6 +3037,41 @@ mod tests {
         assert!((45.0..75.0).contains(&knees), "knees bent {knees}°");
         assert!((45.0..75.0).contains(&elbows), "elbows bent {elbows}°");
         assert!(early < 15.0, "elbows bent {early}° before their event");
+    }
+
+    /// A legacy pose's muscle targets drive the joints to their angles as an active
+    /// pose. Before, the pose didn't import at all ("stores muscle (effector) targets
+    /// instead of joint transforms"). Now, held for two seconds: knees 57° (the target
+    /// is 1.0 rad, 57°), elbows 45° (0.8 rad, 46°), hips flexed 28° (0.5 rad, 29°).
+    #[test]
+    fn legacy_pose_drives_joints_to_its_muscle_targets() {
+        let project = legacy_pose();
+        let sim = check(project.clone());
+        let skeleton = &project.characters[0].skeleton;
+        let joints = |f: i32| &sim.frame(f).unwrap()[0].as_ref().unwrap().joints;
+        let at = |f: i32, name: &str| joints(f)[skeleton.joint_index(name).unwrap()];
+        // The thigh's angle from straight down in the hips' frame, degrees.
+        let flexion = |f: i32| {
+            let (hips, _) = at(f, "hips");
+            let thigh = hips.inverse() * (at(f, "l_knee").1 - at(f, "l_hip").1);
+            thigh.angle_between(-Vec3::Y).to_degrees()
+        };
+        let knees = bend(&project, &sim, 150, "l_knee", "l_ankle");
+        let right = bend(&project, &sim, 150, "r_knee", "r_ankle");
+        let elbows = bend(&project, &sim, 150, "l_elbow", "l_wrist");
+        let hips = flexion(150);
+        let early = bend(&project, &sim, 8, "l_knee", "l_ankle");
+        println!(
+            "legacy pose: knees {knees:.0}° (right {right:.0}°), elbows {elbows:.0}°, hips {hips:.0}° \
+             at frame 150; knees {early:.0}° at 8"
+        );
+        assert!((47.0..67.0).contains(&knees), "knees bent {knees}°");
+        assert!((knees - right).abs() < 2.0, "knees {knees}° and {right}°");
+        assert!((36.0..56.0).contains(&elbows), "elbows bent {elbows}°");
+        assert!((19.0..39.0).contains(&hips), "hips flexed {hips}°");
+        // Forwards: the knee ends up in front of the hip (the character faces +Z).
+        assert!(at(150, "l_knee").1.z > at(150, "l_hip").1.z + 0.1);
+        assert!(early < 10.0, "knees bent {early}° before the event");
     }
 
     /// A head that may collide with its parent but overlaps the neck at rest isn't

@@ -17,7 +17,7 @@ each other, and [what's next](#next-up). Each open item is, or will become, a Gi
 
 | Area | endorphin 2.5 | NeuroMotion today |
 |---|---|---|
-| Open endorphin files | – | ✅ `.ens`, `.nmc`, `.nma` (160 of 163 bundled files) |
+| Open endorphin files | – | ✅ `.ens`, `.nmc`, `.nma` (161 of 163 bundled files) |
 | Physics engine | Karma, 120 Hz, stiff muscles | ✅ own engine, 120 Hz, deterministic on one machine; all 16 sample scenes checked clean over their whole range |
 | Event types | 9 | 🟡 7 of 9 (no motion transfer; behaviours partly) |
 | Behaviours | a library of them | 🟡 5 (Balance with stepping, Stagger, CatchFall, BodyFoetal, Writhe) |
@@ -80,7 +80,12 @@ NeuroMotion, and we need numbers to prove it.
 - ⬜ **Exact cylinders** ([#14](https://github.com/Rick007110/NeuroMotion/issues/14))
 - ⬜ **Interpolated output** between physics ticks, for smooth 60 fps playback
 - ⬜ **Large scenes**: Bridge Escape and other big scenes simulate at a usable speed
-- ⬜ Legacy poses that store muscle targets (`dp.nma`)
+- ✅ Legacy poses that store muscle targets (`dp.nma`): imported as a held pose and
+  usable as an active pose, mapped onto the character's joints and turned from a
+  T-pose's arms to the pose's rest first
+  ([endorphin-formats.md](docs/endorphin-formats.md#muscle-target-poses)). On the
+  Standard character its spine bends less than the pose's: its 46° and 34° are past
+  that spine's limits, and the middle spine joint gets no share
 - ⬜ Bit-identical results across platforms (optional): today the same build on the
   same machine always gives the same result, but other platforms' maths libraries
   round in the last bit, which chaotic moments can turn into a different outcome.

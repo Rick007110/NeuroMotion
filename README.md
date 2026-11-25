@@ -60,8 +60,8 @@ compatibility.
   | `.nmc` characters, props and rigs | Open as a project |
   | `.nma` poses | Import onto a character at the playhead |
 
-  160 of the files bundled with endorphin 2.5.2 import. The exceptions are
-  password-protected scenes and one legacy pose format. Details:
+  161 of the files bundled with endorphin 2.5.2 import, the legacy pose that stores
+  muscle targets included. The exceptions are two password-protected scenes. Details:
   [docs/endorphin-formats.md](docs/endorphin-formats.md).
 
 ## Physics
