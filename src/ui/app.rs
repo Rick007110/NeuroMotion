@@ -339,6 +339,10 @@ impl NeuroMotionApp {
             "Imported pose \u{201c}{}\u{201d} at frame {start}.",
             pose.name
         );
+        for note in &pose.notes {
+            self.status.push(' ');
+            self.status.push_str(note);
+        }
     }
 
     /// Files dropped on the window: poses go onto the timeline, anything else opens.
