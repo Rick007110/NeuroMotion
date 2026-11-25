@@ -572,6 +572,30 @@ impl Drive<'_> {
         }
     }
 
+    /// Fades the muscles moving `bodies` by `limp` (0 to 1) of the way to limp, keeping
+    /// some passive damping: each joint at least damps the body it moves to a stop
+    /// within `LIMP_SETTLE` s. Not the presets' own damping, which is sized for the
+    /// solver to cap along with the stiffness: kept on its own it is far too strong
+    /// for a finger, and the character slid about at metres a second.
+    fn go_limp(&mut self, limp: f32, bodies: impl Iterator<Item = usize>) {
+        for b in bodies {
+            let Some(j) = self.layout.joint_of[b] else {
+                continue;
+            };
+            let pivot = self.pivot(b);
+            let inertia = self.rig.bodies[b].mass * self.body(b).position.distance_squared(pivot);
+            let damping = limp * inertia.max(1e-4) / LIMP_SETTLE;
+            let fade = |g: Gains| Gains {
+                stiffness: g.stiffness * (1.0 - limp),
+                damping: (g.damping * (1.0 - limp)).max(damping),
+                force_limit: (g.force_limit * (1.0 - limp)).max(damping * LIMP_SPIN),
+            };
+            let g = &mut self.gains[j];
+            g.twist = fade(g.twist);
+            g.swing = fade(g.swing);
+        }
+    }
+
     /// Centre of mass and its velocity.
     fn centre_of_mass(&self) -> (Vec3, Vec3) {
         let (mut mass, mut at, mut vel) = (0.0, Vec3::ZERO, Vec3::ZERO);
@@ -1929,6 +1953,13 @@ const EXPLOSION_FADE: f32 = 0.35;
 const EXPLOSION_LYING: (f32, f32) = (0.8, 1.3);
 /// Seconds after the behaviour starts before legs near the ground give.
 const EXPLOSION_SETTLE: f32 = 0.25;
+/// A limp joint's passive damping stops the body it moves within this many seconds
+/// (its moment of inertia about the joint over this, N·m·s/rad). Without it a hand
+/// lying limp swung to and fro for seconds; 0.1 s still left the mid-air stand-in
+/// moving 9 cm/s at the end in some nudged runs (docs/physics-design.md, lesson 31).
+const LIMP_SETTLE: f32 = 0.01;
+/// Turning speed, rad/s, up to which a limp joint's damping has the force to act.
+const LIMP_SPIN: f32 = 10.0;
 
 /// Explosion (endorphin's "Writhe in mid-air"): the arms, held out to the sides, flap
 /// up and down together, the elbows bending as they come up; the legs pedal, spread a
@@ -1965,11 +1996,7 @@ fn explosion(d: &mut Drive, e: Explosion) {
     let tilt = libm::acosf(trunk.normalize_or(Vec3::Y).y.clamp(-1.0, 1.0));
     let lying =
         ((tilt - EXPLOSION_LYING.0) / (EXPLOSION_LYING.1 - EXPLOSION_LYING.0)).clamp(0.0, 1.0);
-    d.preset(
-        "Normal",
-        e.strength * (1.0 - (1.0 - clear) * lying),
-        d.all_bodies(),
-    );
+    d.preset("Normal", e.strength, d.all_bodies());
     // Landing on its feet, its legs give: held, ours stood on landing in some runs and
     // went down on its back in others. Not in the first moments, though, so a character
     // it starts on while standing (Multi Martial's, as they are kicked) keeps its feet.
@@ -1995,6 +2022,7 @@ fn explosion(d: &mut Drive, e: Explosion) {
         d.damp_for_swing(hand.upper, &whole);
         d.damp_for_swing(hand.lower, &outer);
     }
+    d.go_limp((1.0 - clear) * lying, d.all_bodies());
     let angle = EXPLOSION_RATE * e.speed * d.elapsed + e.phase * TAU;
 
     // The back arches, shared by the trunk's joints; the head turns.

@@ -642,7 +642,10 @@ Speed 0.6), plus PhaseOffset cycles. Nothing is remembered between ticks.
    trunk tilted 46° to 74° from upright), all its muscles fade out, so it lies still.
    Holding the pose, even at a third of the strength, it sat up again or rolled over
    for a second or more; with only the trunk's tilt deciding, it stood on its feet in
-   some runs. The legs keep their strength for the first 0.25 s, so a character the
+   some runs. Limp, each joint keeps a little passive damping, in
+   proportion to the body it moves (its moment of inertia about the joint over
+   0.01 s): without it a hand lying across the chest swung to and fro for seconds
+   (docs/physics-design.md, lesson 31). The legs keep their strength for the first 0.25 s, so a character the
    behaviour starts on while it stands (Multi Martial kicks two) keeps its feet: going
    limp there, one had its hand crushed by its attacker's keyed arm (21 cm of
    stretch).
@@ -660,20 +663,18 @@ On a rig like endorphin's (clavicles, forearm twists, resting in a T-pose; test
 | Arms lowest | -40° to -58° at 42-46 | -56° at frame 50 |
 | Turned in the air | none visible | pelvis 9° (the arch) |
 | Lands | feet first, frame 56-58 | feet first (toes), frame 54 |
-| Then | on its back by ~70, still | trunk 89° from upright, bodies moving 0.01 m/s at frames 190-210 |
+| Then | on its back by ~70, still | trunk 93° from upright, bodies moving 0.01 m/s at frames 190-210 |
 
 Limp, the same character drops with its arms still out (within 0.1°) and lands
 sprawled. On the placeholder, whose arms hang at rest, the arms come up to +24° and
 swing down to -34° (`explosion_works_on_the_placeholder_and_is_deterministic`), and two
 runs are bit-identical. The numbers in the air don't move when the drop height is
 nudged by up to ±5 cm; the landing settles the same way in all 11 nudged runs (trunk
-89-90°, at most 0.02 m/s). Over 41 runs with the height nudged by up to ±2e-3
-(`NM_SURVEY=explosion`), no joint opens more than 1.4 cm, and the bodies move 0.15 to
-20 cm/s at the end: 39 runs under 4 cm/s, the unnudged one 8.4, and one 20, which
-hasn't come to rest: it lies face down with a leg propped up on its knee, and limbs
-still shifting (in a similar run such a leg toppled over late). Nothing holds a
-raised knee while it lies limp; a little tone or straightening the legs moved that
-tail without removing it, so it is still open. Before lesson 29 of
+88-105°, at most 0.02 m/s). Over 41 runs with the height nudged by up to ±2e-3
+(`NM_SURVEY=explosion`), no joint opens more than 1.4 cm, and the bodies move 0.23 to
+2.9 cm/s at the end, the unnudged one 1.1. Before lesson 31 (a limp body's joints
+damped) 0.15 to 20 cm/s, the unnudged one 8.4: a limp hand kept swinging, and one
+run lay with a leg propped up on its knee, limbs still shifting. Before lesson 29 of
 docs/physics-design.md (the engine warm-starting a finger off the ground) up to
 18.6 cm/s and 15 cm, which is how CI's Linux runner came to see 0.19 m/s.
 

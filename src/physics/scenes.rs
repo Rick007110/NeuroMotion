@@ -3604,7 +3604,7 @@ mod tests {
     fn simulations_are_bit_identical_everywhere() {
         let scenes = [
             ("car hit", car_hit(), 0x13fe_6b43_2574_a7a3u64),
-            ("explosion", mid_air(true, true), 0x1610_ef2c_a19f_bfc3),
+            ("explosion", mid_air(true, true), 0x946d_7389_3aab_f2fd),
             (
                 "stagger",
                 pushed(Some("Stagger"), 2.8, Vec3::Z),
@@ -4769,9 +4769,9 @@ mod behaviour_tests {
     /// lands feet first at about frame 56, goes down on its back and lies still.
     /// Over 41 runs with the drop's height nudged by up to ±2e-3 (`NM_SURVEY=explosion
     /// nudge_survey`) no joint opens more than 1.4 cm (15 cm before lesson 29), and the
-    /// bodies move 0.15 to 4 cm/s over the last 20 frames, this run 8.4, but one run
-    /// 20: lying limp, a leg propped up on its knee may topple late (lesson 30; still
-    /// open). Results are bit-identical everywhere, so this run is the same on CI.
+    /// bodies move 0.23 to 2.9 cm/s over the last 20 frames, this run 1.1 (up to 20
+    /// before lesson 31 damped a limp body's joints). Results are bit-identical
+    /// everywhere, so this run is the same on CI.
     #[test]
     fn explosion_flails_in_mid_air_like_endorphins() {
         let project = mid_air(true, true);

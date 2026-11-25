@@ -1132,9 +1132,16 @@ The first behaviour that reads its event's settings, Explosion, taught one more.
     rest-pose turn, force headings, the demo animation, and the viewport's camera for
     good measure), and glam is built with its `libm` and `scalar-math` features, so its
     maths uses the same functions and plain arithmetic in a fixed order. `clippy.toml`
-    refuses the std functions, so new code can't slip back. `powi` is left: it is a
-    product (the same in debug, where compiler-builtins multiplies, and release,
-    where LLVM does).
+    refuses the std functions, so new code can't slip back. `powi` went too, after
+    Windows disagreed: on Linux and macOS it is a product (compiler-builtins
+    multiplies in debug, LLVM in release), but LLVM has no `powi` library call on
+    Windows (MSVC), so a debug build there calls the platform's `powf` instead. CI's
+    Windows runner hashed Car Hit and the Explosion differently while Stagger, which
+    never reaches a swing limit's ellipse, matched; the swing-limit boundary
+    (`(x / y).powi(2)`) was the one such call they used. Squares are now written as
+    products, and clippy also refuses `powi`, `mul_add` (the platform's `fma` where the
+    CPU has none), the inverse hyperbolic functions and the f64 versions of all of them.
+    Then all three platforms print the same hashes.
     `simulations_are_bit_identical_everywhere` hashes every frame of three stand-ins
     whose outcome turns on the last bit within a second or two (Car Hit's car running
     the pedestrian over, the mid-air Explosion's landing, Stagger after a 2.8 m/s
@@ -1147,8 +1154,8 @@ The first behaviour that reads its event's settings, Explosion, taught one more.
     shifting (in a similar run such a leg toppled over late); the unnudged run, the
     one the test checks, 8.4 cm/s. Lying limp, nothing holds a raised knee, and when
     it falls turns on the last bit; a little muscle tone (5 % of
-    the strength) or holding the legs straight moved the tail but didn't remove it, so
-    this is still open. Car carry: up to the stop 0.30 to 0.87 cm for the body, after
+    the strength) or holding the legs straight moved the tail but didn't remove it
+    (lesson 31 does). Car carry: up to the stop 0.30 to 0.87 cm for the body, after
     the stop 0.08 to 0.57; Balance as before but forwards 10 to 12 of 12 (10 to 11);
     Stagger's fewest steps after one push 5 to 7, 26 to 37 in all, feet 2.2 to 3.5
     times as far as Balance's. The endorphin sweep stays 16 of 16 clean (Catch Rope's
@@ -1160,6 +1167,31 @@ The first behaviour that reads its event's settings, Explosion, taught one more.
     (docs/export.md); 0.89 mm.
     Speed: the release tests take 9.9 s on one thread either way, the sweep 11.5 to
     12.0 s against 10.6 to 11.8 with the platform's maths, within the runs' spread.
+
+31. **A limp body still needs damping, sized by what each joint moves.** Explosion
+    fades its character's muscles out once it lies on the ground (lesson 28), and the
+    mid-air stand-in's unnudged run was still moving 8.4 cm/s over its last 20 frames
+    (the test allows 10; Windows, before lesson 30's `powi` fix, 18 cm/s). Per body,
+    frame by frame (`dump_scene_motion`), it wasn't the propped-up knee that kept it
+    going but the right hand: lying across the chest, the wrist and fingers swung to
+    and fro at 0.3 to 3 m/s from frame 140 to the end, a pendulum with nothing to stop
+    it, since fading the muscles faded their damping with their stiffness.
+    Keeping the presets' damping while the stiffness fades made it far worse (it slid
+    about at 1.2 to 4.7 m/s, joints up to 11 cm open; lesson 29 saw the same): the
+    presets' damping is sized for the solver to cap with the stiffness, and a
+    finger's, uncapped, is far too strong for its 60 g. Instead, going limp
+    (`Drive::go_limp`) now fades stiffness, damping and force together as before but
+    keeps at least a passive damping of the body's own moment of inertia about its
+    joint over 0.01 s, with the force to stop it turning at 10 rad/s, so every joint is
+    damped in proportion to what it moves, on any rig.
+    Over 41 runs with the drop's height nudged by up to ±2e-3 the bodies now move 0.23
+    to 2.85 cm/s at the end (0.15 to 20 before), the unnudged one 1.1 (8.4); worst joint
+    0.55 to 1.32 cm (1.35); nudged by up to ±5 cm in 11 runs, 0.17 to 1.97 cm/s and at
+    most 2.0 cm. The flight doesn't change (arms +43° at 24, -51° at 50, lands at 54);
+    the trunk is 93° from upright at frame 200 (92-105° over the 41 runs). A time of
+    0.1 s left up to 9.3 cm/s, 0.3 s up to 16; 0.02 s gave 3.1. Car Hit's and Stagger's
+    hashes don't change; in the endorphin sweep, 16 of 16 clean, only Multi Martial
+    moves (worst joint 0.94 to 0.81 cm).
 
 ## Status against endorphin's sample scenes
 
@@ -1251,7 +1283,7 @@ What each stand-in reproduces:
 | Head on neck | A head shape that may collide with its parent, inside the neck at rest (lesson 19) | turned 44° against the neck in 1 s | 2.6° |
 | Curl hand-back | Car Hit's hand-back: a character with clavicles curls up on the ground (BodyFoetal), then a 0.75 s transition, overlapping the curl's end, blends it back onto its standing animation (lesson 18) | 16.6 cm (knee) mid-transition | 0.09 cm |
 | Car hit | A keyed car (collision with momentum) drives through a standing placeholder at 15 m/s, throws them along the road, catches them again and pushes them under its bumper; Coulomb friction (lesson 29) | 1.95 to 12.7 cm over 41 nudged runs (5 over the sweep's 5 cm) | 0.55 to 2.32 cm (0.56 to 2.38 with lesson 30) |
-| Mid-air | endorphin's "Writhe in mid-air": a character with clavicles and forearm twists, resting in a T-pose, dropped from 4 m running Explosion with the 2.5 scene's settings (lesson 28) | falls with its arms out, lands limp | arms +44° at frame 24 and -56° at 50 (endorphin +35-38° at 20-30, -40 to -58° at 42-46), upright in the air, feet first at 54, still on its back; over 41 runs with the height nudged, worst joint 0.55 to 1.27 cm and 0.3 to 6.5 cm/s at the end (0.76 to 15.2 cm and up to 18.6 cm/s before lesson 29); with lesson 30, 0.55 to 1.35 cm and 0.15 to 20 cm/s, one run in 41 over 10 cm/s (a limp leg toppling late, still open) |
+| Mid-air | endorphin's "Writhe in mid-air": a character with clavicles and forearm twists, resting in a T-pose, dropped from 4 m running Explosion with the 2.5 scene's settings (lesson 28) | falls with its arms out, lands limp | arms +44° at frame 24 and -56° at 50 (endorphin +35-38° at 20-30, -40 to -58° at 42-46), upright in the air, feet first at 54, still on its back; over 41 runs with the height nudged, worst joint 0.55 to 1.27 cm and 0.3 to 6.5 cm/s at the end (0.76 to 15.2 cm and up to 18.6 cm/s before lesson 29); with lesson 30, 0.55 to 1.35 cm and 0.15 to 20 cm/s, one run in 41 over 10 cm/s (a limp leg toppling late); with lesson 31 (a limp body's joints damped), 0.55 to 1.32 cm and 0.23 to 2.85 cm/s |
 | Tilting floor | Rotating Floor's end: no ground; a long collision-only slab with a wall at its low end tilts 20°, carrying a character 1.9 m below y = 0 | fails the sweep (lowest -1.9 m) | rides it (nothing under the slab) |
 | Roof edge | Heli Leap's jumper: no ground; a character runs off a roof whose top is at y = 0 and falls past the building's side | fails the sweep (lowest -10.6 m) | falls 10.6 m beside the building |
 | Cut rope | Catch Rope: a force on the environment's track names a rope's end; the environment's roof is massless; the rope's last link is cut at 1 s | roof drifts 1.98 m in 2 s, rope end not pushed; the cut link counts as 0.83 m stretch | roof still, end swings 0.14 m; cut link not counted |
