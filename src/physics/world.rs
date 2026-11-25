@@ -275,11 +275,33 @@ pub struct Lock {
     pub angular: Vec3,
 }
 
+/// A force-limited Cartesian spring between two bodies of a character (endorphin's
+/// virtual muscles, chest to hand and pelvis to heel): pulls `point` on `body` towards
+/// `target_position` in `anchor`'s frame, and turns `body` towards `target_rotation`
+/// relative to `anchor`. Unlike a joint it removes no freedom: it is a spring on the
+/// two bodies, solved implicitly like a muscle (stable at any stiffness), and its force
+/// (N) and torque (N·m) are capped by its gains' force limits, on the full 3D vector.
+#[derive(Clone, Copy, Debug)]
+pub struct VirtualMuscle {
+    pub anchor: usize,
+    pub body: usize,
+    /// The pulled point, in `body`'s frame.
+    pub point: Vec3,
+    /// Where `point` is wanted, in `anchor`'s frame.
+    pub target_position: Vec3,
+    /// `body`'s wanted rotation relative to `anchor`'s.
+    pub target_rotation: Quat,
+    pub linear: Option<Gains>,
+    pub angular: Option<Gains>,
+}
+
 pub struct World {
     pub bodies: Vec<Body>,
     pub shapes: Vec<Shape>,
     pub joints: Vec<Joint>,
     pub locks: Vec<Lock>,
+    /// Set by the caller every tick; nothing is remembered between ticks.
+    pub virtual_muscles: Vec<VirtualMuscle>,
     pub gravity: Vec3,
     /// Ground plane height and material.
     pub ground: Option<(f32, usize)>,
@@ -403,6 +425,25 @@ struct LockBlock {
     /// at up to this × √e and still stop on target using its strength (lesson 20).
     brake: [f32; 6],
     key: (usize, usize, usize),
+}
+
+/// A virtual muscle's position or orientation spring this substep: three rows (world
+/// axes) solved as one block, the impulse capped in length.
+struct DriveBlock {
+    a: usize,
+    b: usize,
+    /// Levers of the pulled point from A's and B's centres (zero for orientation).
+    ra: Vec3,
+    rb: Vec3,
+    linear: bool,
+    /// Spring softness and velocity bias.
+    gamma: f32,
+    bias: Vec3,
+    /// (K + γ)⁻¹, K the block's effective inverse mass.
+    mass: Mat3,
+    /// Force limit × h.
+    bound: f32,
+    impulse: Vec3,
 }
 
 /// One equality row of a lock group: a joint's anchor along a world axis, or one held
@@ -566,6 +607,7 @@ impl World {
             shapes: Vec::new(),
             joints: Vec::new(),
             locks: Vec::new(),
+            virtual_muscles: Vec::new(),
             gravity,
             ground: None,
             contact_model,
@@ -682,6 +724,7 @@ impl World {
         }
         let mut joints = self.prepare_joints(&sb, h, &grounded);
         let mut locks = self.prepare_locks(&sb, h);
+        let mut drives = self.prepare_virtual_muscles(&sb, h);
 
         // Warm start.
         for c in &contacts {
@@ -728,6 +771,7 @@ impl World {
         // Direct solves of the groups, then the contacts, then the direct solves of the
         // groups whose locks close a loop: those have the last word (lesson 25).
         for _ in 0..ITERATIONS {
+            solve_drives(&mut sb, &mut drives);
             self.solve_joints(&mut sb, &mut joints, joint_soft, h, true);
             solve_locks(&mut sb, &mut locks, joint_soft.bias_rate);
             for late in [false, true] {
@@ -770,6 +814,7 @@ impl World {
 
         // Relax: remove the velocity that position correction added.
         for _ in 0..RELAX_ITERATIONS {
+            solve_drives(&mut sb, &mut drives);
             self.solve_joints(&mut sb, &mut joints, joint_soft, h, false);
             solve_locks(&mut sb, &mut locks, 0.0);
             for late in [false, true] {
@@ -1163,6 +1208,73 @@ impl World {
             j.point_impulse += impulse;
             apply_impulse(sb, a, b, j.ra, j.rb, impulse);
         }
+    }
+
+    // -----------------------------------------------------------------------------
+    // Virtual muscles
+
+    fn prepare_virtual_muscles(&self, sb: &[SolverBody], h: f32) -> Vec<DriveBlock> {
+        let mut out = Vec::new();
+        for vm in &self.virtual_muscles {
+            let (a, b) = (vm.anchor, vm.body);
+            if !self.bodies[a].is_dynamic() && !self.bodies[b].is_dynamic() {
+                continue;
+            }
+            let (ba, bb) = (&self.bodies[a], &self.bodies[b]);
+            let (sa, sbb) = (sb[a], sb[b]);
+            let mut block = |linear: bool, gains: Gains, ra: Vec3, rb: Vec3, error: Vec3| {
+                let k = if linear {
+                    Mat3::from_diagonal(Vec3::splat(sa.inv_mass + sbb.inv_mass))
+                        - skew(ra) * sa.inv_i * skew(ra)
+                        - skew(rb) * sbb.inv_i * skew(rb)
+                } else {
+                    sa.inv_i + sbb.inv_i
+                };
+                // Like a muscle, no stiffer than the solver can follow on the lightest
+                // direction the two bodies move in (a hand alone weighs 0.4 kg).
+                let lightest = k.x_axis.x.max(k.y_axis.y).max(k.z_axis.z);
+                let (stiffness, damping) = cap_spring(
+                    gains.stiffness.max(0.0),
+                    gains.damping.max(0.0),
+                    spring_ceiling(MAX_SPRING_HERTZ, lightest),
+                );
+                let denom = damping + h * stiffness;
+                if denom <= 0.0 || gains.force_limit <= 0.0 {
+                    return;
+                }
+                let gamma = 1.0 / (h * denom);
+                let soft = k + Mat3::from_diagonal(Vec3::splat(gamma));
+                if soft.determinant().abs() < 1e-18 {
+                    return;
+                }
+                out.push(DriveBlock {
+                    a,
+                    b,
+                    ra,
+                    rb,
+                    linear,
+                    gamma,
+                    bias: error * (stiffness / denom),
+                    mass: soft.inverse(),
+                    bound: gains.force_limit * h,
+                    impulse: Vec3::ZERO,
+                });
+            };
+            if let Some(gains) = vm.linear {
+                let rb = bb.rotation * vm.point;
+                let ra = ba.rotation * vm.target_position;
+                let error = (bb.position + rb) - (ba.position + ra);
+                block(true, gains, ra, rb, error);
+            }
+            if let Some(gains) = vm.angular {
+                let mut turn = bb.rotation * (ba.rotation * vm.target_rotation).inverse();
+                if turn.w < 0.0 {
+                    turn = -turn;
+                }
+                block(false, gains, Vec3::ZERO, Vec3::ZERO, turn.to_scaled_axis());
+            }
+        }
+        out
     }
 
     // -----------------------------------------------------------------------------
@@ -1851,6 +1963,27 @@ impl LockBlock {
 }
 
 /// Solves each lock's block; `bias_rate` is the share of the error corrected per second.
+/// Virtual muscles' springs: implicit, so `γ·impulse` stands in for the spring's give,
+/// with the accumulated impulse kept within the force limit.
+fn solve_drives(sb: &mut [SolverBody], drives: &mut [DriveBlock]) {
+    for d in drives.iter_mut() {
+        let velocity = if d.linear {
+            relative_velocity(sb, d.a, d.b, d.ra, d.rb)
+        } else {
+            get(sb, d.b).w - get(sb, d.a).w
+        };
+        let total = (d.impulse - d.mass * (velocity + d.bias + d.gamma * d.impulse))
+            .clamp_length_max(d.bound);
+        let delta = total - d.impulse;
+        d.impulse = total;
+        if d.linear {
+            apply_impulse(sb, d.a, d.b, d.ra, d.rb, delta);
+        } else {
+            apply_angular(sb, d.a, d.b, delta);
+        }
+    }
+}
+
 fn solve_locks(sb: &mut [SolverBody], locks: &mut [LockBlock], bias_rate: f32) {
     for l in locks.iter_mut() {
         let mut rhs = l.velocity(sb);
@@ -2707,6 +2840,42 @@ mod tests {
             lowest = lowest.min(w.bodies[b].position.y);
         }
         assert!(lowest < -0.3, "lowest {lowest}");
+    }
+
+    /// A virtual muscle pulls a free 1 kg ball 0.5 m to its target beside a fixed
+    /// anchor and holds it there against gravity, as a stiff spring; capped at 5 N it
+    /// can't hold up the 9.8 N ball, which falls.
+    #[test]
+    fn virtual_muscle_pulls_to_its_target_within_its_force_limit() {
+        let run = |force_limit: f32| {
+            let mut w = world();
+            w.ground = None;
+            let a = ball(&mut w, Vec3::ZERO, 0.05, 5.0);
+            let b = ball(&mut w, Vec3::new(0.5, 0.0, 0.0), 0.05, 1.0);
+            w.bodies[a].motion = Motion::Kinematic { momentum: 1.0 };
+            let target = Vec3::new(0.0, 0.0, 0.5);
+            for _ in 0..240 {
+                w.virtual_muscles = vec![VirtualMuscle {
+                    anchor: a,
+                    body: b,
+                    point: Vec3::ZERO,
+                    target_position: target,
+                    target_rotation: Quat::IDENTITY,
+                    linear: Some(Gains {
+                        stiffness: 2000.0,
+                        damping: 100.0,
+                        force_limit,
+                    }),
+                    angular: None,
+                }];
+                w.step(1.0 / 120.0);
+            }
+            w.bodies[b].position - target
+        };
+        let held = run(1000.0);
+        assert!(held.length() < 0.01, "{held}");
+        let weak = run(5.0);
+        assert!(weak.y < -1.0, "{weak}");
     }
 
     #[test]

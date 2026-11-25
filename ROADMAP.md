@@ -94,8 +94,14 @@ NeuroMotion, and we need numbers to prove it.
 - ✅ **Sever events**: cut a joint or switch its muscle off
   ([#13](https://github.com/Rick007110/NeuroMotion/issues/13)); endorphin's own setting
   names for them still need checking against a real scene
-- ⬜ **Virtual muscles**: the chest-to-hand and pelvis-to-foot springs endorphin uses for
-  reaching and planting (now skipped on import)
+- 🟡 **Virtual muscles**: the chest-to-hand and pelvis-to-heel springs endorphin uses for
+  reaching and planting. Imported into the rig (not the skeleton or exported motion)
+  and simulated as force-limited springs pulling the hand or heel to where the active
+  poses that name them put it (docs/physics-design.md, lesson 35); the sweep stays 16 of
+  16 clean, five scenes move a little. Still open: active animations don't drive them
+  yet (doing so tipped Multi Martial's Stagger landing over), and endorphin's own gains
+  (1 in every preset field) make them weak, more brake than pull; how endorphin scales
+  them isn't known. None of the scenes with endorphin measurements uses them
 - ⬜ **Exact cylinders** ([#14](https://github.com/Rick007110/NeuroMotion/issues/14))
 - ✅ **Interpolated output** between cached frames, for smooth 60 fps playback: the
   viewport blends the two neighbouring simulated frames at the fractional playhead, and

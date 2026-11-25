@@ -42,6 +42,14 @@ wandering and Look and Reach for its delays; that comes from the frame number, s
 is deterministic too. Look and Reach also reads its event's settings and targets
 (`Drive::settings`); the others don't read theirs yet.
 
+Behaviours set joint targets only. While one runs, the character's virtual muscles
+(the chest-to-hand and pelvis-to-heel springs active poses pull with,
+physics-design.md lesson 35) are off, so they can't fight it. Whether endorphin's own
+behaviours use them isn't known; no behaviour event in its scenes names them. None of
+the scenes with endorphin measurements here (Car Hit, Tackle, Stagger Walk, Look and
+Reach, Explosion, Back-Flip-To-Combo) has a pose that names one, so their numbers
+below are unchanged by them.
+
 ## Finding the limbs
 
 Behaviours need to know which bodies are the pelvis, legs and arms. Names differ

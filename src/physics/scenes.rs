@@ -25,7 +25,7 @@ use glam::{Quat, Vec3};
 use super::sim::{Simulation, cut_joints, lock_spans, rig_bodies};
 use crate::document::physics::{
     BodyDef, ContactModel, Frame, Gains, Geometry, JointDef, Limits, MuscleGains, MuscleSet,
-    PhysicsRig, ShapeDef, SpringCap,
+    PhysicsRig, ShapeDef, SpringCap, VirtualMuscleDef,
 };
 use crate::document::sample::{humanoid_rig, humanoid_skeleton};
 use crate::document::{
@@ -1048,6 +1048,7 @@ fn prop_rig(
         name: "Default".into(),
         muscles: Default::default(),
         fallback: both,
+        linear: Default::default(),
     };
     (
         skeleton,
@@ -1056,6 +1057,7 @@ fn prop_rig(
             joints: rig_joints,
             muscle_sets: vec![set],
             isotropic_inertia: true,
+            virtual_muscles: Vec::new(),
         },
     )
 }
@@ -1143,6 +1145,7 @@ fn scenery(pieces: &[(Geometry, Quat, Vec3)]) -> (SkeletonRef, PhysicsRig) {
             joints: Vec::new(),
             muscle_sets: Vec::new(),
             isotropic_inertia: true,
+            virtual_muscles: Vec::new(),
         },
     )
 }
@@ -2118,6 +2121,7 @@ pub fn car_carry_at(speed: f32) -> Project {
         joints: Vec::new(),
         muscle_sets: Vec::new(),
         isotropic_inertia: true,
+        virtual_muscles: Vec::new(),
     };
     let car = add_prop(
         &mut p,
@@ -2648,6 +2652,80 @@ pub fn arms_out(cap: SpringCap) -> Project {
     active_pose(&mut p, id, 0, 120, &[], arms.to_vec());
     let clip = p.clips.last_mut().unwrap();
     clip.source.insert("entryBlendPeriod".into(), "0.5".into());
+    p
+}
+
+/// Virtual muscles: hung by the hips, the placeholder (with clavicles) reaches both arms
+/// straight out in front with an active pose at strength 10 (Bendy Stick's "Grab the
+/// stick"). With the two-body muscle cap its shoulders can't hold the arms up (lesson
+/// 27, `arms_out`). `vm` gives it chest-to-hand virtual muscles pulling the centre of
+/// each hand, with these (position, orientation) gains per unit of strength in the
+/// pose preset; endorphin's characters list theirs at 1 in every field. `named`: the
+/// pose names them (as endorphin's whole-body poses do) or only the arm joints, which
+/// leaves them off.
+pub fn virtual_reach(vm: Option<(Gains, Gains)>, named: bool) -> Project {
+    let mut p = new_scene("Virtual reach", 2.0);
+    // As in `arms_out`, whose arms this cap leaves hanging.
+    p.physics.spring_cap = SpringCap::Bodies;
+    p.physics.contact = ContactModel::ForceCapped;
+    let (skeleton, mut rig) = person_rig_with_clavicles();
+    if let Some((linear, angular)) = vm {
+        let chest = rig.body_index("chest").unwrap();
+        for side in ["l", "r"] {
+            let name = format!("{side}_ArmVirtualMuscle");
+            rig.virtual_muscles.push(VirtualMuscleDef {
+                name: name.clone(),
+                muscle: name.clone(),
+                parent_body: chest,
+                body: rig.body_index(&format!("{side}_wrist")).unwrap(),
+                point: [0.0; 3],
+                position: true,
+                orientation: true,
+            });
+            for set in &mut rig.muscle_sets {
+                set.linear.insert(name.clone(), linear);
+                set.muscles.insert(
+                    name.clone(),
+                    MuscleGains {
+                        twist: angular,
+                        swing: angular,
+                    },
+                );
+            }
+        }
+    }
+    let id = add_person(
+        &mut p,
+        "reacher",
+        (skeleton, rig),
+        Vec3::new(0.0, 1.5, 0.0),
+        0.0,
+        &[],
+    );
+    constrain(
+        &mut p,
+        id,
+        0,
+        120,
+        "Lock",
+        &["reacher.MetaBodies.hips"],
+        (STRONG, STRONG),
+    );
+    let arms = ["l", "r"].map(|side| held(&format!("{side}_shoulder"), Property::RotX, -90.0));
+    let mut targets: Vec<String> = ["l", "r"]
+        .iter()
+        .flat_map(|s| ["shoulder", "elbow", "wrist"].map(|j| format!("reacher.Joints.{s}_{j}")))
+        .collect();
+    if named {
+        targets.extend(["l", "r"].map(|s| format!("reacher.Joints.{s}_ArmVirtualMuscle")));
+    }
+    let targets: Vec<&str> = targets.iter().map(String::as_str).collect();
+    active_pose(&mut p, id, 0, 120, &targets, arms.to_vec());
+    p.clips
+        .last_mut()
+        .unwrap()
+        .source
+        .insert("strength".into(), "10".into());
     p
 }
 
@@ -3477,6 +3555,94 @@ mod tests {
             "arms at {}° at frame 30",
             limbs.0
         );
+    }
+
+    /// How far the hands' centres are from where the pose puts them relative to the
+    /// chest (m, the worse hand), averaged over frames 60-120, after the reach.
+    fn reach_error(project: &Project, sim: &Simulation) -> f32 {
+        let c = &project.characters[0];
+        let rig = c.physics.as_ref().unwrap();
+        let mut pose = Pose::rest(c.skeleton.joints.len());
+        for side in ["l", "r"] {
+            let j = c.skeleton.joint_index(&format!("{side}_shoulder")).unwrap();
+            pose.joints[j][0] = -90.0;
+        }
+        let wanted = rig_bodies(rig, &world_transforms(&c.skeleton, &pose));
+        let chest = rig.body_index("chest").unwrap();
+        let relative = |bodies: &[(Quat, Vec3)], hand: usize| {
+            bodies[chest].0.inverse() * (bodies[hand].1 - bodies[chest].1)
+        };
+        let frames = 60..=120;
+        let total: f32 = frames
+            .clone()
+            .map(|frame| {
+                let now = &sim.frame(frame).unwrap()[0].as_ref().unwrap().bodies;
+                ["l", "r"]
+                    .iter()
+                    .map(|side| {
+                        let hand = rig.body_index(&format!("{side}_wrist")).unwrap();
+                        (relative(now, hand) - relative(&wanted, hand)).length()
+                    })
+                    .fold(0.0, f32::max)
+            })
+            .sum();
+        total / frames.count() as f32
+    }
+
+    /// Virtual muscles (`virtual_reach`): with its shoulders too weak to hold the arms
+    /// up under the two-body cap, the reacher's hands swing about 0.3 m from where the
+    /// pose puts them (0.12-0.48 m over frames 60-120). Chest-to-hand virtual muscles
+    /// at 20 N/m, 2 N·s/m and 20 N per unit of strength (strength 10) bring them within
+    /// 5 cm and hold them there, with no joint pulled apart. endorphin's own gains, 1 in
+    /// every field, are too weak to lift the arms and brake them instead (0.6 m: the
+    /// orientation drive's damping resists the arm turning). A pose that doesn't name
+    /// the virtual muscles leaves them off: the same motion, exactly, as without them.
+    #[test]
+    fn virtual_muscles_pull_the_hands_to_the_pose() {
+        let gains = |stiffness, damping, force_limit| Gains {
+            stiffness,
+            damping,
+            force_limit,
+        };
+        let stand_in = (gains(20.0, 2.0, 20.0), gains(1.0, 1.0, 1.0));
+        let endorphins = (gains(1.0, 1.0, 1.0), gains(1.0, 1.0, 1.0));
+        let run = |vm: Option<(Gains, Gains)>, named: bool| {
+            let project = virtual_reach(vm, named);
+            let sim = check(project.clone());
+            let (stretch, at) = joint_stretch(&project, &sim, "reacher", 0..=120, |_| true);
+            (reach_error(&project, &sim), stretch, at, sim)
+        };
+        let (without, without_stretch, _, plain) = run(None, true);
+        let (with, stretch, at, _) = run(Some(stand_in), true);
+        let (stock, stock_stretch, _, _) = run(Some(endorphins), true);
+        let (unnamed, _, _, off) = run(Some(stand_in), false);
+        println!(
+            "virtual reach, hand error over frames 60-120: {without:.3} m without virtual \
+             muscles, {with:.3} m with them, {stock:.3} m with endorphin's gains; max joint \
+             stretch {stretch:.4} m at {at} ({without_stretch:.4} m without, \
+             {stock_stretch:.4} m with endorphin's gains)"
+        );
+        assert!(
+            without > 0.15,
+            "hands {without} m off without virtual muscles"
+        );
+        assert!(with < 0.1, "hands {with} m off with them");
+        assert!(
+            with < 0.5 * without,
+            "hands {with} m off with them, {without} without"
+        );
+        assert!(stretch < 0.01, "a joint stretched {stretch} m at {at}");
+        assert!(stock_stretch < 0.01, "a joint stretched {stock_stretch} m");
+        assert_eq!(
+            unnamed, without,
+            "a pose that doesn't name them leaves them off"
+        );
+        for frame in [30, 120] {
+            assert_eq!(
+                off.frame(frame).unwrap()[0].as_ref().unwrap().bodies,
+                plain.frame(frame).unwrap()[0].as_ref().unwrap().bodies
+            );
+        }
     }
 
     /// A joint no running pose names follows the pose that drives its limb (the lesson

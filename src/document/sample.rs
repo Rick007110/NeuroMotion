@@ -407,6 +407,7 @@ pub fn humanoid_rig(skeleton: &SkeletonRef) -> PhysicsRig {
         joints,
         muscle_sets: endorphin_style_presets(),
         isotropic_inertia: true,
+        virtual_muscles: Vec::new(),
     }
 }
 
@@ -429,6 +430,7 @@ fn endorphin_style_presets() -> Vec<MuscleSet> {
             name: name.to_owned(),
             muscles,
             fallback,
+            linear: BTreeMap::new(),
         }
     };
     let strong_hinge = MuscleGains {

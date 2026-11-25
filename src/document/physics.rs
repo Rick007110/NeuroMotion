@@ -81,6 +81,11 @@ pub struct PhysicsRig {
     pub muscle_sets: Vec<MuscleSet>,
     /// Treat every body's inertia as a sphere's (endorphin's default).
     pub isotropic_inertia: bool,
+    /// Cartesian springs between distant bodies (chest to hand, pelvis to heel) that
+    /// active poses and animations pull with. They aren't bones: nothing in the
+    /// skeleton or exported motion shows them. Projects saved before them have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub virtual_muscles: Vec<VirtualMuscleDef>,
 }
 
 impl PhysicsRig {
@@ -188,6 +193,32 @@ pub struct JointDef {
     pub muscle: String,
 }
 
+/// A virtual muscle: a force-limited spring that pulls a point on `body` towards where
+/// the target pose puts it relative to `parent_body`, and turns `body` towards the
+/// target pose's orientation relative to it (docs/physics-design.md, virtual muscles).
+/// It adds no joint and no degree of freedom: the two bodies stay connected only
+/// through the skeleton between them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VirtualMuscleDef {
+    /// Its name in the character file ("LeftArmVirtualMuscle"); active poses and
+    /// animations name it to drive it.
+    pub name: String,
+    /// Muscle (effector) name, for its entry in a [`MuscleSet`].
+    pub muscle: String,
+    /// The body it pulls from (the chest, the pelvis).
+    pub parent_body: usize,
+    /// The body it pulls (a hand, a heel).
+    pub body: usize,
+    /// The point on `body` it pulls, in that body's frame (metres): where the helper
+    /// joint sits at rest.
+    pub point: [f32; 3],
+    /// Whether it drives position, and orientation. Its gains are its entries in the
+    /// muscle presets, like a joint's: `MuscleSet::linear` for position, the swing
+    /// gains for orientation.
+    pub position: bool,
+    pub orientation: bool,
+}
+
 /// Angular limits, all in radians, measured between the limit frames.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Limits {
@@ -216,6 +247,11 @@ pub struct MuscleSet {
     /// Gains per muscle name; muscles not listed use `fallback`.
     pub muscles: BTreeMap<String, MuscleGains>,
     pub fallback: MuscleGains,
+    /// Position-drive gains (N/m, N·s/m, N) per muscle name, for the muscles that drive
+    /// a position: virtual muscles. A virtual muscle not listed doesn't drive position
+    /// with this preset. Projects saved before them have none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub linear: BTreeMap<String, Gains>,
 }
 
 impl MuscleSet {
