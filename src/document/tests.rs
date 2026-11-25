@@ -783,7 +783,7 @@ fn editor_events_simulate_like_imported_ones() {
     assert!(!crate::physics::Simulation::is_needed(&doc.project));
 
     let simulate = doc
-        .add_new_clip(events::NewClip::Simulation, character, None, 45, None)
+        .add_new_clip(events::NewClip::Simulation, character, None, 46, None)
         .unwrap();
     let push = doc
         .add_new_clip(events::NewClip::Force, character, None, 45, None)

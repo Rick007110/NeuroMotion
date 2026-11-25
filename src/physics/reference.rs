@@ -223,7 +223,7 @@ pub const SCENES: &[Scene] = &[
                 1.790,
                 0.03,
                 false,
-                1.725,
+                1.83,
             ),
             fbx(
                 "flight: frame it is highest",
@@ -232,7 +232,7 @@ pub const SCENES: &[Scene] = &[
                 68.0,
                 2.0,
                 false,
-                67.0,
+                70.0,
             ),
             fbx(
                 "flight: centre of mass x, frame 68",
@@ -241,7 +241,7 @@ pub const SCENES: &[Scene] = &[
                 -0.073,
                 0.05,
                 false,
-                0.074,
+                0.20,
             ),
             fbx(
                 "flight: centre of mass x, frame 78",
@@ -250,7 +250,7 @@ pub const SCENES: &[Scene] = &[
                 -0.114,
                 0.05,
                 false,
-                0.112,
+                0.31,
             ),
             fbx(
                 "flight: centre of mass x, frame 88",
@@ -259,7 +259,7 @@ pub const SCENES: &[Scene] = &[
                 -0.155,
                 0.05,
                 false,
-                0.149,
+                0.42,
             ),
             fbx(
                 "flight: centre of mass z, frame 68",
@@ -268,7 +268,7 @@ pub const SCENES: &[Scene] = &[
                 -0.056,
                 0.05,
                 false,
-                -0.261,
+                -0.21,
             ),
             fbx(
                 "flight: centre of mass height, frame 78",
@@ -277,7 +277,7 @@ pub const SCENES: &[Scene] = &[
                 1.667,
                 0.05,
                 false,
-                1.559,
+                1.74,
             ),
             fbx(
                 "flight: centre of mass height, frame 88",
@@ -286,7 +286,7 @@ pub const SCENES: &[Scene] = &[
                 1.270,
                 0.05,
                 false,
-                1.122,
+                1.37,
             ),
             fbx(
                 "flight: left knee bend, frame 60",
@@ -295,7 +295,7 @@ pub const SCENES: &[Scene] = &[
                 61.1,
                 4.0,
                 false,
-                58.1,
+                59.2,
             ),
             fbx(
                 "flight: right knee bend, frame 60",
@@ -304,7 +304,7 @@ pub const SCENES: &[Scene] = &[
                 32.6,
                 4.0,
                 false,
-                34.6,
+                32.1,
             ),
             fbx(
                 "flight: trunk to left thigh bend, frame 70",
@@ -313,7 +313,7 @@ pub const SCENES: &[Scene] = &[
                 96.5,
                 4.0,
                 false,
-                75.4,
+                76.4,
             ),
             fbx(
                 "upside down (head under the centre of mass) from",
@@ -326,7 +326,7 @@ pub const SCENES: &[Scene] = &[
                 60.0,
                 2.0,
                 false,
-                62.0,
+                63.0,
             ),
             fbx(
                 "upside down until",
@@ -352,7 +352,7 @@ pub const SCENES: &[Scene] = &[
                 96.0,
                 2.0,
                 false,
-                94.0,
+                96.0,
             ),
             fbx(
                 "landed: centre of mass x, frame 96",
@@ -361,7 +361,7 @@ pub const SCENES: &[Scene] = &[
                 -0.358,
                 0.05,
                 false,
-                -0.073,
+                0.20,
             ),
             fbx(
                 "landed: centre of mass z, frame 96",
@@ -370,7 +370,7 @@ pub const SCENES: &[Scene] = &[
                 0.063,
                 0.05,
                 false,
-                -0.326,
+                -0.26,
             ),
             fbx(
                 "back on its feet: centre of mass x, frame 190",
@@ -579,7 +579,7 @@ pub const SCENES: &[Scene] = &[
                 0.698,
                 0.03,
                 false,
-                0.819,
+                0.83,
             ),
             fbx(
                 "hit: centre of mass height, frame 65",
@@ -597,7 +597,7 @@ pub const SCENES: &[Scene] = &[
                 0.464,
                 0.05,
                 false,
-                0.692,
+                0.70,
             ),
             fbx(
                 "down: centre of mass lowest, frames 60-100",
@@ -615,7 +615,7 @@ pub const SCENES: &[Scene] = &[
                 76.0,
                 3.0,
                 false,
-                77.0,
+                76.0,
             ),
             fbx(
                 "down: head under the centre of mass from",
@@ -628,7 +628,7 @@ pub const SCENES: &[Scene] = &[
                 75.0,
                 2.0,
                 false,
-                77.0,
+                76.0,
             ),
             fbx(
                 "carried: centre of mass z, frame 70",
@@ -637,7 +637,7 @@ pub const SCENES: &[Scene] = &[
                 1.514,
                 0.05,
                 false,
-                1.613,
+                1.58,
             ),
             fbx(
                 "lying: centre of mass x, frame 100",
@@ -646,7 +646,7 @@ pub const SCENES: &[Scene] = &[
                 0.785,
                 0.1,
                 false,
-                0.661,
+                0.75,
             ),
             fbx(
                 "lying: centre of mass z, frame 100",
@@ -655,7 +655,7 @@ pub const SCENES: &[Scene] = &[
                 1.650,
                 0.1,
                 false,
-                2.183,
+                1.93,
             ),
         ],
     },
