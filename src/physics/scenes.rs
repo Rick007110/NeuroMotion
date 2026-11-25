@@ -2594,6 +2594,12 @@ pub fn split_poses() -> Project {
 pub fn arms_out(cap: SpringCap) -> Project {
     let mut p = new_scene("Arms out", 2.0);
     p.physics.spring_cap = cap;
+    // Tuned on force-capped friction, the default when it was written. With Coulomb
+    // friction (now the default, lesson 26) the limb cap gives the same -32° / -9°, but
+    // the two-body cap's weak arms no longer hang still: rubbing against the body they
+    // creep up to -43° at frame 50 and settle near -53°, and the comparison this scene
+    // makes is between the caps, not the friction models.
+    p.physics.contact = ContactModel::ForceCapped;
     let id = add_person(
         &mut p,
         "poser",
@@ -4881,7 +4887,8 @@ mod settings_tests {
         let p = PhysicsSettings::default();
         assert_eq!(p.rate, 120.0);
         assert_eq!(p.gravity, [0.0, -9.81, 0.0]);
-        assert_eq!(p.contact, ContactModel::ForceCapped);
+        // Coulomb since lesson 26; the stand-ins that need force caps say so.
+        assert_eq!(p.contact, ContactModel::Coulomb);
         let default = p.interactions["Default"];
         assert_eq!(
             (
