@@ -9,8 +9,9 @@ toward a modern physics engine that behaves like endorphin's and then goes furth
 
 > **Status: early development.** The editor, timeline, undo/redo and endorphin import
 > work. The physics engine runs imported endorphin characters with their own bodies,
-> joint limits and muscles; all 16 bundled sample scenes checked simulate
-> cleanly over their whole length, and a test scores NeuroMotion against measurements
+> joint limits and muscles; all 17 bundled sample scenes simulate
+> cleanly over their whole length, faster than real time (the largest, Bridge Escape,
+> runs its 10.5 s in about 3 s on one core), and a test scores NeuroMotion against measurements
 > of endorphin's own runs ([docs/reference-measurements.md](docs/reference-measurements.md)).
 > Of endorphin's *behaviours*, balance (which steps
 > when pushed too hard to stand still), stagger, catch fall, body foetal, writhe and

@@ -39,13 +39,13 @@ NeuroMotion, and we need numbers to prove it.
   poses, active animations, constraints (lock and join, including negative
   "drive" strengths)
 - ✅ Scenery props, characters placed in the world, the scene's own keys
-- ✅ All 16 sample scenes clean: the real Car Hit's clavicle came apart in its
+- ✅ All 17 sample scenes clean: the real Car Hit's clavicle came apart in its
   transition back to animation, which shortened the bones it drew; transitions now
   blend each bone in its own pose's frame (lesson 18,
   [#7](https://github.com/Rick007110/NeuroMotion/issues/7)). Lessons 15 and 17 fixed
   the car's hit and the arm whipping round after it stops
   ([#23](https://github.com/Rick007110/NeuroMotion/issues/23)) in the Car carry
-  stand-in. Bridge Escape is skipped for size
+  stand-in. Bridge Escape, skipped for size until the large-scenes item, is clean too
 - ✅ Heavy bodies pressing on a character, friction only where surfaces touch, and
   characters with a joint come apart solved directly (lessons 15, 16 and 17)
 - ✅ Car Hit measured against a recording of endorphin's: a lock that falls behind
@@ -110,7 +110,13 @@ NeuroMotion, and we need numbers to prove it.
   export can write 2x or 4x the project's frame rate (the simulation itself still runs
   at 120 Hz and caches one state per scene frame; scrubbing clicks still snap to whole
   frames)
-- ⬜ **Large scenes**: Bridge Escape and other big scenes simulate at a usable speed
+- ✅ **Large scenes**: Bridge Escape and other big scenes simulate at a usable speed.
+  Measured, Bridge Escape was never slow: its file is large for its animation keys,
+  and it simulates its 10.5 s in about 3 s on one core, so it is now in the sweep (17
+  of 17 clean). Finding contacts no longer tests every pair of shapes (a sweep and
+  prune, bit for bit the same results): Balcony, the slowest sample, 4.5 to 2.9 s for
+  its 5 s. The rest of the time is the solver, mostly its direct solves
+  ([physics-design.md](docs/physics-design.md), lesson N)
 - ✅ Legacy poses that store muscle targets (`dp.nma`): imported as a held pose and
   usable as an active pose, mapped onto the character's joints and turned from a
   T-pose's arms to the pose's rest first
