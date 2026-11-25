@@ -1571,7 +1571,8 @@ endorphin's own runs were measured in (Car Hit, Back-Flip-To-Combo, Stagger Walk
 the Look and Reach and Explosion behaviour scenes) and scores how close NeuroMotion's
 numbers are; the measurements, the scores and what is still estimated from recordings
 are in [reference-measurements.md](reference-measurements.md). On the build with
-lessons up to 28, 15 of 36 measurements are within endorphin's uncertainty.
+lessons up to 36, 14 of 36 measurements are within endorphin's uncertainty (15 with
+lessons up to 28: lessons 29-31 moved Stagger Walk's knife-edge steps).
 
 Last run, over each scene's whole range, with lessons 1-36 and
 imported behaviours actually running (until the behaviour names were matched,

@@ -79,7 +79,7 @@ NeuroMotion, and we need numbers to prove it.
   angles) and scored against NeuroMotion by a test, `reference_scores`, so "behaves
   like endorphin" is checked, not eyeballed. 36 measurements in five scenes: Car Hit,
   Back-Flip-To-Combo, Stagger Walk and the Look and Reach and Explosion behaviour
-  scenes; 15 are within endorphin's uncertainty, 10 of them guarded against
+  scenes; 14 are within endorphin's uncertainty, 10 of them guarded against
   regressions, and the known gaps print their error so progress shows
   ([details](docs/reference-measurements.md)). Every number is still read from
   recordings of endorphin's runs (frame counter, fitted camera, silhouettes), not from
