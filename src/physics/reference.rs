@@ -545,7 +545,7 @@ pub const SCENES: &[Scene] = &[
                 296.0,
                 3.0,
                 false,
-                284.0,
+                289.0,
             ),
             fbx(
                 "first on the floor (a body centre under 15 cm)",
@@ -558,7 +558,7 @@ pub const SCENES: &[Scene] = &[
                 330.0,
                 3.0,
                 false,
-                329.0,
+                326.0,
             ),
             fbx(
                 "flip: trunk (pelvis to head) turned since frame 190, frame 260",
@@ -567,7 +567,7 @@ pub const SCENES: &[Scene] = &[
                 -246.7,
                 10.0,
                 false,
-                -270.3,
+                -261.8,
             ),
             fbx(
                 "flip: trunk (pelvis to head) turned since frame 190, frame 297",
@@ -576,7 +576,7 @@ pub const SCENES: &[Scene] = &[
                 -522.8,
                 10.0,
                 false,
-                -655.1,
+                -524.0,
             ),
             fbx(
                 "flip: trunk (pelvis to head) turned since frame 190, frame 330",
@@ -585,7 +585,7 @@ pub const SCENES: &[Scene] = &[
                 -688.5,
                 10.0,
                 false,
-                -862.8,
+                -645.2,
             ),
             fbx(
                 "combo: centre of mass highest, frames 500-620",
@@ -594,7 +594,7 @@ pub const SCENES: &[Scene] = &[
                 1.667,
                 0.1,
                 false,
-                0.52,
+                0.93,
             ),
         ],
     },

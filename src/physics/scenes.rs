@@ -3443,8 +3443,9 @@ mod tests {
     ///   included (they follow their animation). This is the pose the viewport draws
     ///   and exports write: while a transition blends back to animation the joints
     ///   are blended and the bodies aren't;
-    /// - `rig.csv`: every body's mass and its frame relative to the joint it hangs
-    ///   from, to place bodies on the joints;
+    /// - `rig.csv`: every body's mass, its principal moments of inertia (kg·m², about
+    ///   its frame's axes) and its frame relative to the joint it hangs from, to place
+    ///   bodies on the joints;
     /// - `shapes.csv`: every collision shape, relative to its body, for drawing.
     ///
     /// `NM_SECONDS` sets how long to simulate from the start of the range, past its
@@ -3521,7 +3522,7 @@ mod tests {
                 }
             }
         }
-        let mut bodies_on_joints = format!("character,body,joint,mass,{POSE}\n");
+        let mut bodies_on_joints = format!("character,body,joint,mass,ix,iy,iz,{POSE}\n");
         let mut shapes =
             format!("character,body,mass,shape,geometry,radius,length,sx,sy,sz,{POSE}\n");
         let frame_of = |f: &crate::document::physics::Frame| {
@@ -3531,7 +3532,18 @@ mod tests {
             let Some(rig) = &c.physics else { continue };
             for body in &rig.bodies {
                 let joint = &c.skeleton.joints[body.joint].name;
-                let head = format!("{},{},{joint},{}", c.name, body.name, body.mass);
+                // The principal moments the simulation uses (kg·m², about the body frame's
+                // axes).
+                let inertia = if rig.isotropic_inertia {
+                    [body.inertia.iter().sum::<f32>() / 3.0; 3]
+                } else {
+                    body.inertia
+                };
+                let [ix, iy, iz] = inertia;
+                let head = format!(
+                    "{},{},{joint},{},{ix},{iy},{iz}",
+                    c.name, body.name, body.mass
+                );
                 row(&mut bodies_on_joints, &head, frame_of(&body.frame));
                 for (si, shape) in body.shapes.iter().enumerate() {
                     let (kind, r, l, size) = match shape.geometry {
