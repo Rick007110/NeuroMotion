@@ -14,6 +14,7 @@ target is the same model, the same parameters, and the same behaviour.
 | Collision spheres, boxes, cylinders, capsules ("sphyls") with self-collision flags | Same shapes and flags. Long cylinders collide as capsules, flat ones (wider than long) as discs with a rounded rim |
 | Ball joints: twist range + swing cone between a parent-side and a child-side limit frame; soft zone inside a hard stop | Same frames, ranges and soft-zone springs (elliptical cone) |
 | Effectors: force-limited PD on twist and swing; calibration presets | Same gains and presets, solved as implicit force-capped springs |
+| Virtual muscles: effectors pulling the hands towards the chest and the heels towards the pelvis | Springs between the two bodies, not bones, driven by the active poses that name them (lesson N); not by active animations yet |
 | Velocity-level constraint solver at 120 Hz | Velocity-level sequential-impulse solver at the scene's rate (120 Hz), substepped |
 | Material pairs → restitution, friction, adhesion, softness | Same table. Friction is Coulomb with μ = friction / 100 (lesson 21), in imported scenes and NeuroMotion's own projects (lesson 26); projects saved before keep a cap of that many newtons per contact |
 | Simulation levels; momentum carried into physics | Same four levels; kinematic bodies carry animation velocity into the switch |
@@ -1048,6 +1049,80 @@ The first behaviour that reads its event's settings, Explosion, taught one more.
     0.05, z -0.27 m (endorphin about 96, -0.3 to -0.44 m). It flies 0.2 m lower than
     endorphin's and lands about 7 frames early; not yet looked into.
 
+Importing endorphin's virtual muscles, which had been skipped as helper joints, taught
+one more.
+
+N. **A virtual muscle is a spring between two bodies, not a bone, and only active
+    poses that name it pull with it.** Every endorphin character has four, in every
+    sample scene: `LeftArmVirtualMuscle` and `RightArmVirtualMuscle` hang from the
+    upper spine and ride the hands (their `metaBody`), `LeftLegVirtualMuscle` and
+    `RightLegVirtualMuscle` hang from the root and ride the heels. They sit where the
+    wrist and the heel's centre are at rest (0.2, 0.04, ±0.775 m from the upper spine;
+    ±0.095, -0.93, 0 m from the root), with `linearEnabled`, `twistEnabled` and
+    `swingEnabled` false, `fixedCoords="CoordsNone"` and limits of 2.6 m: they hold
+    nothing. Each has an effector of its own name, active, driving position and
+    orientation (`DrivePosAndVel`), in an effector group `VirtualMuscles`. Every preset
+    of every character lists them at exactly 1 in all nine fields (1 N/m, 1 N·s/m, 1 N
+    for position, the same for twist and swing). What drives them: whole-body active
+    poses list them among their `Objects` (Balcony, Bendy Stick, Car Crash, Catch Run,
+    Gymnast Rings, Heli Leap, Trapeze; Bridge Escape too), and some store a
+    `Relationship` for them; poses of only the legs or the arms (Walk With Gun's, Back-
+    Flip-To-Combo's) leave them out. Every active and passive animation lists them and
+    keys them (`LeftArmVirtualMuscle.quat`, `.tx` ...). No behaviour event names them.
+
+    NeuroMotion now keeps them in the rig (`PhysicsRig::virtual_muscles`: the two
+    bodies, the point on the hand or heel, which drives) and their position gains in
+    the presets (`MuscleSet::linear`); the skeleton and exported motion still leave them
+    out. In the world a `VirtualMuscle` is an implicit spring, like a muscle (capped at
+    30 Hz for the bodies it moves, lesson 4), pulling the point on the hand to where the
+    pose puts it in the chest's frame and turning the hand to the pose's orientation
+    relative to the chest, each capped at its force limit as a whole vector. Its target
+    is worked out from the pose's joints (forward kinematics, so a pose made in
+    NeuroMotion drives it too), not from the stored relationship, which says the same
+    thing for the same skeleton. Gains are its preset entries (`DesiredPoseCalibration`)
+    times the event's strength, as for the joints; a later pose eases in over an
+    earlier one as for the joints. It is off where no running pose names it, while a
+    NeuroMotion behaviour drives the character (behaviours set joint targets only), and
+    where a joint between its two bodies is cut or its muscle switched off.
+
+    What was learned:
+    - **The effector's own `<Calibration>` isn't the gains.** It reads 10 N/m, 10 N·s/m
+      and 50 N for position and 1, 10, 1 for orientation, which would make a virtual
+      muscle mostly a brake (damping ten times stiffness: at strength 10 a stand-in's
+      arms stayed down at 0.56 m from the pose against 0.25 m without). But the
+      shoulders and spine carry the very same block, and their gains come from the
+      presets, so virtual muscles' do too.
+    - **endorphin's own gains do little, and brake more than they pull.** At strength
+      10, 1 in every field is 10 N/m capped at 10 N, and 10 N·m·s/rad against the
+      hand turning. In the *Virtual reach* stand-in, a character whose shoulders can't
+      hold its arms out, the hands average 0.28 m from the pose over frames 60-120
+      without virtual muscles, 0.62 m with endorphin's gains (they slow the arm
+      rising), and 0.05 m with a character's own stronger ones (20 N/m, 2 N·s/m, 20 N
+      per unit of strength). Whether endorphin scales them some other way isn't known.
+    - **Active animations don't drive them yet.** Driven by active animations too (at
+      the scenes' strengths, 0.1 to 1: at most 1 N), they changed nothing measurable but
+      tipped Multi Martial's chaotic Stagger landing (character02, frame 363) into a
+      5.6 cm mid-foot stretch, failing the sweep; without them 1.9 cm. Off for
+      animations until that landing is robust to a nudge.
+
+    The sweep stays 16 of 16 clean. It moved only in the scenes whose poses name them
+    (max stretch / lowest body / fastest / largest lock drift):
+
+    | Scene | Before | After |
+    |---|---|---|
+    | Balcony | 1.16 cm / 0.3 cm / 17.8 m/s / 0.1 cm | 1.36 / 0.4 / 24.9 / 0.1 |
+    | Car Crash | 0.51 / 0.0 / 18.5 / 29.0 | 0.49 / 0.0 / 18.5 / 29.0 |
+    | Gymnast Rings | 0.39 / 159.4 / 6.9 / 5.1 | 0.37 / 159.5 / 6.7 / 5.1 |
+    | Heli Leap (no ground) | 0.29 / -87.4 / 17.7 / 0.4 | 0.29 / -71.1 / 16.4 / 0.3 |
+    | Trapeze | 0.61 / 1.0 / 15.8 / 0.1 | 0.76 / 1.0 / 17.3 / 0.1 |
+
+    Bendy Stick's poses that name them start after the 25 frames it runs; Catch Run's
+    pose names them but its numbers didn't move. The scenes with endorphin
+    measurements, Car Hit, Tackle, Stagger Walk, Back-Flip-To-Combo, and the behaviour
+    scenes of Look and Reach and Explosion, have no pose that names a virtual muscle,
+    so they are unchanged: nothing here moves them toward endorphin or away. None of
+    the scenes that moved has endorphin measurements to compare with.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over
@@ -1133,6 +1208,7 @@ What each stand-in reproduces:
 | Gun drop | Walk With Gun: a placeholder holds a 550 kg box in both hands (`JoinBodies`, 1e5 N and 1e4 N·m), its 0.39 kg fingers 3 cm below the box's underside, and drops with it; Coulomb friction (lesson 25) | lowest finger 1.4 cm in the ground | 2.7 to 2.8 cm above it, over 9 nudged runs |
 | Split poses | Two overlapping active poses on different joints (knees from frame 10, elbows from 20), each storing the other joints at rest (lesson 19) | knees 0°, elbows 59° at frame 150 | knees 59°, elbows 60° |
 | Arms out | Back-Flip-To-Combo's first pose: a character with clavicles, hung by the hips, poses its arms straight forward over 0.5 s (lesson 27) | arms stay hanging (-89° at frame 120) with the two-body muscle cap | -32° at frame 30, holding at -9° with the limb cap |
+| Virtual reach | A character with clavicles, hung by the hips, poses its arms straight forward at strength 10 with the two-body muscle cap, too weak to hold them; chest-to-hand virtual muscles at 20 N/m, 2 N·s/m and 20 N per unit of strength (lesson N) | hands 0.28 m from the pose on average over frames 60-120 | 0.05 m, no joint stretched over 0.1 mm; a pose that doesn't name them gives exactly the run without them |
 | Unnamed ankles | Back-Flip-To-Combo's crouch: an event names only the knees and stores the ankles bent 30° (lesson 27) | ankles don't move (0°), knees 59° | ankles 21°, knees 59° |
 | Legacy pose | A pose stored as muscle targets (endorphin's `dp.nma` format; a hand-written one) imported and held as an active pose from frame 10 by the placeholder, hung by the hips ([endorphin-formats.md](endorphin-formats.md#muscle-target-poses)) | didn't import | knees 57°, elbows 45°, hips 28° at frame 150 (targets 57°, 46°, 29°) |
 | Head on neck | A head shape that may collide with its parent, inside the neck at rest (lesson 19) | turned 44° against the neck in 1 s | 2.6° |
@@ -1155,7 +1231,10 @@ hasn't been re-run against endorphin's scene since.
 - Sever events are in (cut a joint, or switch its muscle off; `events.md`), but
   endorphin's own option names for them are unverified (`endorphin-formats.md`), and
   a severed joint can't be re-attached later.
-- Virtual-muscle reach springs.
+- Virtual muscles driven by active animations (lesson N): endorphin's animations
+  list and key them, but driving them tipped Multi Martial's Stagger landing over.
+  And how endorphin scales their gains (1 in every preset field) isn't known: with
+  them as read they do little.
 - Exact cylinders: long ones have rounded ends; flat ones a rounded rim, touching
   flat things at six rim points, the lowest rim point and the point nearest them.
 - An exact solve for joint anchors where no lock holds the chain, nothing heavy

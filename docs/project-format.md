@@ -73,6 +73,13 @@ Pretty-printed JSON, chosen over RON because every language and diff tool reads 
   moves: `"bodies"` (the joint's two bodies, the default, what Balance and Stagger are
   tuned on) or `"limbs"` (the whole limb hanging from the joint, as endorphin's muscles
   behave; imported scenes get it). A file without it gets `"bodies"`.
+- A character's physics rig may list `virtual_muscles`: springs between two of its
+  bodies (endorphin's chest-to-hand and pelvis-to-heel virtual muscles), each with
+  `name`, `muscle` (its preset entry), `parent_body`, `body`, `point` (metres, in the
+  body's frame) and whether it drives `position` and `orientation`. A muscle preset
+  may list `linear` gains (position drives, per muscle name). Both are left out of
+  files that have none and missing in older files, which load with none; the version
+  stays 2. They aren't joints: the skeleton and exported motion don't show them.
 - Key frames are local to the clip. Rotations are degrees, offsets are metres added to
   the joint's rest offset.
 - `skeleton.source` points at an external rig file; `joints` is a cached copy so the

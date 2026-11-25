@@ -24,7 +24,7 @@ use roxmltree::Node;
 use super::IoError;
 use crate::document::physics::{
     BodyDef, ContactModel, Frame, Gains, Geometry, Ground, Interaction, JointDef, Limits,
-    MuscleGains, MuscleSet, PhysicsRig, ShapeDef, SpringCap,
+    MuscleGains, MuscleSet, PhysicsRig, ShapeDef, SpringCap, VirtualMuscleDef,
 };
 use crate::document::{
     Channel, Character, CharacterId, CharacterKind, ClipKind, ClipProps, FrameRange, Interp, Joint,
@@ -363,11 +363,7 @@ pub fn import_scene(path: &Path) -> Result<Import, IoError> {
     if counts.contains_key("Behaviour") {
         notes.push("Behaviours are kept with their settings; Balance, Stagger, CatchFall, BodyFoetal, BodyWrithe, Look and Reach and Writhe in mid-air (Explosion) run NeuroMotion's own controllers, the others aren't simulated yet.".into());
     }
-    if skipped_joints > 0 {
-        notes.push(format!(
-            "Skipped {skipped_joints} virtual-muscle helper joint(s)."
-        ));
-    }
+    virtual_muscle_notes(&project, skipped_joints, &mut notes);
     if skipped_channels > 0 {
         notes.push(format!(
             "Skipped {skipped_channels} animation channel(s) for joints the rig doesn't have."
@@ -426,10 +422,30 @@ pub fn import_character(path: &Path) -> Result<Import, IoError> {
         kind.label().to_lowercase()
     };
     let mut notes = vec![format!("Imported {what} with {joints} joints.")];
-    if skipped > 0 {
-        notes.push(format!("Skipped {skipped} virtual-muscle helper joint(s)."));
-    }
+    virtual_muscle_notes(&project, skipped, &mut notes);
     Ok(Import { project, notes })
+}
+
+/// Says what became of the virtual-muscle helper joints (`helpers` of them): springs in
+/// the rigs, or left out where a character has no rig or no effector for them.
+fn virtual_muscle_notes(project: &Project, helpers: usize, notes: &mut Vec<String>) {
+    let kept: usize = project
+        .characters
+        .iter()
+        .filter_map(|c| c.physics.as_ref())
+        .map(|rig| rig.virtual_muscles.len())
+        .sum();
+    if kept > 0 {
+        notes.push(format!(
+            "{kept} virtual muscle(s) (chest to hand, pelvis to heel) kept as springs in the physics rig, not as bones."
+        ));
+    }
+    if helpers > kept {
+        notes.push(format!(
+            "Skipped {} virtual-muscle helper joint(s).",
+            helpers - kept
+        ));
+    }
 }
 
 /// Reads a pose and converts it to channels for the best-matching character.
@@ -1588,8 +1604,29 @@ fn read_rig(
         });
     }
 
+    let virtual_muscles = virtual_muscles(node, skeleton, &bodies);
     let muscle_sets = elements(child(node, "Calibrations"))
         .filter_map(|cal| {
+            // Position gains, kept for the muscles that drive a position.
+            let linear: BTreeMap<String, Gains> = elements(Some(cal))
+                .filter(|p| p.has_tag_name("SkeletalEffectorParameters"))
+                .filter_map(|p| {
+                    let name = p.attribute("name")?;
+                    virtual_muscles
+                        .iter()
+                        .any(|vm| vm.position && vm.muscle == name)
+                        .then(|| {
+                            let gain =
+                                |what: &str| number(p, &format!("linear{what}")).unwrap_or(0.0);
+                            let gains = Gains {
+                                stiffness: gain("Stiffness"),
+                                damping: gain("Damping"),
+                                force_limit: gain("ForceLimit"),
+                            };
+                            (name.to_owned(), gains)
+                        })
+                })
+                .collect();
             let skeletal = elements(Some(cal))
                 .filter(|p| p.has_tag_name("SkeletalEffectorParameters"))
                 .filter_map(|p| {
@@ -1629,6 +1666,7 @@ fn read_rig(
                 name: cal.attribute("name")?.to_owned(),
                 muscles,
                 fallback,
+                linear,
             })
         })
         .collect();
@@ -1638,7 +1676,96 @@ fn read_rig(
         joints,
         muscle_sets,
         isotropic_inertia: isotropic,
+        virtual_muscles,
     })
+}
+
+/// A character's virtual muscles: helper joints (`isVirtualMuscle="true"`) under the
+/// chest and the pelvis, each riding on a hand or heel body (its `metaBody`), with an
+/// effector of the same name. They are springs, not bones, so the skeleton leaves them
+/// out (`add_joint`) and only the rig keeps them.
+///
+/// The helper's frame at rest gives the point on the hand or heel it pulls: at the
+/// wrist and the heel's centre on the standard character. Its `SecondaryFrameOffset`
+/// (a few centimetres, differing between copies of the same character) isn't used: what
+/// it offsets isn't clear from the files. Its limits (2.6 m) and the joint's
+/// `linearEnabled`, `twistEnabled` and `swingEnabled` (all false) leave the bodies free:
+/// the helper constrains nothing. Its effector's drive modes say whether it drives
+/// position and orientation (`DriveNone` is off); an inactive effector leaves it out.
+/// Its gains, as a joint's, are its entries in the presets: every shipped character
+/// lists its virtual muscles at 1 in every field (1 N/m, 1 N·s/m, 1 N; 1 N·m/rad, ...),
+/// in every preset. The effector's own `<Calibration>` (10 N/m, 10 N·s/m, 50 N and
+/// 1, 10, 1 for orientation) is the same block the shoulders and spine carry, so it
+/// isn't read as the virtual muscles' gains, as it isn't for the joints.
+fn virtual_muscles(
+    node: Node,
+    skeleton: &SkeletonRef,
+    bodies: &[BodyDef],
+) -> Vec<VirtualMuscleDef> {
+    let Some(root) = child(node, "Skeleton") else {
+        return Vec::new();
+    };
+    let rest = world_transforms(skeleton, &Pose::rest(skeleton.joints.len()));
+    let body_index = |name: &str| bodies.iter().position(|b| b.name == name);
+    let effector = |joint: &str| {
+        node.descendants()
+            .filter(|n| n.has_tag_name("Effector"))
+            .find(|e| e.attribute("jointName") == Some(joint))
+    };
+    let mut out = Vec::new();
+    for vm in root.descendants().filter(|n| {
+        n.is_element()
+            && n.attribute("isVirtualMuscle") == Some("true")
+            && n.attribute("name")
+                .is_some_and(|name| name.contains("VirtualMuscle"))
+    }) {
+        let name = vm.attribute("name").unwrap_or_default();
+        // The joint it hangs from (the chest's, the pelvis's): its nearest ancestor the
+        // skeleton kept, and the body that joint carries.
+        let Some((parent_joint, parent)) = vm
+            .ancestors()
+            .skip(1)
+            .find_map(|a| Some((skeleton.joint_index(a.attribute("name")?)?, a)))
+        else {
+            continue;
+        };
+        let (Some(parent_body), Some(body)) = (
+            parent.attribute("metaBody").and_then(body_index),
+            vm.attribute("metaBody").and_then(body_index),
+        ) else {
+            continue;
+        };
+        let Some(effector) = effector(name).filter(|e| e.attribute("active") != Some("false"))
+        else {
+            continue;
+        };
+        let drives = |mode: &str| effector.attribute(mode).is_some_and(|m| m != "DriveNone");
+        let (position, orientation) = (drives("linearDriveMode"), drives("angularDriveMode"));
+        if !position && !orientation {
+            continue;
+        }
+        // Where the helper sits at rest, on the body it rides.
+        let (_, local_pos) = transform(vm).unwrap_or((Quat::IDENTITY, Vec3::ZERO));
+        let (pr, pp) = rest[parent_joint];
+        let at = pp + pr * local_pos;
+        let def = &bodies[body];
+        let (jr, jp) = rest
+            .get(def.joint)
+            .copied()
+            .unwrap_or((Quat::IDENTITY, Vec3::ZERO));
+        let br = (jr * Quat::from_array(def.frame.rotation).normalize()).normalize();
+        let bp = jp + jr * Vec3::from(def.frame.position);
+        out.push(VirtualMuscleDef {
+            name: name.to_owned(),
+            muscle: effector.attribute("name").unwrap_or(name).to_owned(),
+            parent_body,
+            body,
+            point: (br.inverse() * (at - bp)).to_array(),
+            position,
+            orientation,
+        });
+    }
+    out
 }
 
 /// A hinge's (lower, upper) range, as twist limits with swing locked.
@@ -2410,6 +2537,112 @@ mod tests {
         assert!((joint.hard.swing2 - 0.85).abs() < 1e-5, "{:?}", joint.hard);
         assert!((joint.hard.swing1 - 0.55).abs() < 1e-5, "{:?}", joint.hard);
         assert_eq!(project.physics.spring_cap, SpringCap::Limbs);
+    }
+
+    /// A virtual muscle (pelvis to heel here) becomes a spring in the rig: the body it
+    /// rides, the point on it where the helper sits at rest, its effector's drive modes
+    /// and its gains in the presets. It is no bone, and an inactive effector leaves it
+    /// out.
+    #[test]
+    fn virtual_muscles_become_rig_springs_not_bones() {
+        let rest = matrix(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            [0.0, 0.0, 0.0],
+        );
+        let below = matrix(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            [0.0, -0.4, 0.0],
+        );
+        let heel = matrix(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            [0.0, -0.9, 0.05],
+        );
+        let xml = |active: &str, angular: &str| {
+            format!(
+                r#"<?xml version="1.0"?>
+<Scene>
+  <Engine bpositionBufferFrameRate="{fps}"><PlaybackRange start="0" end="30"/></Engine>
+  <Characters>
+    <Character name="hero" typeName="skeletalCharacter2.5">
+      <MetaBodies>
+        <MetaBody name="PelvisMass">{rest}
+          <InertialBody><Geometry type="Sphere" bparam0="{r}"/><Inertia density="{one}"/></InertialBody>
+        </MetaBody>
+        <MetaBody name="HeelMass">{rest}
+          <InertialBody><Geometry type="Sphere" bparam0="{r}"/><Inertia density="{one}"/></InertialBody>
+        </MetaBody>
+      </MetaBodies>
+      <Skeleton name="root" metaBody="PelvisMass">{rest}<ChildJoints>
+        <SkeletalJoint name="LeftLegVirtualMuscle" metaBody="HeelMass" isVirtualMuscle="true" linearEnabled="false">{heel}</SkeletalJoint>
+        <SkeletalJoint name="Knee" metaBody="HeelMass">{below}</SkeletalJoint>
+      </ChildJoints></Skeleton>
+      <Effectors>
+        <Effector name="LeftLegVirtualMuscle" jointName="LeftLegVirtualMuscle" type="Skeletal" active="{active}" linearDriveMode="DrivePosAndVel" angularDriveMode="{angular}">
+          <Calibration blinearStiffness="{ten}" blinearDamping="{ten}" bswingStiffness="{one_}" btwistStiffness="{one_}" bswingDamping="{ten}" btwistDamping="{ten}" blinearForceLimit="{fifty}" bswingForceLimit="{one_}" btwistForceLimit="{one_}"/>
+        </Effector>
+      </Effectors>
+      <Calibrations>
+        <Calibration name="Default">
+          <SkeletalEffectorParameters blinearStiffness="{ten}" blinearDamping="{one_}" bswingStiffness="{fifty}" btwistStiffness="{fifty}" bswingDamping="{one_}" btwistDamping="{one_}" blinearForceLimit="{fifty}" bswingForceLimit="{ten}" btwistForceLimit="{ten}" name="LeftLegVirtualMuscle"/>
+          <SkeletalEffectorParameters blinearStiffness="{ten}" blinearDamping="{one_}" bswingStiffness="{fifty}" btwistStiffness="{fifty}" bswingDamping="{one_}" btwistDamping="{one_}" blinearForceLimit="{fifty}" bswingForceLimit="{ten}" btwistForceLimit="{ten}" name="Knee"/>
+        </Calibration>
+      </Calibrations>
+    </Character>
+  </Characters>
+</Scene>"#,
+                fps = hex(30.0),
+                r = hex(0.1),
+                one = hex(1000.0),
+                one_ = hex(1.0),
+                ten = hex(10.0),
+                fifty = hex(50.0),
+            )
+        };
+        let Import { project, notes } = import(&xml("true", "DrivePosAndVel"));
+        let hero = &project.characters[0];
+        let names: Vec<_> = hero
+            .skeleton
+            .joints
+            .iter()
+            .map(|j| j.name.as_str())
+            .collect();
+        assert_eq!(names, ["root", "Knee"], "no bone for the virtual muscle");
+        let rig = hero.physics.as_ref().unwrap();
+        assert_eq!(rig.joints.len(), 1, "and no joint");
+        let vm = &rig.virtual_muscles[..];
+        assert_eq!(vm.len(), 1, "{vm:?}");
+        assert_eq!(vm[0].name, "LeftLegVirtualMuscle");
+        assert_eq!((vm[0].parent_body, vm[0].body), (0, 1));
+        // The heel body sits at the knee joint, 0.4 m down: the helper 0.5 m below it.
+        let point = Vec3::from(vm[0].point);
+        assert!(
+            (point - Vec3::new(0.0, -0.5, 0.05)).length() < 1e-5,
+            "{point}"
+        );
+        assert!(vm[0].position && vm[0].orientation);
+        // Its gains are its preset entries; only it keeps position gains.
+        let set = &rig.muscle_sets[0];
+        let linear = set.linear["LeftLegVirtualMuscle"];
+        assert_eq!(
+            (linear.stiffness, linear.damping, linear.force_limit),
+            (10.0, 1.0, 50.0)
+        );
+        assert_eq!(set.linear.len(), 1);
+        assert_eq!(set.muscles["LeftLegVirtualMuscle"].swing.stiffness, 50.0);
+        assert!(
+            notes.iter().any(|n| n.contains("1 virtual muscle")),
+            "{notes:?}"
+        );
+
+        let rig = |xml: &str| import(xml).project.characters[0].physics.clone().unwrap();
+        let no_turn = rig(&xml("true", "DriveNone"));
+        assert!(!no_turn.virtual_muscles[0].orientation);
+        assert!(no_turn.virtual_muscles[0].position);
+        assert!(
+            rig(&xml("false", "DrivePosAndVel"))
+                .virtual_muscles
+                .is_empty()
+        );
     }
 
     #[test]

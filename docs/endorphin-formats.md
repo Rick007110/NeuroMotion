@@ -67,8 +67,9 @@ Seen on endorphin 2.5.2's sample scenes (Bendy Stick, Car Crash and Heli Leap ru
 **Characters.** Each character, prop and the environment becomes a NeuroMotion
 character, with its endorphin name kept (`character01`, `prop01`, `background`) because
 events refer to characters by name. Joints keep their real names, offsets and rest
-orientations. Virtual-muscle helper joints are left out: they are solver links between
-distant body parts, not bones, and the import report says how many were skipped.
+orientations. Virtual-muscle helper joints (`isVirtualMuscle="true"`) are left out of
+the skeleton: they are springs between distant body parts, not bones. The physics rig
+keeps them instead (see *Virtual muscles* below), and the import report says how many.
 Each character's own `TransformMatrix` is where it sits in the world (Catch Rope's
 runner starts on a roof 15.8 m up, the gymnast hangs 1.7 m up); see *Starting poses*.
 
@@ -112,6 +113,33 @@ frame's X axis, `swing1Size` for the turn about its Z axis and `swing2Size` abou
 axis (the active poses endorphin's scenes store sit inside the cones read this way, and
 far outside them read the other way: physics-design.md, lesson 27).
 Imported scenes also get Coulomb friction (lesson 21) and the whole-limb muscle cap.
+
+**Virtual muscles.** Every character in the install (the standard one, the custom
+ones, every copy in the sample scenes) has four helper joints with
+`isVirtualMuscle="true"`: `LeftArmVirtualMuscle` and `RightArmVirtualMuscle` under
+`UpperSpineJoint`, riding `LeftHandMass` and `RightHandMass` (their `metaBody`), and
+`LeftLegVirtualMuscle` and `RightLegVirtualMuscle` under the root, riding
+`LeftHeelMass` and `RightHeelMass`. Their `TransformMatrix` puts them where the wrist
+and the heel's centre are at rest on the standard character (0.2, 0.04, ±0.775 m from
+the upper spine; ±0.095, -0.9255, 0 m from the root); some rescaled characters keep
+those values (Car Hit's pedestrian: 6.5 cm beyond its wrist), others have their own. `fixedCoords="CoordsNone"`,
+`linearEnabled`, `twistEnabled` and `swingEnabled` false and limits of 2.6 m (soft)
+and 2.65 m (hard, `radius` included) mean they constrain nothing. Their
+`SecondaryFrameOffset` carries a few centimetres of translation that differs between
+copies of the same character; NeuroMotion doesn't use it, as what it offsets isn't
+clear. Each has a `Skeletal` effector of the same name, active, with
+`linearDriveMode` and `angularDriveMode` `DrivePosAndVel`, grouped as
+`VirtualMuscles`; every preset (`Default`, `DesiredPoseCalibration` and the others)
+lists them at 1 in all nine fields, linear included. The effector's own
+`<Calibration>` block (linear 10, 10, 50; angular 1, 10, 1) is the same one the
+shoulders and spine carry. Whole-body active poses list them in their `Objects`, and
+some store a `Relationship` for them (the hand or heel relative to the chest or
+pelvis); every animation lists and keys them (`.quat`, `.tx`, `.ty`, `.tz`).
+NeuroMotion imports each as a `VirtualMuscleDef` in the rig (the two bodies, the
+point on the hand or heel where the helper sits at rest, and which drives its
+effector's modes switch on; an inactive effector leaves it out) and their linear
+gains into the presets' `linear` table; the skeleton, animation channels and exported
+motion leave them out. How they are simulated: physics-design.md, lesson N.
 
 **Every other event** becomes an *event clip* on a track named after its kind:
 Forces, Behaviours, Constraints, Simulations, Active poses, Transitions, Motion

@@ -81,6 +81,9 @@ behave the same way, then improved:
 - Per-character simulation levels (animated, collision only, collision with momentum,
   simulated), momentum carried from animation into physics, push events, active poses,
   active animations, lock/join constraints, and transitions back to animation.
+- endorphin's virtual muscles, springs pulling the hands towards the chest and the heels
+  towards the pelvis, driven by the active poses that name them (not yet by active
+  animations).
 - Behaviours: balance (capture-point ankle strategy, stepping when the ankles can't
   hold), stagger (balance that keeps stepping), catch fall (arms reach for the
   ground), body foetal (curl up), writhe (weak, wandering struggle), look and reach

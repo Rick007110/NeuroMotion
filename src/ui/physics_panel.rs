@@ -8,6 +8,7 @@ use super::selection::Selection;
 use super::theme::{grid, section};
 use crate::document::physics::{
     BodyDef, ContactModel, Geometry, Interaction, JointDef, PhysicsSettings, SpringCap,
+    VirtualMuscleDef,
 };
 use crate::document::{CharacterId, Document, Edit, Project};
 
@@ -434,6 +435,16 @@ pub(super) fn body_page(
     for joint in rig.joints.iter().filter(|j| j.body == index) {
         joint_section(ui, rig.bodies.as_slice(), joint, character, selection);
     }
+    for (n, vm) in rig
+        .virtual_muscles
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| v.body == index || v.parent_body == index)
+    {
+        ui.push_id(("virtual_muscle", n), |ui| {
+            virtual_muscle_section(ui, rig.bodies.as_slice(), vm, character, selection);
+        });
+    }
     ui.add_space(6.0);
     ui.weak("Read-only: bodies come from the character or scene file.");
 }
@@ -543,6 +554,42 @@ fn joint_section(
             ui.label(&joint.muscle);
             ui.end_row();
         });
+    });
+}
+
+/// A virtual muscle this body pulls or is pulled by: a spring, not a joint, so it's
+/// shown apart from the joints (docs/physics-design.md).
+fn virtual_muscle_section(
+    ui: &mut Ui,
+    bodies: &[BodyDef],
+    vm: &VirtualMuscleDef,
+    character: CharacterId,
+    selection: &mut Selection,
+) {
+    section(ui, "Virtual muscle", |ui| {
+        grid(ui, "body_virtual_muscle", |ui| {
+            ui.label("Name");
+            ui.label(&vm.name);
+            ui.end_row();
+            for (label, body) in [("From", vm.parent_body), ("Pulls", vm.body)] {
+                ui.label(label);
+                if let Some(b) = bodies.get(body)
+                    && ui.link(&b.name).clicked()
+                {
+                    *selection = Selection::Body { character, body };
+                }
+                ui.end_row();
+            }
+            ui.label("Drives");
+            ui.label(match (vm.position, vm.orientation) {
+                (true, true) => "position and orientation",
+                (true, false) => "position",
+                (false, true) => "orientation",
+                (false, false) => "nothing",
+            });
+            ui.end_row();
+        });
+        ui.weak("Active poses that name it pull the body towards where the pose puts it.");
     });
 }
 

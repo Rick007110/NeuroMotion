@@ -84,7 +84,7 @@ always clear what you're editing. Controls are grouped by what they affect:
 |-----------|--------|
 | Nothing   | General · Time (fps, range) · Physics (below) · Characters · Contents |
 | Character | Rig · Physics (bodies, starting simulation level) · Tracks (add a track) |
-| Body      | Body (character, joint, mass, inertia, centre of mass) · Shapes · Joint to parent. Read-only |
+| Body      | Body (character, joint, mass, inertia, centre of mass) · Shapes · Joint to parent · Virtual muscle (for a hand, heel, chest or pelvis that has one: the two bodies and what it drives). Read-only |
 | Track     | Track (name, mute) · delete track |
 | Clip      | Clip (name, enabled, track) · Timing (start, duration) · Blending (weight, blend in/out, live influence) · Channels |
 | Event     | Clip · Timing · the event's own settings (see [events.md](events.md)) |

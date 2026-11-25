@@ -183,6 +183,22 @@ mod tests {
         assert_eq!(from_str(&text).unwrap(), project);
     }
 
+    /// A rig without virtual muscles is written as older builds wrote it, so files saved
+    /// before them (no `virtual_muscles`, no presets' `linear` gains) load, with none.
+    #[test]
+    fn rigs_without_virtual_muscles_keep_the_old_format() {
+        let project = placeholder_project();
+        assert!(project.characters[0].physics.is_some());
+        let text = to_string(&project).unwrap();
+        assert!(!text.contains("virtual_muscles") && !text.contains("\"linear\""));
+        let rig = from_str(&text).unwrap().characters[0]
+            .physics
+            .clone()
+            .unwrap();
+        assert!(rig.virtual_muscles.is_empty());
+        assert!(rig.muscle_sets.iter().all(|s| s.linear.is_empty()));
+    }
+
     #[test]
     fn migrates_v1_projects() {
         let project = placeholder_project();
