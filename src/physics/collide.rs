@@ -354,7 +354,7 @@ pub fn between(a: &Placed, b: &Placed, margin: f32, out: &mut Vec<Contact>) {
 fn rim(rotation: Quat, center: Vec3, core: f32) -> [Vec3; RIM_POINTS] {
     std::array::from_fn(|i| {
         let angle = i as f32 * std::f32::consts::TAU / RIM_POINTS as f32;
-        center + rotation * Vec3::new(angle.cos() * core, angle.sin() * core, 0.0)
+        center + rotation * Vec3::new(libm::cosf(angle) * core, libm::sinf(angle) * core, 0.0)
     })
 }
 

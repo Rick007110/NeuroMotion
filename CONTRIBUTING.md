@@ -152,10 +152,13 @@ the solver.
 - Keep the module boundaries in [ARCHITECTURE.md](ARCHITECTURE.md): `document` and
   `physics` never depend on `ui`.
 - Comment *why*, not *what*. Units go in names or comments (N, N·m, kg, radians, frames).
-- Simulation must stay deterministic: the same project gives the same result on every
-  run of the same build on the same machine. No randomness, no wall-clock time in the
-  physics, no iteration over hash maps where order matters. Other platforms can differ
-  in the last bits (their maths libraries round differently), and a chaotic moment
-  can make that a visibly different outcome, so a test mustn't depend on one exact
-  number near a limit (see `nudge_survey` below).
+- Simulation must stay deterministic: the same project gives the same result, bit for
+  bit, on every run and on Linux, Windows and macOS. No randomness, no wall-clock time
+  in the physics, no iteration over hash maps where order matters. Use the `libm`
+  crate for `sin`, `cos`, `atan2`, `exp`, `powf` and the like (`libm::sinf(x)`, not
+  `x.sin()`; clippy refuses the std ones): the platforms' own maths libraries round
+  differently in the last bit, and a chaotic moment makes that a visibly different
+  outcome. `simulations_are_bit_identical_everywhere` checks this on CI. A change to
+  the physics still moves chaotic numbers, so a test mustn't depend on one exact
+  number near a limit (see `nudge_survey` above).
 - Text the user sees is plain, short English, in NeuroMotion's own words.

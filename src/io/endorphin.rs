@@ -733,7 +733,7 @@ fn muscle_target_channels(
         let a = flat(pose_at(r)? - pose_at(l)?);
         let b = flat(rest[r].1 - rest[l].1);
         (a.length() > 1e-3 && b.length() > 1e-3)
-            .then(|| Quat::from_rotation_y(a.cross(b).y.atan2(a.dot(b))))
+            .then(|| Quat::from_rotation_y(libm::atan2f(a.cross(b).y, a.dot(b))))
     });
     let mut notes = Vec::new();
     let turn = facing.unwrap_or_else(|| {

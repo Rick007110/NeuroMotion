@@ -69,14 +69,15 @@ to ±(force limit × h). This makes them unconditionally stable at any gain, whi
 what makes endorphin's 1000–6000 N·m/rad presets usable.
 
 Everything is single-threaded with a fixed order, so a scene always simulates the same
-way with the same build on the same machine. That determinism is what allows
-automatic re-simulation. It isn't bit-identical across platforms: `sin`, `cos`,
-`atan2`, `acos` and `powf` come from the platform's maths library, which can round
-differently in the last bit (glibc even picks FMA variants by CPU at run time).
-Usually that stays in the last bits, but a chaotic moment (a foot landing near the
-edge of a recovery, a light limb whipping round) amplifies it into a visibly different
-outcome. Tests therefore check statements that hold when the scene is nudged slightly
-(`nudge_survey`), not one exact number near a limit.
+way. That determinism is what allows automatic re-simulation. It is bit-identical
+across platforms too (lesson 30): `sin`, `cos`, `atan2`, `acos`, `exp` and the like
+come from the pure-Rust `libm` crate, not the platform's maths library, which rounds
+differently in the last bit from one OS (and CPU) to the next; glam is built with
+`libm` and `scalar-math`. A chaotic moment (a foot landing near the edge of a
+recovery, a light limb whipping round) would amplify a last-bit difference into a
+visibly different outcome, and any change to the code still can, so tests check
+statements that hold when the scene is nudged slightly (`nudge_survey`), not one exact
+number near a limit.
 
 ## Muscle targets (what the muscles try to reach)
 
@@ -1116,6 +1117,50 @@ The first behaviour that reads its event's settings, Explosion, taught one more.
     thread), the sweep the same 12.3 s; Car carry, solved directly for longer, about
     1.4 times as long.
 
+30. **The maths comes from `libm`, so every platform simulates bit for bit the same.**
+    Lesson 29's two stand-ins came out differently on CI's Linux runner than on a Linux
+    machine here (and passed on CI's macOS), from the same code.
+    Rust's `f32::sin`, `cos`, `atan2`, `acos`, `exp` and `powf` call the platform's
+    maths library, which rounds the last bit its own way (glibc even picks routines by
+    what the CPU offers, at run time); `sqrt` and the four operations are exactly
+    rounded everywhere, and Rust never fuses a multiply and an add on its own. glam's
+    rotations (`from_axis_angle`, `slerp`, `to_euler`, ...) call the same functions,
+    and its SIMD types (`Quat` on SSE2 or NEON) may add up a dot product in another
+    order on another CPU.
+    Now every such call in the crate goes through the pure-Rust `libm` crate
+    (`libm::sinf(x)` for `x.sin()`: behaviours, collision, the solver, the importer's
+    rest-pose turn, force headings, the demo animation, and the viewport's camera for
+    good measure), and glam is built with its `libm` and `scalar-math` features, so its
+    maths uses the same functions and plain arithmetic in a fixed order. `clippy.toml`
+    refuses the std functions, so new code can't slip back. `powi` is left: it is a
+    product (the same in debug, where compiler-builtins multiplies, and release,
+    where LLVM does).
+    `simulations_are_bit_identical_everywhere` hashes every frame of three stand-ins
+    whose outcome turns on the last bit within a second or two (Car Hit's car running
+    the pedestrian over, the mid-air Explosion's landing, Stagger after a 2.8 m/s
+    push): CI checks the hashes on Linux, Windows and macOS in debug, and here in
+    release. A physics change changes them on purpose; the test prints the new ones.
+    The results moved, as any last-bit change moves chaotic scenes (`libm` rounds
+    differently from glibc). Over 41 nudged runs: Car Hit 0.56 to 2.38 cm; the
+    Explosion 0.55 to 1.35 cm, and 0.15 to 20 cm/s at the end, with one run over the
+    test's 10 cm/s: it lies face down with a leg propped up on its knee and limbs still
+    shifting (in a similar run such a leg toppled over late); the unnudged run, the
+    one the test checks, 8.4 cm/s. Lying limp, nothing holds a raised knee, and when
+    it falls turns on the last bit; a little muscle tone (5 % of
+    the strength) or holding the legs straight moved the tail but didn't remove it, so
+    this is still open. Car carry: up to the stop 0.30 to 0.87 cm for the body, after
+    the stop 0.08 to 0.57; Balance as before but forwards 10 to 12 of 12 (10 to 11);
+    Stagger's fewest steps after one push 5 to 7, 26 to 37 in all, feet 2.2 to 3.5
+    times as far as Balance's. The endorphin sweep stays 16 of 16 clean (Catch Rope's
+    worst joint 0.47 to 1.38 cm, Trapeze's 0.69 to 1.10; the others within 0.2 cm).
+    The physics demo's FBX round trip then read the ankle 1.08 mm off, over the test's
+    1 mm: the exporter left out each joint's stretch under 1 mm, and a hip's, knee's
+    and ankle's added up at the ankle (0.86 mm before, by luck). It now keeps a joint's
+    translation when leaving it out would put the joint itself over 1 mm out
+    (docs/export.md); 0.89 mm.
+    Speed: the release tests take 9.9 s on one thread either way, the sweep 11.5 to
+    12.0 s against 10.6 to 11.8 with the platform's maths, within the runs' spread.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over
@@ -1139,7 +1184,7 @@ set-up (ground, rigs, events, constraint targets and settings).
 Each failure also gets a stand-in built in code (`src/physics/scenes.rs`) with the
 same pattern, so it can be worked on without endorphin's files.
 
-Last run, over each scene's whole range, with lessons 1-29 and
+Last run, over each scene's whole range, with lessons 1-30 and
 imported behaviours actually running (until the behaviour names were matched,
 `docs/behaviours.md`, none of them ran in these scenes); 16 scenes, Bridge Escape is
 skipped for size:
@@ -1149,10 +1194,10 @@ skipped for size:
 | Clean | All 16: Arrows, Balcony, Bendy Stick, Car Crash, Car Hit, Catch Rope, Catch Run, Gymnast Rings, Heli Leap, Multi Martial, Rotating Floor, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
 | Failing | None |
 
-Max joint stretch per scene over its whole range: Arrows 0.40 cm, Balcony 0.75,
-Bendy Stick 0.61, Car Crash 0.34, Car Hit 0.80, Catch Rope 0.47, Catch Run 1.41,
-Gymnast Rings 0.39, Heli Leap 0.29, Multi Martial 0.54, Rotating Floor 0.87, Stagger
-Walk 0.30, Sword Play 0.63, Tackle 0.51, Trapeze 0.69, Walk With Gun 0.06 (the whole
+Max joint stretch per scene over its whole range: Arrows 0.41 cm, Balcony 0.78,
+Bendy Stick 0.61, Car Crash 0.34, Car Hit 0.80, Catch Rope 1.38, Catch Run 1.41,
+Gymnast Rings 0.39, Heli Leap 0.29, Multi Martial 0.61, Rotating Floor 0.46, Stagger
+Walk 0.48, Sword Play 0.70, Tackle 0.54, Trapeze 1.10, Walk With Gun 0.06 (the whole
 sweep takes about 12 s on four cores). The largest lock drifts are Car Hit's 38 cm (the car falling
 behind its carrier at frame 5, lesson 20) and Car Crash's 29 cm; Walk With Gun's hands'
 join drifts 0.7 cm (14.6 before lesson 25) and its lowest body is 1.4 cm
@@ -1205,8 +1250,8 @@ What each stand-in reproduces:
 | Legacy pose | A pose stored as muscle targets (endorphin's `dp.nma` format; a hand-written one) imported and held as an active pose from frame 10 by the placeholder, hung by the hips ([endorphin-formats.md](endorphin-formats.md#muscle-target-poses)) | didn't import | knees 57°, elbows 45°, hips 28° at frame 150 (targets 57°, 46°, 29°) |
 | Head on neck | A head shape that may collide with its parent, inside the neck at rest (lesson 19) | turned 44° against the neck in 1 s | 2.6° |
 | Curl hand-back | Car Hit's hand-back: a character with clavicles curls up on the ground (BodyFoetal), then a 0.75 s transition, overlapping the curl's end, blends it back onto its standing animation (lesson 18) | 16.6 cm (knee) mid-transition | 0.09 cm |
-| Car hit | A keyed car (collision with momentum) drives through a standing placeholder at 15 m/s, throws them along the road, catches them again and pushes them under its bumper; Coulomb friction (lesson 29) | 1.95 to 12.7 cm over 41 nudged runs (5 over the sweep's 5 cm) | 0.55 to 2.32 cm |
-| Mid-air | endorphin's "Writhe in mid-air": a character with clavicles and forearm twists, resting in a T-pose, dropped from 4 m running Explosion with the 2.5 scene's settings (lesson 28) | falls with its arms out, lands limp | arms +44° at frame 24 and -56° at 50 (endorphin +35-38° at 20-30, -40 to -58° at 42-46), upright in the air, feet first at 54, still on its back; over 41 runs with the height nudged, worst joint 0.55 to 1.27 cm and 0.3 to 6.5 cm/s at the end (0.76 to 15.2 cm and up to 18.6 cm/s before lesson 29) |
+| Car hit | A keyed car (collision with momentum) drives through a standing placeholder at 15 m/s, throws them along the road, catches them again and pushes them under its bumper; Coulomb friction (lesson 29) | 1.95 to 12.7 cm over 41 nudged runs (5 over the sweep's 5 cm) | 0.55 to 2.32 cm (0.56 to 2.38 with lesson 30) |
+| Mid-air | endorphin's "Writhe in mid-air": a character with clavicles and forearm twists, resting in a T-pose, dropped from 4 m running Explosion with the 2.5 scene's settings (lesson 28) | falls with its arms out, lands limp | arms +44° at frame 24 and -56° at 50 (endorphin +35-38° at 20-30, -40 to -58° at 42-46), upright in the air, feet first at 54, still on its back; over 41 runs with the height nudged, worst joint 0.55 to 1.27 cm and 0.3 to 6.5 cm/s at the end (0.76 to 15.2 cm and up to 18.6 cm/s before lesson 29); with lesson 30, 0.55 to 1.35 cm and 0.15 to 20 cm/s, one run in 41 over 10 cm/s (a limp leg toppling late, still open) |
 | Tilting floor | Rotating Floor's end: no ground; a long collision-only slab with a wall at its low end tilts 20°, carrying a character 1.9 m below y = 0 | fails the sweep (lowest -1.9 m) | rides it (nothing under the slab) |
 | Roof edge | Heli Leap's jumper: no ground; a character runs off a roof whose top is at y = 0 and falls past the building's side | fails the sweep (lowest -10.6 m) | falls 10.6 m beside the building |
 | Cut rope | Catch Rope: a force on the environment's track names a rope's end; the environment's roof is massless; the rope's last link is cut at 1 s | roof drifts 1.98 m in 2 s, rope end not pushed; the cut link counts as 0.83 m stretch | roof still, end swings 0.14 m; cut link not counted |
@@ -1234,12 +1279,6 @@ hasn't been re-run against endorphin's scene since.
   solve steps in, and a hard landing opens ankles by 2-3 cm for a substep or two.
 - A sweep measure for joints that open sideways: it compares bone lengths, which
   read Car carry's 14 cm shoulder gap as 2.1 cm (lesson 17).
-- Bit-identical results across platforms. Results are identical run to run with the
-  same build on the same machine, but `sin`, `cos`, `atan2`, `acos` and `powf` come
-  from the platform's maths library and can differ in the last bit, which a chaotic
-  moment can grow into a different outcome. If identical results everywhere become a
-  goal, the physics could use pure-Rust maths that rounds the same everywhere (the
-  `libm` crate, say) instead of the platform's.
 - Interpolated output between frames.
 - Contacts in the direct solve, for the groups where they aren't yet. Those of free
   lock groups against the ground and massless scenery are in (lesson

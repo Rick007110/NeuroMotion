@@ -85,7 +85,7 @@ pub fn placeholder_project() -> Project {
 
     let idle_len = 240;
     let wave = |period: f32, amp: f32, phase: f32, bias: f32| {
-        move |t: f32| bias + amp * (TAU * t / period + phase).sin()
+        move |t: f32| bias + amp * libm::sinf(TAU * t / period + phase)
     };
     project.add_clip(
         ClipProps {

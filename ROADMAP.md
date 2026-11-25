@@ -94,10 +94,11 @@ NeuroMotion, and we need numbers to prove it.
   ([endorphin-formats.md](docs/endorphin-formats.md#muscle-target-poses)). On the
   Standard character its spine bends less than the pose's: its 46° and 34° are past
   that spine's limits, and the middle spine joint gets no share
-- ⬜ Bit-identical results across platforms (optional): today the same build on the
-  same machine always gives the same result, but other platforms' maths libraries
-  round in the last bit, which chaotic moments can turn into a different outcome.
-  Pure-Rust maths (e.g. the `libm` crate) would make every platform identical.
+- ✅ Bit-identical results across platforms: the physics' `sin`, `cos`, `atan2`,
+  `acos`, `exp` and the like come from the pure-Rust `libm` crate, and glam's from its
+  `libm` and `scalar-math` features, so Linux, Windows and macOS simulate every scene
+  bit for bit the same (CI checks a hash of three stand-ins on all three). No
+  measurable cost in speed
 
 ## Milestone 2: Behaviours
 

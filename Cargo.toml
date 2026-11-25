@@ -11,7 +11,10 @@ readme = "README.md"
 [dependencies]
 eframe = "0.31"
 flate2 = "1.1.10"
-glam = "0.30"
+# Pure-Rust maths (`libm`) and no SIMD (`scalar-math`), so the simulation rounds the same
+# on every platform (docs/physics-design.md, lesson 30).
+glam = { version = "0.30", features = ["libm", "scalar-math"] }
+libm = "0.2"
 rfd = "0.17.2"
 roxmltree = "0.21.1"
 serde = { version = "1.0.229", features = ["derive"] }

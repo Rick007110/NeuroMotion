@@ -287,7 +287,11 @@ pub fn pose_channels(character: &Character, pose: &[(Quat, Vec3)]) -> Vec<Channe
 /// 90 = +X) and an elevation (degrees above horizontal).
 pub fn push(speed: f32, heading: f32, elevation: f32) -> Vec3 {
     let (h, e) = (heading.to_radians(), elevation.to_radians());
-    Vec3::new(h.sin() * e.cos(), e.sin(), h.cos() * e.cos()) * speed
+    Vec3::new(
+        libm::sinf(h) * libm::cosf(e),
+        libm::sinf(e),
+        libm::cosf(h) * libm::cosf(e),
+    ) * speed
 }
 
 /// The inverse of [`push`]: (speed, heading, elevation).
@@ -297,13 +301,13 @@ pub fn push_parts(velocity: Vec3) -> (f32, f32, f32) {
         return (0.0, 0.0, 0.0);
     }
     let d = velocity / speed;
-    let heading = match d.x.atan2(d.z).to_degrees() {
+    let heading = match libm::atan2f(d.x, d.z).to_degrees() {
         // Straight back reads as 180°, not −180°.
         h if h < -179.999 => 180.0,
         h if h.abs() < 1e-4 => 0.0,
         h => h,
     };
-    let elevation = d.y.clamp(-1.0, 1.0).asin().to_degrees();
+    let elevation = libm::asinf(d.y.clamp(-1.0, 1.0)).to_degrees();
     (speed, heading, elevation)
 }
 

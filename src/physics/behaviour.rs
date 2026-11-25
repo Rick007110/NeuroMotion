@@ -672,7 +672,7 @@ impl Drive<'_> {
         let mut target = capture;
         for _ in 0..2 {
             let eta = (STEP_TIME + from.distance(target) / FOOT_SPEED).min(gait.ahead);
-            let ahead = edge + (capture - edge) * (eta / fall.max(0.05)).exp();
+            let ahead = edge + (capture - edge) * libm::expf(eta / fall.max(0.05));
             target = ahead + (ahead - middle).normalize_or_zero() * gait.overshoot;
         }
         let across = (target - middle).dot(outward);
@@ -1375,7 +1375,7 @@ struct Wander {
 impl Wander {
     fn at(self, i: usize) -> f32 {
         let rate = 0.5 + ((i * 7) % 11) as f32 * 0.1;
-        (rate * self.elapsed + i as f32 * 2.4).sin()
+        libm::sinf(rate * self.elapsed + i as f32 * 2.4)
     }
 }
 
@@ -1961,7 +1961,7 @@ fn explosion(d: &mut Drive, e: Explosion) {
     // it on characters still on their feet as they are kicked.
     let chest = layout.chest.unwrap_or(layout.pelvis);
     let trunk = d.body(chest).position - d.body(layout.pelvis).position;
-    let tilt = trunk.normalize_or(Vec3::Y).y.clamp(-1.0, 1.0).acos();
+    let tilt = libm::acosf(trunk.normalize_or(Vec3::Y).y.clamp(-1.0, 1.0));
     let lying =
         ((tilt - EXPLOSION_LYING.0) / (EXPLOSION_LYING.1 - EXPLOSION_LYING.0)).clamp(0.0, 1.0);
     d.preset(
@@ -2007,7 +2007,7 @@ fn explosion(d: &mut Drive, e: Explosion) {
             let turn = Turn {
                 bend: -e.back_arch * EXPLOSION_ARCH / n as f32,
                 twist: if i + 1 == n {
-                    airborne * e.head_turn * EXPLOSION_HEAD * (0.5 * angle).sin()
+                    airborne * e.head_turn * EXPLOSION_HEAD * libm::sinf(0.5 * angle)
                 } else {
                     0.0
                 },
@@ -2029,12 +2029,12 @@ fn explosion(d: &mut Drive, e: Explosion) {
         let cycle = angle + l as f32 * PI;
         let swing = airborne * e.legs;
         let hip = Turn {
-            bend: -swing * EXPLOSION_HIP * cycle.sin(),
+            bend: -swing * EXPLOSION_HIP * libm::sinf(cycle),
             side: side * EXPLOSION_SPREAD,
             twist: 0.0,
         };
         let knee = Turn {
-            bend: swing * EXPLOSION_KNEE * (0.5 + 0.5 * cycle.cos()),
+            bend: swing * EXPLOSION_KNEE * (0.5 + 0.5 * libm::cosf(cycle)),
             ..Turn::default()
         };
         d.pose_chain(
@@ -2050,12 +2050,12 @@ fn explosion(d: &mut Drive, e: Explosion) {
     // The arms flap together about out to the sides; the elbows bend most just after
     // the arms are at their highest, bringing the hands in over the head.
     let Some(chest) = layout.chest else { return };
-    let lift = airborne * e.shoulder * EXPLOSION_SHOULDER * angle.sin();
-    let bend = airborne * e.elbow * EXPLOSION_ELBOW * (0.5 + 0.5 * (angle - FRAC_PI_4).sin());
+    let lift = airborne * e.shoulder * EXPLOSION_SHOULDER * libm::sinf(angle);
+    let bend = airborne * e.elbow * EXPLOSION_ELBOW * (0.5 + 0.5 * libm::sinf(angle - FRAC_PI_4));
     for &arm in &layout.arms {
         let frame = d.chest_frame(chest, arm);
         // (up, forward, out) weights: out to the side, turned up by `a`.
-        let along = |a: f32| Vec3::new(a.sin(), 0.15, a.cos());
+        let along = |a: f32| Vec3::new(libm::sinf(a), 0.15, libm::cosf(a));
         d.point_arm(arm, frame, along(lift), along(lift + bend));
     }
 }

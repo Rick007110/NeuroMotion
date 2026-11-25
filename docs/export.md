@@ -32,7 +32,7 @@ grid.
 | Hierarchy | The character's own skeleton. Each `OFFSET` is the joint's rest offset in its parent's frame. Roots sit at the origin (`OFFSET 0 0 0`). |
 | Rotation channels | The joint's **full local rotation**: rest orientation times the animated rotation. Importers don't need to know about rest orientations, and the motion plays back exactly. |
 | Rotation order | `X Y Z` (the order NeuroMotion keys in) for every joint whose motion stays clear of gimbal lock; otherwise, per joint, whichever order keeps the middle angle furthest from ±90°. Curves are made continuous frame to frame (no 360° jumps or flips). |
-| Position channels | On the root, holding its full position. Other joints only get them when their offset is animated by more than 1 mm (simulated joints stretch by fractions of a millimetre; that is left out). Position channels hold the joint's full local position, replacing its `OFFSET`, which is how Blender and MotionBuilder read them. |
+| Position channels | On the root, holding its full position. Other joints only get them when their offset is animated by more than 1 mm, or when leaving that out would put the joint itself more than 1 mm from where it is (stretch left out at a hip and a knee adds up at the ankle). Simulated joints stretch by fractions of a millimetre; that is left out. Position channels hold the joint's full local position, replacing its `OFFSET`, which is how Blender and MotionBuilder read them. |
 | End sites | Leaves get a short tip along their own bone so importers can draw them. |
 | Names | Joint names with spaces or `" : { } ,` get `_` instead, and repeated names get a number. |
 | Units | Metres by default (Blender's unit). Centimetres for tools that expect them (Maya, MotionBuilder). |
@@ -116,8 +116,9 @@ and a hand-made skeleton with rotated rest frames (one joint sitting exactly at 
 gimbal lock), read each file back with independent readers (BVH; binary FBX, checking
 every record offset and the footer; ASCII FBX, which must say exactly what the binary
 says) and check forward-kinematics joint positions against the source at every frame.
-Errors are under 0.001 mm for keys and under 0.5 mm for the simulation (the
-simulation's tiny joint stretch is the difference).
+Errors are under 0.001 mm for keys and under 1 mm for the simulation (the
+simulation's tiny joint stretch, left out, is the difference; 0.9 mm in the physics
+demo).
 
 `src/document/tests.rs` bakes the placeholder animation and the physics demo's
 simulation, checks the keys alone reproduce every joint within 0.1 mm (keys) and 2 mm

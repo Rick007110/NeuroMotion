@@ -551,7 +551,7 @@ pub fn swing_twist(q: Quat) -> (f32, Vec3) {
         return (0.0, q.to_scaled_axis());
     }
     let twist = Quat::from_xyzw(q.x / twist_len, 0.0, 0.0, q.w / twist_len);
-    let angle = 2.0 * q.x.atan2(q.w);
+    let angle = 2.0 * libm::atan2f(q.x, q.w);
     let angle =
         (angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
     let swing = (q * twist.inverse()).normalize();
@@ -3076,7 +3076,7 @@ mod tests {
         let top = ball(&mut w, pivot, 0.03, 2.7);
         let bar = ball(
             &mut w,
-            pivot + Vec3::new(0.0, -angle.cos(), angle.sin()) * length,
+            pivot + Vec3::new(0.0, -libm::cosf(angle), libm::sinf(angle)) * length,
             0.03,
             2.7,
         );
@@ -3101,7 +3101,7 @@ mod tests {
             w.step(1.0 / 120.0);
             fastest = fastest.max(w.bodies[bar].linear_velocity.length());
         }
-        let expected = (2.0 * 9.81 * length * (1.0 - angle.cos())).sqrt();
+        let expected = (2.0 * 9.81 * length * (1.0 - libm::cosf(angle))).sqrt();
         assert!(
             (fastest - expected).abs() < 0.05 * expected,
             "fastest {fastest}, a pendulum reaches {expected}"

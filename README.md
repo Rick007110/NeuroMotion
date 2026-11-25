@@ -89,7 +89,8 @@ behave the same way, then improved:
   name, with their targets and settings
   ([docs/behaviours.md](docs/behaviours.md)).
 - **Improvements over endorphin:** no simulate/clear step (the timeline re-simulates
-  automatically, in the background, whenever you edit); deterministic results;
+  automatically, in the background, whenever you edit); deterministic results,
+  bit for bit the same on Windows, macOS and Linux;
   stiff muscles that can't explode; muscle targets kept inside joint limits; bodies
   that constraints hold together (a heavy prop in both hands, a trapeze on a long rope)
   solved exactly as one system.

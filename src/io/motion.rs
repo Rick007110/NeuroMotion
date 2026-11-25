@@ -151,6 +151,12 @@ pub fn joint_curves(skeleton: &SkeletonRef, motion: &Motion) -> Vec<JointCurves>
         .iter()
         .map(|world| local_transforms(skeleton, world))
         .collect();
+    // Where each joint lands per frame as exported. Leaving out one joint's stretch moves
+    // every joint below it, so a joint keeps its translation when leaving it out would
+    // put the joint itself more than the tolerance from where it is: a hip, knee and
+    // ankle each stretched by under 1 mm put the ankle 1.1 mm out when only each
+    // joint's own offset counted.
+    let mut placed: Vec<Vec<Vec3>> = Vec::with_capacity(skeleton.joints.len());
     skeleton
         .joints
         .iter()
@@ -168,14 +174,29 @@ pub fn joint_curves(skeleton: &SkeletonRef, motion: &Motion) -> Vec<JointCurves>
                 .collect();
             let positions: Vec<Vec3> = locals.iter().map(|l| l[i].1).collect();
             let offset = Vec3::from(joint.offset);
-            let is_root = joint.parent.filter(|&p| p < i).is_none();
-            let moves = positions
-                .iter()
-                .any(|p| p.distance(offset) > TRANSLATION_TOLERANCE);
+            let parent = joint.parent.filter(|&p| p < i);
+            let moves = parent.is_none_or(|p| {
+                motion.frames.iter().enumerate().any(|(f, world)| {
+                    let at = placed[p][f] + world[p].0 * offset;
+                    positions[f].distance(offset) > TRANSLATION_TOLERANCE
+                        || at.distance(world[i].1) > TRANSLATION_TOLERANCE
+                })
+            });
+            placed.push(
+                motion
+                    .frames
+                    .iter()
+                    .enumerate()
+                    .map(|(f, world)| match parent {
+                        Some(p) if !moves => placed[p][f] + world[p].0 * offset,
+                        _ => world[i].1,
+                    })
+                    .collect(),
+            );
             JointCurves {
                 order,
                 rotation,
-                translation: (is_root || moves).then_some(positions),
+                translation: moves.then_some(positions),
             }
         })
         .collect()

@@ -1549,7 +1549,12 @@ pub fn bendy_stick() -> Project {
     let holder = person(&mut p, "holder", Vec3::ZERO, 0.0, &pose);
     let swing: Vec<(i32, f32)> = (0..=120)
         .step_by(5)
-        .map(|f| (f, 40.0 * (f as f32 / 60.0 * std::f32::consts::TAU).sin()))
+        .map(|f| {
+            (
+                f,
+                40.0 * libm::sinf(f as f32 / 60.0 * std::f32::consts::TAU),
+            )
+        })
         .collect();
     motion(
         &mut p,
@@ -1791,7 +1796,12 @@ pub fn rotating_floor() -> Project {
     );
     let rock: Vec<(i32, f32)> = (0..=120)
         .step_by(3)
-        .map(|f| (f, 10.0 * (f as f32 / 60.0 * std::f32::consts::TAU).sin()))
+        .map(|f| {
+            (
+                f,
+                10.0 * libm::sinf(f as f32 / 60.0 * std::f32::consts::TAU),
+            )
+        })
         .collect();
     motion(
         &mut p,
@@ -3323,7 +3333,7 @@ mod tests {
                 let cf = frame(f);
                 // The hips' starting up direction, carried along.
                 let up = cf.bodies[hips].0 * start.inverse() * Vec3::Y;
-                let angle = up.z.atan2(up.y);
+                let angle = libm::atan2f(up.z, up.y);
                 let step = (angle - last + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
                     - std::f32::consts::PI;
                 turned += step;
@@ -3430,7 +3440,7 @@ mod tests {
             .1
         };
         let arm = at("l_wrist") - at("l_shoulder");
-        arm.y.atan2(arm.x.hypot(arm.z)).to_degrees()
+        libm::atan2f(arm.y, libm::hypotf(arm.x, arm.z)).to_degrees()
     }
 
     /// A clavicle holds the whole arm up (lesson 27). With the muscle cap
@@ -3553,10 +3563,65 @@ mod tests {
     /// hit within limits, so this guards against regressions rather than reproducing it.
     /// The keyed car drives on and runs the pedestrian over: over 41 runs with its speed
     /// nudged by up to ±2e-3 (`NM_SURVEY=car_hit nudge_survey`) the worst joint opens
-    /// 0.55 to 2.3 cm (1.95 to 12.7 cm, 5 runs over 5 cm, before lesson 29).
+    /// 0.56 to 2.4 cm (1.95 to 12.7 cm, 5 runs over 5 cm, before lesson 29).
     #[test]
     fn car_hit_keeps_joints_together() {
         check(car_hit());
+    }
+
+    /// A fingerprint of everything a simulation produced: every frame's joints, bodies
+    /// and level for every character, bit for bit (64-bit FNV-1a).
+    fn fingerprint(project: &Project, sim: &Simulation) -> u64 {
+        let mut hash = 0xcbf2_9ce4_8422_2325u64;
+        let mut eat = |bits: u32| {
+            for byte in bits.to_le_bytes() {
+                hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+            }
+        };
+        let range = project.settings.range;
+        for frame in range.start..=range.end {
+            for c in sim.frame(frame).unwrap().iter().flatten() {
+                eat(c.level as u32);
+                for (q, v) in c.joints.iter().chain(&c.bodies) {
+                    q.to_array()
+                        .into_iter()
+                        .chain(v.to_array())
+                        .for_each(|x| eat(x.to_bits()));
+                }
+            }
+        }
+        hash
+    }
+
+    /// The simulation is bit-identical on every platform (lesson 30): CI runs this on
+    /// Linux, Windows and macOS, in debug, and it runs here in release too. Three
+    /// stand-ins that turn a last-bit difference into a different outcome within a
+    /// second or two (a car running a character over, Explosion's landing, Stagger
+    /// stepping after a hard push), each hashed whole. A change to the physics changes
+    /// these on purpose: run the test, check the other tests still pass, and copy the
+    /// new values it prints. If one platform alone disagrees, something in the physics
+    /// is rounding the platform's way again (a maths function not from `libm`, say).
+    #[test]
+    fn simulations_are_bit_identical_everywhere() {
+        let scenes = [
+            ("car hit", car_hit(), 0x13fe_6b43_2574_a7a3u64),
+            ("explosion", mid_air(true, true), 0x1610_ef2c_a19f_bfc3),
+            (
+                "stagger",
+                pushed(Some("Stagger"), 2.8, Vec3::Z),
+                0xe2ab_f4f1_7094_e2cc,
+            ),
+        ];
+        let mut wrong = Vec::new();
+        for (name, project, expected) in scenes {
+            let (sim, _) = simulate(&project);
+            let hash = fingerprint(&project, &sim);
+            println!("{name}: {hash:#018x}");
+            if hash != expected {
+                wrong.push(format!("{name}: {hash:#018x}, expected {expected:#018x}"));
+            }
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("; "));
     }
 
     /// Heavy join (lesson 20): the car falls behind its carrier as it drives off (23 cm
@@ -4614,7 +4679,7 @@ mod behaviour_tests {
             let at = |n: &str| cf.joints[joint(n)].1;
             let elevation = |from: &str, to: &str| {
                 let v = at(to) - at(from);
-                v.y.atan2(v.with_y(0.0).length()).to_degrees()
+                libm::atan2f(v.y, v.with_y(0.0).length()).to_degrees()
             };
             f.arms.push((
                 elevation("l_shoulder", "l_elbow"),
@@ -4627,7 +4692,8 @@ mod behaviour_tests {
                     .to_degrees(),
             );
             let trunk = (at("neck") - at("hips")).normalize();
-            f.tilt.push(trunk.y.clamp(-1.0, 1.0).acos().to_degrees());
+            f.tilt
+                .push(libm::acosf(trunk.y.clamp(-1.0, 1.0)).to_degrees());
             let (b, low) = cf
                 .bodies
                 .iter()
@@ -4696,8 +4762,10 @@ mod behaviour_tests {
     /// to -40 to -58° at 42-46 and are coming back up at 52; the body falls upright,
     /// lands feet first at about frame 56, goes down on its back and lies still.
     /// Over 41 runs with the drop's height nudged by up to ±2e-3 (`NM_SURVEY=explosion
-    /// nudge_survey`) the bodies move 0.3 to 6.5 cm/s over the last 20 frames, and no
-    /// joint opens more than 1.3 cm (up to 18.6 cm/s and 15 cm before lesson 29).
+    /// nudge_survey`) no joint opens more than 1.4 cm (15 cm before lesson 29), and the
+    /// bodies move 0.15 to 4 cm/s over the last 20 frames, this run 8.4, but one run
+    /// 20: lying limp, a leg propped up on its knee may topple late (lesson 30; still
+    /// open). Results are bit-identical everywhere, so this run is the same on CI.
     #[test]
     fn explosion_flails_in_mid_air_like_endorphins() {
         let project = mid_air(true, true);

@@ -668,10 +668,14 @@ swing down to -34° (`explosion_works_on_the_placeholder_and_is_deterministic`),
 runs are bit-identical. The numbers in the air don't move when the drop height is
 nudged by up to ±5 cm; the landing settles the same way in all 11 nudged runs (trunk
 89-90°, at most 0.02 m/s). Over 41 runs with the height nudged by up to ±2e-3
-(`NM_SURVEY=explosion`), the bodies move 0.3 to 6.5 cm/s at the end and no joint
-opens more than 1.3 cm; before lesson 29 of docs/physics-design.md (the engine
-warm-starting a finger off the ground) up to 18.6 cm/s and 15 cm, which is how CI's
-Linux runner came to see 0.19 m/s.
+(`NM_SURVEY=explosion`), no joint opens more than 1.4 cm, and the bodies move 0.15 to
+20 cm/s at the end: 39 runs under 4 cm/s, the unnudged one 8.4, and one 20, which
+hasn't come to rest: it lies face down with a leg propped up on its knee, and limbs
+still shifting (in a similar run such a leg toppled over late). Nothing holds a
+raised knee while it lies limp; a little tone or straightening the legs moved that
+tail without removing it, so it is still open. Before lesson 29 of
+docs/physics-design.md (the engine warm-starting a finger off the ground) up to
+18.6 cm/s and 15 cm, which is how CI's Linux runner came to see 0.19 m/s.
 
 In endorphin's own scene, with its characters, NeuroMotion's left character's arms
 reach +44° at frame 16 and -40° at 40; it lands feet first at 55, is on its back
