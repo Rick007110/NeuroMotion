@@ -44,7 +44,7 @@ const MAX_SPRING_HERTZ: f32 = 30.0;
 /// With `SpringCap::Limbs`, a muscle may also be as stiff as this natural frequency on the
 /// whole limb it moves against the rest of the body, if that allows more: a clavicle
 /// holding an arm out, a knee in a crouch holding the body above it. Such characters are
-/// solved whole (`limb::Articulation`, lesson N), so the muscle does move the whole limb.
+/// solved whole (`limb::Articulation`, lesson 38), so the muscle does move the whole limb.
 /// Solved by sequential impulses, which see only a joint's two bodies, the cap had to stay
 /// at 5 Hz: at 30 Hz Car Hit's pedestrian, curled up on the bonnet, opened a knee by
 /// 6.2 cm, and Multi Martial's fingers came 6-28 cm out of their joints. Solved whole,
@@ -798,7 +798,7 @@ impl World {
             }
         }
         // With whole-limb muscles, every jointed group's joints, muscles and stops are
-        // solved as one system (lesson N).
+        // solved as one system (lesson 38).
         let mut articulations = if self.spring_cap == SpringCap::Limbs {
             Articulation::build(&sb, &mut joints, joint_soft.bias_rate, h)
         } else {
@@ -914,7 +914,7 @@ impl World {
 
     /// One iteration after the joints' sequential impulses: the locks, the direct solves
     /// of the groups, the contacts, then the articulations, so a character's joints and
-    /// muscles have the last word over its contacts (lesson N), then the groups solved
+    /// muscles have the last word over its contacts (lesson 38), then the groups solved
     /// before the contacts again, so their locks hold too, and last the direct solves of
     /// the groups whose locks close a loop (lesson 25). The first iteration also solves
     /// the articulations before the locks, so the locks and contacts start from joints

@@ -360,6 +360,16 @@ standing is on a knife edge: with gravity nudged by up to 4e-4, the top of the n
 ends 0.02 to 0.51 m lower at frame 108 than at frame 0, so in some runs it sinks or
 falls.
 
+Since imported characters are solved whole and their muscles may be as stiff as 30 Hz
+on the whole limb (lesson 38 in `physics-design.md`), it no longer sinks: over five
+runs with gravity nudged (`NM_NUDGES=2`) the top of its neck ends 0.02-0.08 m lower at
+frame 108 than at frame 0 (endorphin about 0.12 m), the pelvis is still 0.92 m up at
+frame 140 (0.37 m before, as the body sank), and its feet take seven steps back up to
+the walk at frame 145 (four before; endorphin about five), 0.53-0.59 m back by frame 36
+(endorphin 0.46). By frame 96 they are only 0.31-0.56 m back and 0.15-0.51 m along +x
+(endorphin 0.88 m back and 0.51 m along -x): it steps back but not as far, and drifts
+the other way.
+
 **Not yet.** Settings on the behaviour event (ArmsWindmill, MaxSteps, ArmsSpeed,
 ArmsStrength in Stagger Walk) aren't read, the arms don't windmill, and nothing but
 Stagger Walk's first second has been compared with endorphin. It inherits Balance's

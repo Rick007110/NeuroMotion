@@ -159,6 +159,12 @@ on all five scenes (lock strength units, damping, strength as a speed, the drive
 the swing sizes, the limb spring cap) are compared in physics-design.md, lesson 34 (after
 Back-Flip-To-Combo's take-off, lesson 33); none is in yet, so the baselines stay.
 
+Solving imported characters whole (physics-design.md, lesson 38) brings it to 18 of 36:
+Car Hit 8 of 15 (it flies to 1.73 m, touches down at 94), Back-Flip-To-Combo 3 of 9
+(leaves the box at 213, on the floor at 281), Stagger Walk 2 of 4 (it stays up in every
+nudged run, but its feet go only 0.31-0.56 m back by frame 96). The baselines below and
+in `reference.rs` are still the run before it.
+
 The known gaps, with their errors on that run:
 
 - **Car Hit**: the pedestrian flies 0.19 m lower (centre of mass 1.62 m at frame 65,

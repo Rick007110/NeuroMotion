@@ -73,8 +73,11 @@ NeuroMotion, and we need numbers to prove it.
   either, so neither is in (physics-design.md, lesson 33). Scored on all five measured
   scenes, no reading of lock strengths, damping or strength improves every scene; the
   limb spring cap (a limit of the solver) is the largest lever, lifting Car Hit's flight
-  to 1.74 m at 30 Hz, but tears Multi Martial's fingers, so the solver has to change
-  first (lesson 34)
+  to 1.74 m at 30 Hz, but tore Multi Martial's fingers. Imported characters are now
+  solved whole, muscles with the limb they move, so the cap is 30 Hz instead of 5
+  (lesson 38): it leaves the box at 213 (endorphin 212, 241 before) and lands at 281
+  (276), but still goes back over the edge instead of springing up, and Car Hit's
+  pedestrian flies to 1.73 m (1.62 m before; endorphin 1.81 m)
 - ✅ **Reference measurements**: scenes measured in endorphin (frames, positions,
   angles) and scored against NeuroMotion by a test, `reference_scores`, so "behaves
   like endorphin" is checked, not eyeballed. 36 measurements in five scenes: Car Hit,
@@ -116,7 +119,10 @@ NeuroMotion, and we need numbers to prove it.
   of 17 clean). Finding contacts no longer tests every pair of shapes (a sweep and
   prune, bit for bit the same results): Balcony, the slowest sample, 4.5 to 2.9 s for
   its 5 s. The rest of the time is the solver, mostly its direct solves
-  ([physics-design.md](docs/physics-design.md), lesson 37)
+  ([physics-design.md](docs/physics-design.md), lesson 37). Solving imported
+  characters whole (lesson 38) costs about twice that again (Balcony 5 s, Bridge
+  Escape 6 s for its 10.5 s, Gymnast Rings 7 s for its 10 s, one core): every scene is
+  still faster than real time, but making it cheaper is open
 - ✅ Legacy poses that store muscle targets (`dp.nma`): imported as a held pose and
   usable as an active pose, mapped onto the character's joints and turned from a
   T-pose's arms to the pose's rest first
@@ -151,9 +157,10 @@ scenes then run something sensible.
   is still weakest, because the foot on the falling side carries the weight and
   can't lift ([details](docs/behaviours.md#not-yet)). On endorphin's own character
   (Stagger Walk) it didn't step at all, the engine's spring cap weakening that rig's
-  hips, knees and ankles several times over; with imported scenes on the whole-limb
-  cap it now steps back two or three times (endorphin about five) and stays up
-  ([details](docs/behaviours.md#stagger-walk))
+  hips, knees and ankles several times over; with imported characters solved whole and
+  their muscles as stiff as their limbs need (lesson 38), it steps back about seven
+  times (endorphin about five) and stays up in every nudged run, though not as far back
+  as endorphin's ([details](docs/behaviours.md#stagger-walk))
 - 🟡 **Stagger** ([#8](https://github.com/Rick007110/NeuroMotion/issues/8)): Balance
   that keeps stepping with a loose trunk; its event settings aren't read and it
   hasn't been compared with endorphin
@@ -272,14 +279,15 @@ What moves NeuroMotion closest to endorphin quality now, in order:
    the character crouches; what's left is why endorphin's crouch stays balanced on 25 N
    toe locks and why its legs straighten in ~8 frames where NeuroMotion's muscles take
    0.1 s (fitting half the damping and stronger toe locks reproduces the jump, lesson
-   33), and how endorphin reads the negative lock strength of the flip's drive. Stiff
-   muscles solved with the whole limb they move, so the limb spring cap can rise
-   without tearing light bodies, would help it and Car Hit's flight together
-   (lesson 34).
+   33), and how endorphin reads the negative lock strength of the flip's drive.
+   Imported characters' muscles are now solved with the whole limb they move (lesson
+   38): it takes off and lands on time but still doesn't spring up. Locks and contacts
+   in the same solve would let the cap go entirely.
 3. **The other missing behaviours** in the inventory's order (JumpDive, Jump,
    LandCrouch; Look and Reach and Explosion are done).
-4. **Stepping on endorphin's characters** (the spring cap on light pelvises and
-   multi-body feet, `docs/behaviours.md#stagger-walk`), and sideways stepping
+4. **Stepping on endorphin's characters** (Stagger Walk steps and stays up since
+   lesson 38, but not as far as endorphin's, `docs/behaviours.md#stagger-walk`), and
+   sideways stepping
    ([#9](https://github.com/Rick007110/NeuroMotion/issues/9)).
 5. **Import BVH and FBX** ([#25](https://github.com/Rick007110/NeuroMotion/issues/25)) and the **3D viewport**
    ([#26](https://github.com/Rick007110/NeuroMotion/issues/26)).

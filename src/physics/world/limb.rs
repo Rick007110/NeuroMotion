@@ -1,5 +1,5 @@
 //! Characters solved whole: every joint's anchor, muscle and stops of a jointed group
-//! as one linear system, each iteration (docs/physics-design.md, lesson N).
+//! as one linear system, each iteration (docs/physics-design.md, lesson 38).
 //!
 //! Sequential impulses solve a muscle with only its joint's two bodies, so a stiff
 //! muscle on a light body (a finger, a clavicle, a 4.5 kg pelvis between two 9 kg
@@ -937,4 +937,128 @@ fn dense_solve(mut a: Vec<f64>, mut b: Vec<f64>, m: usize) -> Vec<f64> {
         x[r] = (b[r] - sum) / p;
     }
     x
+}
+
+#[cfg(test)]
+mod tests {
+    use glam::{Quat, Vec3};
+
+    use super::super::{Body, Joint, Motion, Muscle, World};
+    use crate::document::physics::{ContactModel, Gains, Interaction, Limits, SpringCap};
+
+    /// Multi Martial's punch: an arm (0.4 kg clavicle, 2.2 kg upper arm, 1.3 kg forearm,
+    /// 0.5 kg hand, 0.06 kg fingers) held out from a keyed chest by endorphin-strength
+    /// muscles (3000 N·m/rad), whose clavicle target jumps 0.6 rad and elbow 1.2 rad at
+    /// 0.2 s. Returns how far the clavicle still lags its target 0.1 s later (rad) and
+    /// the widest any joint opens (m).
+    fn punch(cap: SpringCap) -> (f32, f32) {
+        let mut w = World::new(Vec3::new(0.0, -9.81, 0.0), ContactModel::Coulomb);
+        w.set_materials(1, |_, _| Interaction {
+            restitution: 0.0,
+            friction: 100.0,
+            adhesion: 0.0,
+            softness: 0.0,
+        });
+        w.spring_cap = cap;
+        // (mass kg, length m); the chest is keyed.
+        let specs: [(f32, f32); 6] = [
+            (10.0, 0.0),
+            (0.4, 0.15),
+            (2.2, 0.3),
+            (1.3, 0.27),
+            (0.5, 0.1),
+            (0.06, 0.08),
+        ];
+        let mut x = 0.0;
+        for (i, &(mass, len)) in specs.iter().enumerate() {
+            x += len;
+            let across = mass * len.max(0.1) * len.max(0.1) / 12.0;
+            let axial = mass * 0.04 * 0.04;
+            w.bodies.push(Body {
+                position: Vec3::new(x - len / 2.0, 1.5, 0.0),
+                rotation: Quat::IDENTITY,
+                linear_velocity: Vec3::ZERO,
+                angular_velocity: Vec3::ZERO,
+                inv_mass: 1.0 / mass,
+                inv_inertia: Vec3::new(1.0 / axial, 1.0 / across, 1.0 / across),
+                motion: if i == 0 {
+                    Motion::Kinematic { momentum: 1.0 }
+                } else {
+                    Motion::Dynamic
+                },
+                group: 0,
+                parent: i.checked_sub(1),
+            });
+        }
+        let wide = Limits {
+            twist_min: -1.5,
+            twist_max: 1.5,
+            swing1: 2.0,
+            swing2: 2.0,
+        };
+        for i in 1..specs.len() {
+            let (parent_len, len) = (specs[i - 1].1, specs[i].1);
+            let mut j = Joint::new(
+                i - 1,
+                i,
+                Vec3::new(parent_len / 2.0, 0.0, 0.0),
+                Vec3::new(-len / 2.0, 0.0, 0.0),
+                Quat::IDENTITY,
+                Quat::IDENTITY,
+                Quat::IDENTITY,
+                Quat::IDENTITY,
+                wide,
+                wide,
+                0.0,
+                0.0,
+            );
+            let g = Gains {
+                stiffness: 3000.0,
+                damping: 150.0,
+                force_limit: 5000.0,
+            };
+            j.muscle = Some(Muscle {
+                target: Quat::IDENTITY,
+                twist: g,
+                swing: g,
+            });
+            w.joints.push(j);
+        }
+        let (mut lag, mut widest) = (0.0, 0.0f32);
+        for frame in 0..120 {
+            if frame >= 24 {
+                for (j, angle) in w.joints.iter_mut().zip([0.6, 0.0, 1.2]) {
+                    if let Some(m) = j.muscle.as_mut() {
+                        m.target = Quat::from_rotation_z(angle);
+                    }
+                }
+            }
+            w.step(1.0 / 120.0);
+            if frame == 35 {
+                let turned = w.joints[0].local_rotation(&w.bodies);
+                lag = turned.angle_between(Quat::from_rotation_z(0.6));
+            }
+            for j in &w.joints {
+                let (a, b) = (&w.bodies[j.parent], &w.bodies[j.child]);
+                let gap = (b.position + b.rotation * j.anchor_child)
+                    - (a.position + a.rotation * j.anchor_parent);
+                widest = widest.max(gap.length());
+            }
+        }
+        (lag, widest)
+    }
+
+    /// The clavicle moves the whole arm, so it can be as stiff as the arm needs, and the
+    /// joints hold while the hand and fingers whip round (lesson 38). Before, solved by
+    /// sequential impulses with the 5 Hz whole-limb cap: 0.085 rad behind, joints 6.4 mm
+    /// open; with that cap at 30 Hz, 0.165 rad and 9.3 mm. Capped for its own two bodies
+    /// (NeuroMotion's own projects), the clavicle lags 0.61 rad.
+    #[test]
+    fn a_stiff_arm_punches_without_coming_apart() {
+        let (lag, widest) = punch(SpringCap::Limbs);
+        let (lag_bodies, _) = punch(SpringCap::Bodies);
+        eprintln!("lag {lag:.3} rad (two-body cap {lag_bodies:.3}), widest joint {widest:.4} m");
+        assert!(lag < 0.08, "the clavicle lags {lag} rad");
+        assert!(widest < 0.003, "a joint opened {widest} m");
+    }
 }

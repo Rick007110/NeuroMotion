@@ -67,6 +67,9 @@ Keep these boundaries: `document`, `timeline` and `physics` must never depend on
 - `world.rs`: bodies, joints, muscles, virtual muscles, locks and contacts, and the
   solver (substepped sequential impulses with soft constraints; locked groups, and
   characters something heavy presses on, solved directly).
+- `world/limb.rs`: imported characters solved whole, each iteration: anchors, muscles
+  and limits as one tree-structured linear system, factored in linear time, so stiff
+  muscles move the whole limb (lesson 38).
 - `collide.rs`: contact generation between shapes (spheres, capsules, boxes,
   and exact cylinders with flat caps and a sharp rim).
 - `behaviour.rs`: controllers that drive muscles while a character is simulated
