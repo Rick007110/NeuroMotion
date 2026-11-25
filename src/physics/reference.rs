@@ -819,6 +819,123 @@ pub const SCENES: &[Scene] = &[
             },
         ],
     },
+    Scene {
+        file: "Sample Scenes/Trapeze.ens",
+        measured: "endorphin's own run, exported as FBX (lesson 43)",
+        rows: &[
+            // endorphin's acrobat jumps off the platform (JumpDive, frames 50-108, a
+            // behaviour NeuroMotion doesn't have yet), catches the bar, swings across
+            // and lands on the far side, where Balance holds it up.
+            Row {
+                what: "jump: centre of mass along z, frames 0 to 160",
+                signal: Signal::Coord(Point::Com("character01"), Axis::Z),
+                measure: Measure::Change(0, 160),
+                endorphin: 4.126,
+                uncertainty: 0.3,
+                guard: false,
+                baseline: 0.15,
+                source: FBX,
+            },
+            Row {
+                what: "swing: centre of mass lowest, frames 150-260",
+                signal: Signal::Coord(Point::Com("character01"), Axis::Y),
+                measure: Measure::Min(150, 260),
+                endorphin: 2.392,
+                uncertainty: 0.1,
+                guard: false,
+                baseline: 4.37,
+                source: FBX,
+            },
+            Row {
+                what: "swing: centre of mass z, frame 300",
+                signal: Signal::Coord(Point::Com("character01"), Axis::Z),
+                measure: Measure::At(300),
+                endorphin: 4.472,
+                uncertainty: 0.2,
+                guard: false,
+                baseline: -9.03,
+                source: FBX,
+            },
+            Row {
+                what: "lands (a body centre under 15 cm)",
+                signal: Signal::Lowest("character01"),
+                measure: Measure::FirstBelow {
+                    from: 300,
+                    to: 600,
+                    below: 0.15,
+                },
+                endorphin: 341.0,
+                uncertainty: 3.0,
+                guard: false,
+                baseline: 369.0,
+                source: FBX,
+            },
+            Row {
+                what: "standing: centre of mass height, frame 400",
+                signal: Signal::Coord(Point::Com("character01"), Axis::Y),
+                measure: Measure::At(400),
+                endorphin: 0.736,
+                uncertainty: 0.05,
+                guard: false,
+                baseline: 0.48,
+                source: FBX,
+            },
+            Row {
+                what: "standing: centre of mass height, frame 600",
+                signal: Signal::Coord(Point::Com("character01"), Axis::Y),
+                measure: Measure::At(600),
+                endorphin: 0.732,
+                uncertainty: 0.05,
+                guard: false,
+                baseline: 0.20,
+                source: FBX,
+            },
+        ],
+    },
+    Scene {
+        file: "Sample Scenes/Balcony.ens",
+        measured: "endorphin's own run of character01, exported as FBX (lesson 43)",
+        rows: &[
+            // endorphin's character01 goes over the railing and falls to the ground.
+            // The export's first key is 0.26 m further along -z than NeuroMotion's
+            // frame 0 and holds 309 keys for the scene's 303 frames, so frames are
+            // read with a few frames' uncertainty and positions as changes.
+            Row {
+                what: "falls: first on the ground (a body centre under 15 cm)",
+                signal: Signal::Lowest("character01"),
+                measure: Measure::FirstBelow {
+                    from: 0,
+                    to: 302,
+                    below: 0.15,
+                },
+                endorphin: 96.0,
+                uncertainty: 5.0,
+                guard: false,
+                baseline: f32::NAN, // never on the ground: it stays on the balcony
+                source: FBX,
+            },
+            Row {
+                what: "lying: centre of mass height, frame 200",
+                signal: Signal::Coord(Point::Com("character01"), Axis::Y),
+                measure: Measure::At(200),
+                endorphin: 0.132,
+                uncertainty: 0.05,
+                guard: false,
+                baseline: 3.15,
+                source: FBX,
+            },
+            Row {
+                what: "lying: centre of mass along z, frames 0 to 200",
+                signal: Signal::Coord(Point::Com("character01"), Axis::Z),
+                measure: Measure::Change(0, 200),
+                endorphin: -3.756,
+                uncertainty: 0.3,
+                guard: false,
+                baseline: -1.16,
+                source: FBX,
+            },
+        ],
+    },
 ];
 
 // Back-Flip-To-Combo's character: the pelvis over the left heel, how far its whole body
