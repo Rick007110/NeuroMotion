@@ -27,7 +27,7 @@ each other, and [what's next](#next-up). Each open item is, or will become, a Gi
 | Viewport | shaded 3D, several views | 🟡 bodies and bones drawn flat, one view |
 | Editing in the viewport | posing, picking bodies | ⬜ |
 | Re-simulating | press Simulate | ✅ automatic, in the background |
-| Same results as endorphin | – | 🟡 Car Hit compared frame by frame with endorphin's own run and close; other scenes not compared yet |
+| Same results as endorphin | – | 🟡 six scenes compared frame by frame with endorphin's own runs (exported as FBX); Car Hit close, Back-Flip-To-Combo now flips |
 
 ## Milestone 1: Physics that matches endorphin
 
@@ -53,47 +53,39 @@ NeuroMotion, and we need numbers to prove it.
   / 100 (lessons 20 and 21). NeuroMotion's own projects use it too now; projects
   saved before keep force-capped friction
 - 🟡 Free fall and thrown bodies follow g·t²/2 to the integrator's 1 cm a second;
-  nothing damps a fast body (lesson 32). Car Hit's pedestrian, merged with the other
-  changes, flies 1.62 m high where endorphin's reaches 1.81 m: that comes from
-  reading endorphin's swing limits the way lesson 27 does, and why is still open
+  nothing damps a fast body (lesson 32). Car Hit's pedestrian flies to 1.73 m where
+  endorphin's own run, exported as FBX, reaches 1.79 m (the recording read 1.81 m):
+  the gap is the launch, not the flight. The car throws NeuroMotion's pedestrian back
+  along the road and sideways, because its left foot is pushed along by the
+  windscreen's lower end where endorphin's is thrown up along it, and it goes into
+  physics a frame after endorphin's (lesson 40)
 - ✅ A force pushes the bodies it names, a massless body never moves, and a
   transition ends exactly on the animation (lessons 22-24); scenes run as long as
   endorphin runs them, and the sweep checks each scene's whole range
 - 🟡 Back-Flip-To-Combo ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)):
-  measured against a recording of endorphin's run with its frame counter, active poses
-  now apply as endorphin's do: a joint no event names follows its limb's pose,
-  endorphin's swing limits are read the right way round, and an imported character's
-  muscles count the whole limb they move. Its arms come forward and it crouches on the
-  box (it used to fall off the back at 171). It doesn't flip yet: its crouch is a slow
-  fall backwards (the 25 N toe locks can't hold its centre of mass, 8-40 cm behind the
-  heels, where endorphin's recovers), and its muscles follow their poses with a 0.1 s
-  lag, so where endorphin's springs up off the box it rotates back over the edge and
-  lands behind it at 294, turning too far. Half the damping and three to ten times the
-  toe locks' strength make it spring up as endorphin's does, but nothing yet explains
-  either, so neither is in (physics-design.md, lesson 33). Scored on all five measured
-  scenes, no reading of lock strengths, damping or strength improves every scene; the
-  limb spring cap (a limit of the solver) is the largest lever, lifting Car Hit's flight
-  to 1.74 m at 30 Hz, but tore Multi Martial's fingers. Imported characters are now
-  solved whole, muscles with the limb they move, so the cap is 30 Hz instead of 5
-  (lesson 38): it leaves the box at 213 (endorphin 212, 241 before) and lands at 281
-  (276), but still goes back over the edge instead of springing up, and Car Hit's
-  pedestrian flies to 1.73 m (1.62 m before; endorphin 1.81 m). Re-scored on that
-  solve (lesson 39): the toe locks sit at their strength from frame 100, and three or
-  more times it holds the crouch as endorphin's (lean and crouch depth within or near
-  endorphin's), but the take-off is still a rotation, because the trunk straightens
-  twice as fast as the legs; only fitted damping springs it up, and that spins it four
-  times round. Nothing kept: no reading improves the overall score yet
+  measured against endorphin's own run, exported as FBX (lesson 40), which showed the
+  recording misread: endorphin's crouches, springs 1.1 m up off the box (centre of
+  mass 3.745 m at frame 242), turns over and lands on the floor at 330. Lock strengths
+  are now read as endorphin's kilograms-force (lesson 41): its 25 toe locks hold the
+  crouch (centre of mass 3.19 m up and 0.155 m behind the heels at frame 192,
+  endorphin 3.16 m and 0.164 m; it used to fall back off the box at 213) and it
+  springs up and flips, its trunk turning as endorphin's (469° by frame 297, endorphin
+  523°). Still short: it jumps to 3.54 m at 224, 0.2 m lower and 18 frames earlier,
+  lands at 314 (330), and its combo jumps reach 0.56 m (1.67 m). The exact curves
+  show its knees, elbows and ankles following their poses as endorphin's do, but
+  endorphin's trunk and hips bend 9-16° further in the crouch and its take-off
+  starts 3-8 frames later; nothing in the files explains either yet (lesson 41)
 - ✅ **Reference measurements**: scenes measured in endorphin (frames, positions,
   angles) and scored against NeuroMotion by a test, `reference_scores`, so "behaves
-  like endorphin" is checked, not eyeballed. 36 measurements in five scenes: Car Hit,
-  Back-Flip-To-Combo, Stagger Walk and the Look and Reach and Explosion behaviour
-  scenes; 18 are within endorphin's uncertainty, 10 of them guarded against
+  like endorphin" is checked, not eyeballed. 59 measurements in six scenes: Car Hit,
+  Back-Flip-To-Combo, Tackle, Stagger Walk and the Look and Reach and Explosion
+  behaviour scenes; 21 are within endorphin's uncertainty, 10 of them guarded against
   regressions, and the known gaps print their error so progress shows
-  ([details](docs/reference-measurements.md)). Every number is still read from
-  recordings of endorphin's runs (frame counter, fitted camera, silhouettes), not from
-  exports of its results (BVH/FBX), which would be far more precise; Tackle, Stagger
-  Walk's steps and turn and the other scenes aren't measured yet. Anyone with
-  endorphin can add rows, using the *Reference measurement* issue template
+  ([details](docs/reference-measurements.md)). 57 are read from endorphin's own runs
+  exported as FBX (every joint at every frame, lesson 40; `tools/fbx_motion.py`
+  reads an export), which corrected several recording-based rows; two still come from
+  a recording. Anyone with endorphin can add rows, using the *Reference measurement*
+  issue template
 - ✅ **Walk With Gun**: since Coulomb friction its hands' join drifted up to 0.15 m and
   a finger sat 2.5 cm in the ground as the character fell with its 549 kg gun. Locks
   now get the last word over contacts in groups nothing pins, and the ground contacts
@@ -109,7 +101,8 @@ NeuroMotion, and we need numbers to prove it.
   16 clean, five scenes move a little. Still open: active animations don't drive them
   yet (doing so tipped Multi Martial's Stagger landing over), and endorphin's own gains
   (1 in every preset field) make them weak, more brake than pull; how endorphin scales
-  them isn't known. None of the scenes with endorphin measurements uses them
+  them isn't known. None of the scenes with endorphin measurements uses them, the six
+  exported as FBX included (lesson 41), so nothing measured says yet
 - ✅ **Exact cylinders** ([#14](https://github.com/Rick007110/NeuroMotion/issues/14)):
   flat caps and a sharp rim against every shape, resting still on a cap or a side
   (lesson 36). A cap rests on six rim points, not the whole circle

@@ -7,8 +7,10 @@ quantities and scores the difference. "Behaves like endorphin" is then checked, 
 eyeballed, and every change to the physics or the behaviours shows which way it moved
 NeuroMotion.
 
-The measurements are in `src/physics/reference.rs`, one row each. They are numbers
-only: endorphin's scenes, recordings and frames stay on the machine that has
+The measurements are in `src/physics/reference.rs`, one row each. Most are read from
+endorphin's own runs exported as FBX (every joint at every frame; physics-design.md,
+lesson 40); a few still come from screen recordings. They are numbers only:
+endorphin's scenes, exports, recordings and frames stay on the machine that has
 endorphin installed.
 
 ## Running it
@@ -33,12 +35,12 @@ It takes a couple of seconds. For each scene it prints a table like this (Car Hi
 shortened):
 
 ```
-Sample Scenes/Car Hit.ens (a frame-by-frame recording of endorphin's run, ...)
+Sample Scenes/Car Hit.ens (endorphin's own run, exported as FBX (lesson 40))
   quantity                                  endorphin NeuroMotion   error  baseline  within?
-  flight: centre of mass highest      1.81 m ± 0.06 m      1.62 m -0.19 m    1.62 m  no (known gap)
-  flight: centre of mass x, frame 68  0.01 m ± 0.10 m      0.06 m  0.05 m    0.06 m  yes (guard)
+  run-up: centre of mass x, frame 30  1.44 m ± 0.03 m      1.44 m -0.00 m    1.44 m  yes (guard)
+  flight: centre of mass highest      1.79 m ± 0.03 m      1.73 m -0.06 m    1.73 m  no (known gap)
   ...
-  score: 5 of 15 within endorphin's uncertainty; mean error 2.0 times the uncertainty (each row counted up to 4)
+  score: 10 of 20 within endorphin's uncertainty; mean error 1.9 times the uncertainty (each row counted up to 4)
 ```
 
 - **within?** is whether NeuroMotion's value is within the measurement's uncertainty
@@ -83,7 +85,10 @@ Scene {
 (`dump_scene_motion` writes every character's joints and bodies to CSV):
 `Point::Joint(character, joint)`, `Point::Body(character, body)` (its centre of mass),
 `Point::Com(character)` (the whole character's centre of mass) and
-`Point::Mid(&[...])` (the middle of several points).
+`Point::Mid(&[...])` (the middle of several points). Bodies are read off the pose the
+character is shown in (each body's joint and its frame on it), as endorphin's export
+has them: during a transition back to animation that is the blended pose, not where
+the simulated bodies are.
 
 **Signals**, a number at every frame:
 
@@ -96,6 +101,7 @@ Scene {
 | `Pitch(a, b)`: the line `a` → `b` from vertical, positive towards +Z | ° |
 | `AimOff { from, tip, target }`: how far `from` → `tip` points off `from` → `target` | ° |
 | `FacingOff(character, body, target)`: how far a body's local +Z points off a target (the face, for endorphin's head bodies) | ° |
+| `Bend(a, b, c)`: how far the joint at `b` bends, 0 with the three in line (hip, knee, ankle: the knee) | ° |
 | `Mean(&[...])`, `Worst(&[...])`: the mean or the largest of several | as theirs |
 
 **Measures**, one number from a signal (frames are the scene's own, endorphin's View
@@ -118,102 +124,86 @@ sits on the body.
 
 From a *Reference measurement* issue, or your own run of endorphin:
 
-1. Find the scene in `SCENES`, or add one (its file, and how it was measured).
-2. Write each measurement as a row: the closest signal and measure, endorphin's value,
-   an honest uncertainty (how far the reading could be off: a frame or two read off a
-   recording's frame counter at 60 fps, a few centimetres for a position fitted from a
-   video, more for something read by eye), and in `source` who measured it and how.
-3. Run the test, put NeuroMotion's value in `baseline`, and check the row reads what
+1. Best, export endorphin's result as FBX (the simulated character) and read it with
+   `python3 -I tools/fbx_motion.py run.fbx joints.csv`: every joint's world position
+   and rotation at every frame, in metres, in the same axes and with the same joint
+   names as NeuroMotion's import. Compare it with `dump_scene_motion`'s `joints.csv`;
+   work out centres of mass from the joints with the rig in `rig.csv` (each body's
+   frame on its joint and its mass), as the test does. Where the character starts
+   animated, the export's first key is its bind pose and scene frame f is key f + 1
+   (docs/endorphin-formats.md, "Exported motion"). Otherwise measure a recording.
+2. Find the scene in `SCENES`, or add one (its file, and how it was measured).
+3. Write each measurement as a row: the closest signal and measure, endorphin's value,
+   an uncertainty, and in `source` who measured it and how. For an export the
+   uncertainty is how close counts as the same (a few centimetres, a few degrees, two
+   or three frames; more after a tumble); for a recording, how far the reading could
+   be off (a frame or two at 60 fps, a few centimetres for a position fitted from a
+   video, more for something read by eye).
+4. Run the test, put NeuroMotion's value in `baseline`, and check the row reads what
    you meant (a `FirstBelow` that is `never`, or a value far off, usually means a
    wrong name, axis or sign; `dump_scene_motion` shows the run frame by frame).
-4. Leave it a known gap (`guard: false`) unless NeuroMotion is within the uncertainty
+5. Leave it a known gap (`guard: false`) unless NeuroMotion is within the uncertainty
    with a margin in every run of `NM_NUDGES=4`; only then make it a guard.
 
-Never put endorphin's files, or images or text taken from them, in the repository.
+Never put endorphin's files, exports, or images or text taken from them, in the
+repository.
 
 ## What is covered
 
-Run on the integrated build (Coulomb friction, active poses, Look and Reach,
-Explosion, libm maths, virtual muscles, exact cylinders, imported characters solved
-whole with the 30 Hz whole-limb cap; physics-design.md lessons up to 38), 2026-11-25:
+Run on lock strengths read in kilograms-force (physics-design.md, lesson 41),
+2026-11-25, with `NM_NUDGES=2`:
 
 | Scene | Rows | Within | Guards | Mean error (× uncertainty) |
 |---|---|---|---|---|
-| Car Hit | 15 | 8 | 5 | 1.4 |
-| Back-Flip-To-Combo (#6, the user's own scene) | 9 | 3 | 1 | 2.0 |
-| Hands reach and look at 2.5 (Look and Reach) | 3 | 2 | 2 | 1.3 |
-| Writhe in mid-air 2.5 (Explosion) | 5 | 3 | 1 | 1.1 |
-| Stagger Walk | 4 | 2 | 1 | 1.6 |
-| In all | 36 | 18 | 10 | |
+| Car Hit | 20 | 10 | 5 | 1.9 |
+| Back-Flip-To-Combo (#6, the user's own scene) | 18 | 2 | 1 | 2.7 |
+| Tackle (the tackled character) | 9 | 3 | 0 | 2.3 |
+| Hands reach and look at 2.5 (Look and Reach) | 3 | 2 | 1 | 1.4 |
+| Writhe in mid-air 2.5 (Explosion) | 5 | 3 | 3 | 1.2 |
+| Stagger Walk | 4 | 1 | 0 | 3.0 |
+| In all | 59 | 21 | 10 | |
 
-The rows were first scored on the build with lessons up to 28 (15 of 36 within). Lessons
-29-31 (the direct solve's warm start, libm maths, a limp body's damping) moved some
-numbers a little and Stagger Walk's, whose standing is on a knife edge, more. Virtual
-muscles and exact cylinders (lessons 35 and 36) don't move any row; that build had 14
-of 36. Solving imported characters whole (lesson 38) brought it to 18 of 36. Ways of
-reading endorphin's numbers that were scored on all five scenes (lock strength units,
-damping, strength as a speed, the drive mode, the swing sizes, the limb spring cap) are
-compared in physics-design.md, lesson 34 (after Back-Flip-To-Combo's take-off, lesson
-33). The baselines are this run's values; every guard holds, also over `NM_NUDGES=2`.
-
-Over `NM_NUDGES=2` every row's nudged range is within a frame, 0.1° or 2 cm of it,
-except Stagger Walk's: its feet go 0.53-0.59 m back by frame 36, 0.31-0.56 m back and
-0.15-0.51 m along +x by frame 96, and the top of its neck is 0.02-0.08 m lower at frame
-108 than at 0 (it stays up in every nudged run).
+57 rows come from endorphin's own runs exported as FBX (lesson 40); character02's two
+rows in Hands reach and look at still come from a recording (the export holds
+character01 only). The rows used to be 36, all from recordings (18 within on the build
+with lessons up to 39); the exports showed several of them were misread (lesson 40),
+among them a Stagger Walk guard. With locks read in newtons the same 59 rows score 21
+within too, with Back-Flip-To-Combo 1 of 18 (3.2) and Tackle 4 of 9 (1.5). Ways of
+reading endorphin's numbers scored on the recordings are in lessons 34 and 39. The
+baselines are this run's values; every guard holds over `NM_NUDGES=2`, where every
+row's nudged range is within a frame, 0.1° or 2 cm except Stagger Walk's feet (0.15 to
+0.51 m along x by frame 96) and the top of its neck (-0.08 to -0.02 m by 108), and
+Back-Flip-To-Combo's combo (0.53 to 0.99 m).
 
 The known gaps, with their errors on that run:
 
-- **Car Hit**: the pedestrian flies 0.08 m lower (centre of mass 1.73 m at frame 67,
-  endorphin 1.81 m at 68), turns upside down 14 frames early (62, endorphin 76) and
-  comes down at 94 (endorphin 96), 0.49 m further along the road (x +0.15 m at frame
-  96, endorphin -0.34 m). Its centre of mass is 0.13 m low at frame 88, and drifts
-  forward (+0.11 m at 78, +0.14 m at 88) where endorphin's goes back (-0.11 m).
-- **Back-Flip-To-Combo**: it leans back 2-4° more than endorphin's in the first
-  second, holds its left arm 25° above the horizontal at frame 96 (endorphin -7°),
-  crouches 0.39 m deeper by frame 192 (it is falling backwards off its heels, lesson
-  33) and, instead of springing up 0.65 m, goes back over the edge of the box, its
-  head 1.74 m lower at 248 than at 192. It leaves the box top at 213 (endorphin about
-  212) and reaches the floor at 281 (about 276), but by falling, not by flipping.
-- **Look and Reach**: character02's far arm points at the box by frame 29; endorphin's
-  waits and gets there at about 55.
-- **Explosion**: the arms are highest at frame 16 (endorphin about 25) and go down to
-  -33° (endorphin -40 to -58°). The lowest arms' frame (42, endorphin 44) and the
-  landing (54, endorphin 56-58) are within their uncertainty but too close to its edge
-  to guard.
-- **Stagger Walk**: the feet go back a little further than endorphin's by frame 36
-  (0.59 m, endorphin 0.46), but by 96 they have gone only 0.56 m back and 0.38 m along
-  +x where endorphin's went 0.88 m back and 0.51 m along -x. Standing is on a knife
-  edge, so "still standing" isn't a guard.
+- **Car Hit**: the car launches the pedestrian back along the road and sideways
+  (centre of mass x +0.07 m at frame 68, z -0.26 m; endorphin -0.07, -0.06), because
+  its left foot is pushed along the road by the windscreen's lower end where
+  endorphin's is thrown up along it (lesson 40); it flies 6 cm lower (1.73 m at 67,
+  endorphin 1.79 m at 68) and folds 21° less at the hips.
+- **Back-Flip-To-Combo**: it now crouches as endorphin's does (its centre of mass
+  3.19 m up and 0.155 m behind the heels at frame 192, endorphin 3.16 m and 0.164 m)
+  and springs up off the box, but to 3.54 m at frame 224 where endorphin's reaches
+  3.745 m at 242, with the hips 15° and the arms 28° short at the take-off; it falls
+  past the box top at 270 (296) and reaches the floor at 314 (330). It leans back
+  1.5° more by frame 100, bends its trunk and hips 9-16° less in the crouch, and its
+  combo jump reaches 0.56 m where endorphin's reaches 1.67 m.
+- **Tackle**: the tackled runner goes down later and slower (centre of mass 0.82 m at
+  frame 55, endorphin 0.70; head 0.69 m over it at 60, 0.46) and ends up 0.53 m
+  further along z.
+- **Look and Reach**: character01's arms reach the box at frame 17 (endorphin 14);
+  character02's far arm points at the box by frame 29, where endorphin's waits and
+  gets there at about 55 (recording).
+- **Explosion**: the arms are highest at frame 16 (endorphin 28) and lowest at 42 (47).
+- **Stagger Walk**: the feet go 0.59 m back by frame 36 (endorphin 0.26 m) and by 96
+  only 0.56 m back and 0.38 m along +x (endorphin 1.03 m back, 0.58 m along -x).
 
 ## What is still estimated
 
-Every endorphin number here comes from screen recordings of endorphin's runs, read
-with its View Frame counter: frames by eye (to a frame or two at 60 fps), positions
-from silhouettes back-projected through a camera fitted to the view, angles read in
-the image. None comes from an export of endorphin's results (BVH or FBX of the
-simulated motion), which would give every joint at every frame to the millimetre;
-those would replace these rows' uncertainties with far smaller ones. In particular:
-
-- Car Hit's positions are the silhouette's centroid, not the centre of mass; where
-  both follow the same animation (frames 30 and 190) they agree within 6 cm.
-- Back-Flip-To-Combo's lean was fitted to the silhouette with the whole start pose
-  turned about the heels; NeuroMotion's side measures the pelvis over the heel, which
-  agrees while the legs are straight (to about frame 100). Its head heights are image
-  pixels at about 86 px a metre.
-- Stagger Walk's feet are the footprint of the lower silhouette, and its standing
-  height the silhouette's top, which reads about 15% short of NeuroMotion's own run
-  drawn the same way; only changes are compared.
-- Explosion's arm angles were read in a front view, where an arm out to the side shows
-  its elevation directly.
-
-Not yet measured, or not yet usable as a row:
-
-- **Tackle**: the recording is too tangled through the tackle to read the runner's
-  hand or head, and the footprints of the two characters lying together can't be told
-  apart from each other.
-- **Stagger Walk**: endorphin takes about five steps and is reported to turn about 90°;
-  how far it turns, which way and by which frame haven't been measured, so neither the
-  steps nor the turn is a row yet.
-- **Look and Reach**: where the hands are (24 px on average from endorphin's at 14
-  points) was measured in the image, which a row can't read.
-- The other sample scenes and behaviour scenes haven't been measured at all.
+- Character02 in Hands reach and look at: two rows from the recording (frames read by
+  eye with endorphin's frame counter).
+- The exports hold one character each: Tackle's tackler and Look and Reach's
+  character02 aren't measured from them.
+- Stagger Walk's turn and steps, and the hands' positions in Look and Reach, aren't
+  rows yet; the other sample scenes and behaviour scenes haven't been measured.
