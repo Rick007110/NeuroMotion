@@ -19,7 +19,7 @@ target is the same model, the same parameters, and the same behaviour.
 | Material pairs → restitution, friction, adhesion, softness | Same table. Friction is Coulomb with μ = friction / 100 (lesson 21), in imported scenes and NeuroMotion's own projects (lesson 26); projects saved before keep a cap of that many newtons per contact |
 | Simulation levels; momentum carried into physics | Same four levels; kinematic bodies carry animation velocity into the switch |
 | Force events are velocity changes on bodies | Same |
-| Lock and join constraints, with per-axis position and orientation strengths | Rigid constraints whose force on each axis is capped by its strength (read as Karma's relative-position-relative-orientation joint; 0 = free; a negative strength pushes or turns instead, lesson 13); one that has fallen behind pulls with its full strength until it catches up (lesson 20) |
+| Lock and join constraints, with per-axis position and orientation strengths | Rigid constraints whose force on each axis is capped by its strength (read as Karma's relative-position-relative-orientation joint, endorphin's strengths in kilograms-force, lesson 41; 0 = free; a negative strength pushes or turns instead, lesson 13); one that has fallen behind pulls with its full strength until it catches up (lesson 20) |
 | Transitions blend simulation back to animation | Same, linear window, then the required level |
 
 ## Solver
@@ -1828,6 +1828,153 @@ again on the new solve.
 
     Speed: `reference_scores` takes 4 s (23 s with `NM_NUDGES=2`), the sample sweep 38
     s on four cores, Back-Flip-To-Combo 1.6 s for its 727 frames (6 s).
+
+A user with endorphin exported its own runs of six scenes as FBX: the exact motion of
+every joint at every frame, where the reference rows had been read off screen
+recordings. That gave two more lessons.
+
+40. **endorphin's own runs, exported as FBX, replace the recordings; several readings
+    of the recordings were wrong.** endorphin 2.5.2 writes binary FBX 6.0 with one
+    take: every joint of the exported character, with the character's own joint names,
+    keyed at every frame, in centimetres in the scene's own axes, and each joint's world
+    rotation the same as NeuroMotion's for the same pose (docs/endorphin-formats.md,
+    "Exported motion"; `tools/fbx_motion.py` reads one into CSV). Where the character
+    starts animated, the file's first key is its bind pose and frame f is key f + 1;
+    NeuroMotion's animated frames then match it to under a millimetre, and the run-up
+    rows of Car Hit (centre of mass at frames 30 and 190) agree to the millimetre. The
+    scenes: Car Hit, Tackle and Stagger Walk, the behaviour scenes Writhe in mid-air 2.5
+    and Hands reach and look at 2.5 (each file holds character01 only), and the user's
+    Back-Flip-To-Combo. The files stay with the user; `reference_scores` now has 59
+    rows in six scenes, 57 of them from the exports (lesson 41 has the scores).
+
+    The centre of mass and the bodies' centres are worked out from the joints with
+    NeuroMotion's rig on both runs. `reference_scores` used to take NeuroMotion's from
+    the simulated bodies, which during a transition back to animation (Car Hit's 90-112)
+    aren't the pose shown; it now reads every body off the shown pose, as the export
+    does (Car Hit's centre of mass x at frame 96: -0.07 m on the shown pose, +0.15 m on
+    the bodies).
+
+    What the exact numbers changed:
+    - **Back-Flip-To-Combo** doesn't fall off the box at 212 and land at 276, as the
+      recording was read (lesson 27). It crouches to a centre of mass 3.16 m up (0.40 m
+      down) from 150 to 192, 0.16 m behind the middle of its heels, springs up to 3.745 m
+      at frame 242, its lowest body 3.60 m up (1.08 m above the box top), turns over
+      (the trunk 118° by 240, 523° by 297, 688° by 330), falls past the box top at 296
+      and reaches the floor at 330; it jumps again to 1.67 m at about 560 during the
+      combo, ending 7.8 m back. Its lean in the first 100 frames is -2.3 / -5.3 / -6.4°
+      at 44 / 72 / 100 (recording -1.5 / -4 / -6), its left arm 2.9° under the
+      horizontal at 96 (-7).
+    - **Car Hit**: the pedestrian flies to 1.790 m at frame 68 (recording 1.81 m), is
+      upside down from 60 (76) to 83 (88), lands at 96, and its centre of mass goes back
+      along the road: x -0.07 / -0.11 / -0.16 m at 68 / 78 / 88 (+0.01 / -0.11 / -0.12).
+    - **Stagger Walk**'s feet go 0.26 m back by frame 36 (recording 0.46, which was a
+      guard NeuroMotion's 0.59 m "met"), 1.03 m back and 0.58 m along -x by 96, and the
+      top of its neck is 0.042 m lower at 108 (0.12): NeuroMotion's is too, to the mm.
+    - **Writhe in mid-air**: the arms reach 36.7° at frame 28 (36.5° at 25) and go down
+      to -33.5° at 47 (-49° at 44); it lands at 54 (57). NeuroMotion's -33.0° and 54 are
+      now within.
+    - **Look and Reach**: both of character01's arms point within 20° of the box from
+      frame 14 (20; NeuroMotion 17).
+
+    The curves also say where NeuroMotion's gaps are (lesson 41 for the muscles):
+    - **Car Hit's launch.** After the hit (frames 49-54) endorphin's centre of mass
+      moves at (-0.25, 2.29, +0.13) m/s, NeuroMotion's at (+0.22, 2.13, -0.55): it goes
+      back along the road and sideways instead of up. The difference is the left foot:
+      at frame 50 endorphin's is thrown up and back (+4.5, +5.0 m/s), along the
+      windscreen's face, where NeuroMotion's is pushed straight along the road (+11
+      m/s) by the windscreen box's lower end, 4 cm lower. endorphin's character goes
+      into physics at frame 48, as its event says; NeuroMotion's at 49, a frame later
+      (a level switch at frame f acts on the step from f to f + 1). Moving all
+      animation a frame later (the export's offset read as endorphin's own) raises the
+      flight to 1.94 m but brings the hit a frame early; neither is in.
+    - Car Hit's pedestrian also folds at the hips far more in flight: trunk to left
+      thigh 96.5° at frame 70, NeuroMotion 75.4°.
+
+41. **Lock strengths are kilograms-force; drives are not. The muscles follow their
+    presets as NeuroMotion reads them, except the trunk and hips, which bend 8-16°
+    further under load, and endorphin's take-off comes 3-8 frames later.**
+
+    - **Locks.** Back-Flip-To-Combo's toe locks (25) can't hold its crouch in newtons:
+      by frame 192 its centre of mass is 0.60 m behind the heels' middle and falling
+      (endorphin's 0.16 m, still). Read in kilograms-force (25 kgf = 245 N, the
+      importer multiplying a positive strength by 9.80665) it is 0.155 m, 3.19 m up
+      (endorphin 3.16), and the character springs up off the box instead of falling
+      back over its edge. Tackle's pelvis lock (orientation strength 500 on x, frames
+      40-51) shows the same: endorphin's pelvis turns 0.2° about x by frame 48 as the
+      runner is hit, NeuroMotion's 11.7° at 500 N·m and 0.0° at 500 kgf·m. Car Hit's
+      car, joined to its keyed carrier, drifts 12.5 cm at most instead of 38 cm, as
+      endorphin's keeps up (lesson 20). Lessons 34 and 39 had found three times the
+      strength or more needed and not kept it because the recording's rows (leaving
+      the box at 212) rewarded falling off.
+    - **Drives.** A negative strength (lesson 13) is kept in N·m. Back-Flip-To-Combo's
+      trunk turns, from frame 190, -110 / -301 / -469 / -593° by 240 / 270 / 297 / 330
+      (endorphin -118 / -326 / -523 / -688); with the drive in kilograms-force too it
+      spins -1076° by 297, without the drive -399°.
+    - **Muscles.** Through the crouch and the take-off the knee, elbow and ankle follow
+      endorphin's within 2-6° and with the same speed (the knee from 12° to 105-112°
+      over frames 100-170, the elbow 10° to 63° and back): the presets, read as
+      NeuroMotion reads them, are right for them. The trunk and hips are not: under the
+      body's weight endorphin's bend further than their poses, the spine joints 4-8°
+      each by frame 100 more than NeuroMotion's, the hip (trunk to thigh) 90° at
+      frame 170 against 75°, the spine 48° at 185 against 39°. That puts endorphin's
+      centre of mass forward over its feet. No reading of the files explains it: the
+      file stores the same gains and the same effector `Calibration` for every joint
+      (10, 20, 10, delay 10), so a scale from them weakens knees and spine alike.
+      Scaled by Calibration / 100 (stiffness 10%, damping 20%, force limit 10%) every
+      scene moves away from endorphin (summed joint-angle error over the six scenes'
+      windows 143° → 240°); stiffness and damping at 10% bend the spine as endorphin's
+      but overshoot the knees by 18° and still go back over the box. At the take-off
+      (frames 190-215) endorphin's hips, ankles and spine move 3-8 frames (at 120 fps)
+      later than NeuroMotion's (shifted by that, the hip's rms error drops from 21.6° to
+      5.2°), but at the crouch's events (frame 100) the knee and ankle show no delay
+      (0-1 frame): not a uniform `timeDelay`. Both are still open; nothing changed.
+    - **Virtual muscles.** None of the six exported scenes has a pose naming them, so
+      the exports say nothing about their gains (lesson 35).
+    - **Car Hit's flight** is unchanged at 1.73 m (endorphin 1.79 m, exact): the gap is
+      the launch (lesson 40), not the flight.
+
+    Scored on the six scenes with `NM_NUDGES=2` (rows within endorphin's uncertainty,
+    mean error in uncertainties, each row counted up to 4):
+
+    | Scene | Rows | Newtons (before) | Kilograms-force |
+    |---|---|---|---|
+    | Car Hit | 20 | 10, 1.9 | 10, 1.9 |
+    | Back-Flip-To-Combo | 18 | 1, 3.2 | 2, 2.7 |
+    | Tackle | 9 | 4, 1.5 | 3, 2.3 |
+    | Hands reach and look at 2.5 | 3 | 2, 1.4 | 2, 1.4 |
+    | Writhe in mid-air 2.5 | 5 | 3, 1.2 | 3, 1.2 |
+    | Stagger Walk | 4 | 1, 3.0 | 1, 3.0 |
+    | In all | 59 | 21 (131.3) | 21 (129.5) |
+
+    Back-Flip-To-Combo, newtons → kilograms-force (endorphin): centre of mass 2.93 →
+    3.19 m at frame 192 (3.16), 0.60 → 0.155 m behind the heels (0.164), highest 2.93 m
+    at 192 (falling) → 3.54 m at 224 (3.745 m at 242), lowest body highest 2.63 → 3.39
+    m (3.60), past the box top 213 → 270 (296), on the floor 281 → 314 (330), lean at
+    frame 100 -9.6 → -7.9° (-6.4). It still jumps 0.2 m too low and 18 frames early,
+    with the hips 15° and the arms 28° short of endorphin's reach at the take-off.
+    Tackle gets worse: its runner, now held level by the pelvis lock, goes down later
+    (centre of mass 0.82 m at frame 55, 0.79 before, endorphin 0.70; lying 2.18 m along
+    z at 100, 1.96, endorphin 1.65). endorphin's pelvis doesn't turn about the vertical
+    either (-1.5° by 48, NeuroMotion's -13°), which the lock leaves free.
+
+    The sample sweep stays 17 of 17 clean; only scenes with locks moved (lowest body /
+    max joint stretch / fastest / lock drift):
+
+    | Scene | Newtons | Kilograms-force |
+    |---|---|---|
+    | Bridge Escape | 10.02 m / 0.86 cm / 26.7 m/s / 5.6 m | 0.07 m / 0.45 / 26.9 / 5.1 m |
+    | Car Crash | 0.00 / 0.12 / 16.8 / 32.7 cm | 0.00 / 0.22 / 15.7 / 0.1 cm |
+    | Car Hit | 0.03 / 0.34 / 12.5 / 38.0 cm | 0.03 / 0.34 / 12.5 / 12.5 cm |
+    | Catch Rope | 0.02 / 0.78 / 20.0 / 3.8 cm | -0.01 / 0.67 / 18.7 / 3.6 cm |
+    | Gymnast Rings | 1.63 / 0.15 / 9.5 / 55.8 cm | 1.64 / 0.55 / 9.6 / 0.9 cm |
+    | Heli Leap (no ground) | 0.00 / 0.29 / 13.8 / 0.3 cm | 0.00 / 0.29 / 13.5 / 0.3 cm |
+    | Rotating Floor (no ground) | -4.64 / 0.14 / 10.6 / 0 | -4.53 / 0.09 / 9.9 / 0 |
+    | Tackle | 0.01 / 0.14 / 9.1 / 0 | 0.01 / 0.22 / 9.1 / 0 |
+    | Walk With Gun | 0.01 / 0.11 / 5.2 / 0.4 cm | 0.01 / 0.11 / 5.2 / 0.4 cm |
+
+    NeuroMotion's own projects keep their strengths in newtons (stand-ins,
+    `simulations_are_bit_identical_everywhere`, `nudge_survey` and the push tests don't
+    change); an imported scene saved before keeps the newtons it was imported with.
 
 ## Status against endorphin's sample scenes
 

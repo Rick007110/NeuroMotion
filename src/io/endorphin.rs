@@ -1318,9 +1318,14 @@ fn event_settings(event: Node) -> BTreeMap<String, String> {
     }
     // Vector settings stored as child elements (e.g. constraint strengths).
     for c in elements(Some(event)) {
-        if let (Some(v), true) = (vec3(Some(c)), c.tag_name().name() != "TransformMatrix") {
+        if let (Some(mut v), true) = (vec3(Some(c)), c.tag_name().name() != "TransformMatrix") {
             let tag = c.tag_name().name();
             let key = tag[..1].to_ascii_lowercase() + &tag[1..];
+            if event.attribute("lockType").is_some()
+                && matches!(tag, "PositionStrength" | "AngularStrength")
+            {
+                v = lock_strength(v);
+            }
             out.insert(
                 key,
                 format!(
@@ -1340,6 +1345,22 @@ fn event_settings(event: Node) -> BTreeMap<String, String> {
     }
     behaviour_parameters(event, &mut out);
     out
+}
+
+/// Standard gravity, m/s²: one kilogram-force in newtons.
+const KILOGRAM_FORCE: f32 = 9.806_65;
+
+/// A lock or join's strengths, per axis, in NeuroMotion's units (N, N·m). endorphin's
+/// hold in kilograms-force (and kgf·m): its own runs, exported as FBX, show Back-Flip-
+/// To-Combo's 25 toe locks holding the crouch and Tackle's 500 lock holding the pelvis
+/// level, where 25 N and 500 N·m give way (physics-design.md, lesson 41). A negative
+/// strength drives rather than holds (lesson 13) and stays as written: read in
+/// kilograms-force too, the flip's drive spins it twice as far as endorphin's.
+fn lock_strength(v: Vec3) -> Vec3 {
+    Vec3::from_array(
+        v.to_array()
+            .map(|s| if s > 0.0 { s * KILOGRAM_FORCE } else { s }),
+    )
 }
 
 /// A behaviour event's own settings (`Parameters`): one `Variable` per setting, named
@@ -2931,6 +2952,28 @@ mod tests {
             decode_document(&[0x1b, 0xd1, 0xd7, 0xee, 0x3e]),
             Err(IoError::Format(_))
         ));
+    }
+
+    #[test]
+    fn lock_strengths_are_kilograms_force_and_drives_are_kept() {
+        let hex = |v: f32| format!("{:08x}", v.to_bits());
+        let xml = format!(
+            r#"<TertiaryBehaviour name="Lock" startFrameNumber="0" endFrameNumber="9" character="c" lockType="Lock">
+                 <PositionStrength bx="{}" by="{}" bz="{}"/>
+                 <AngularStrength bx="{}" by="{}" bz="{}"/>
+               </TertiaryBehaviour>"#,
+            hex(25.0),
+            hex(0.0),
+            hex(1.0),
+            hex(-100.0),
+            hex(500.0),
+            hex(0.0),
+        );
+        let doc = roxmltree::Document::parse(&xml).unwrap();
+        let settings = event_settings(doc.root_element());
+        // 25 kgf is 245.17 N; a free axis stays free; a drive stays as written.
+        assert_eq!(settings["positionStrength"], "245.16626, 0, 9.80665");
+        assert_eq!(settings["angularStrength"], "-100, 4903.325, 0");
     }
 
     /// Imports every scene, character and pose shipped with a local endorphin install.

@@ -77,6 +77,10 @@ pub enum Signal {
     /// (character, body, target). On endorphin's characters the head body's +Z is the
     /// way the face looks.
     FacingOff(&'static str, &'static str, Point),
+    /// How far a joint bends, degrees: the angle between the line from the middle point
+    /// back to the first and the line from it on to the third, 0 when they are in line
+    /// (hip, knee, ankle gives the knee's bend).
+    Bend(Point, Point, Point),
     /// The mean of several signals.
     Mean(&'static [Signal]),
     /// The largest of several signals (e.g. the arm furthest off a target).
@@ -136,311 +140,530 @@ pub struct Scene {
     pub rows: &'static [Row],
 }
 
-// Car Hit's recording was read with endorphin's View Frame field (to a frame or two at
-// 60 fps), and positions by fitting a camera to the view and back-projecting the
-// pedestrian's silhouette (background subtracted) onto the vertical plane through
-// NeuroMotion's centre of mass, so x runs along the road. A silhouette's centroid is
-// not quite the centre of mass: where endorphin's pedestrian and NeuroMotion's follow
-// the same animation (frames 30 and 190), the two differ by up to 6 cm.
-const CAR_HIT_VIDEO: &str =
-    "recording of endorphin 2.5.2, silhouette back-projected (lessons 20-21, 28)";
+// Most rows are read from endorphin 2.5.2's own runs, exported as FBX by a user with
+// endorphin (docs/endorphin-formats.md, "Exported motion"; physics-design.md, lesson
+// 40): every joint's world transform at every frame, to the file's float precision.
+// The centre of mass and body centres are worked out from those joints with
+// NeuroMotion's own rig (body frames and masses), exactly as on NeuroMotion's run, so
+// the two compare like with like. The uncertainty is then not endorphin's measurement
+// error but how close counts as the same: 3 cm, 1-4° and 2-3 frames where nothing
+// chaotic happens, wider after a landing or a tumble. Rows still read from recordings
+// say so in `source`.
+const FBX: &str = "endorphin's own run, exported as FBX (lesson 40)";
+
+/// A row read from endorphin's own run, exported as FBX.
+#[allow(clippy::too_many_arguments)]
+const fn fbx(
+    what: &'static str,
+    signal: Signal,
+    measure: Measure,
+    endorphin: f32,
+    uncertainty: f32,
+    guard: bool,
+    baseline: f32,
+) -> Row {
+    Row {
+        what,
+        signal,
+        measure,
+        endorphin,
+        uncertainty,
+        guard,
+        baseline,
+        source: FBX,
+    }
+}
 
 const fn com(axis: Axis) -> Signal {
     Signal::Coord(Point::Com("character01"), axis)
 }
 
+const fn joint(name: &'static str) -> Point {
+    Point::Joint("character01", name)
+}
+
+/// The bend at a joint, degrees: 0 when the three joints are in line.
+const fn bend(a: &'static str, b: &'static str, c: &'static str) -> Signal {
+    Signal::Bend(joint(a), joint(b), joint(c))
+}
+
+const HEAD_OVER_COM: Signal = Signal::Above(
+    Point::Body("character01", "HeadMass"),
+    Point::Com("character01"),
+);
+
 /// What is measured, scene by scene. See the module's documentation to add to it.
 pub const SCENES: &[Scene] = &[
     Scene {
         file: "Sample Scenes/Car Hit.ens",
-        measured: "a frame-by-frame recording of endorphin's run, silhouette \
-                   back-projected through a fitted camera (physics-design.md lessons \
-                   20, 21 and 28)",
+        measured: "endorphin's own run, exported as FBX (lesson 40)",
         rows: &[
-            Row {
-                what: "run-up: centre of mass x, frame 30",
-                signal: com(Axis::X),
-                measure: Measure::At(30),
-                endorphin: 1.38,
-                uncertainty: 0.12,
-                guard: true,
-                baseline: 1.437,
-                source: CAR_HIT_VIDEO,
-            },
-            Row {
-                what: "run-up: centre of mass height, frame 30",
-                signal: com(Axis::Y),
-                measure: Measure::At(30),
-                endorphin: 0.82,
-                uncertainty: 0.12,
-                guard: true,
-                baseline: 0.868,
-                source: CAR_HIT_VIDEO,
-            },
-            Row {
-                what: "flight: centre of mass highest",
-                signal: com(Axis::Y),
-                measure: Measure::Max(48, 100),
-                endorphin: 1.81,
-                uncertainty: 0.06,
-                guard: false,
-                baseline: 1.730,
-                source: CAR_HIT_VIDEO,
-            },
-            Row {
-                what: "flight: frame it is highest",
-                signal: com(Axis::Y),
-                measure: Measure::MaxFrame(48, 100),
-                endorphin: 68.0,
-                uncertainty: 2.0,
-                guard: false,
-                baseline: 67.0,
-                source: CAR_HIT_VIDEO,
-            },
-            Row {
-                what: "flight: centre of mass x, frame 68",
-                signal: com(Axis::X),
-                measure: Measure::At(68),
-                endorphin: 0.01,
-                uncertainty: 0.1,
-                guard: true,
-                baseline: 0.073,
-                source: CAR_HIT_VIDEO,
-            },
-            Row {
-                what: "flight: centre of mass x, frame 78",
-                signal: com(Axis::X),
-                measure: Measure::At(78),
-                endorphin: -0.11,
-                uncertainty: 0.1,
-                guard: false,
-                baseline: 0.109,
-                source: CAR_HIT_VIDEO,
-            },
-            Row {
-                what: "flight: centre of mass x, frame 88",
-                signal: com(Axis::X),
-                measure: Measure::At(88),
-                endorphin: -0.12,
-                uncertainty: 0.1,
-                guard: false,
-                baseline: 0.145,
-                source: CAR_HIT_VIDEO,
-            },
-            Row {
-                what: "flight: centre of mass height, frame 78",
-                signal: com(Axis::Y),
-                measure: Measure::At(78),
-                endorphin: 1.62,
-                uncertainty: 0.08,
-                guard: false,
-                baseline: 1.568,
-                source: CAR_HIT_VIDEO,
-            },
-            Row {
-                what: "flight: centre of mass height, frame 88",
-                signal: com(Axis::Y),
-                measure: Measure::At(88),
-                endorphin: 1.26,
-                uncertainty: 0.08,
-                guard: false,
-                baseline: 1.134,
-                source: CAR_HIT_VIDEO,
-            },
-            Row {
-                what: "upside down (head under the centre of mass) from",
-                signal: Signal::Above(
-                    Point::Body("character01", "HeadMass"),
-                    Point::Com("character01"),
-                ),
-                measure: Measure::FirstBelow {
+            fbx(
+                "run-up: centre of mass x, frame 30",
+                com(Axis::X),
+                Measure::At(30),
+                1.437,
+                0.03,
+                true,
+                1.437,
+            ),
+            fbx(
+                "run-up: centre of mass height, frame 30",
+                com(Axis::Y),
+                Measure::At(30),
+                0.868,
+                0.03,
+                true,
+                0.868,
+            ),
+            fbx(
+                "flight: centre of mass highest",
+                com(Axis::Y),
+                Measure::Max(48, 100),
+                1.790,
+                0.03,
+                false,
+                1.725,
+            ),
+            fbx(
+                "flight: frame it is highest",
+                com(Axis::Y),
+                Measure::MaxFrame(48, 100),
+                68.0,
+                2.0,
+                false,
+                67.0,
+            ),
+            fbx(
+                "flight: centre of mass x, frame 68",
+                com(Axis::X),
+                Measure::At(68),
+                -0.073,
+                0.05,
+                false,
+                0.074,
+            ),
+            fbx(
+                "flight: centre of mass x, frame 78",
+                com(Axis::X),
+                Measure::At(78),
+                -0.114,
+                0.05,
+                false,
+                0.112,
+            ),
+            fbx(
+                "flight: centre of mass x, frame 88",
+                com(Axis::X),
+                Measure::At(88),
+                -0.155,
+                0.05,
+                false,
+                0.149,
+            ),
+            fbx(
+                "flight: centre of mass z, frame 68",
+                com(Axis::Z),
+                Measure::At(68),
+                -0.056,
+                0.05,
+                false,
+                -0.261,
+            ),
+            fbx(
+                "flight: centre of mass height, frame 78",
+                com(Axis::Y),
+                Measure::At(78),
+                1.667,
+                0.05,
+                false,
+                1.559,
+            ),
+            fbx(
+                "flight: centre of mass height, frame 88",
+                com(Axis::Y),
+                Measure::At(88),
+                1.270,
+                0.05,
+                false,
+                1.122,
+            ),
+            fbx(
+                "flight: left knee bend, frame 60",
+                bend("LeftHipJoint", "LeftKneeJoint", "LeftAnkleJoint"),
+                Measure::At(60),
+                61.1,
+                4.0,
+                false,
+                58.1,
+            ),
+            fbx(
+                "flight: right knee bend, frame 60",
+                bend("RightHipJoint", "RightKneeJoint", "RightAnkleJoint"),
+                Measure::At(60),
+                32.6,
+                4.0,
+                false,
+                34.6,
+            ),
+            fbx(
+                "flight: trunk to left thigh bend, frame 70",
+                bend("UpperSpineJoint", "LeftHipJoint", "LeftKneeJoint"),
+                Measure::At(70),
+                96.5,
+                4.0,
+                false,
+                75.4,
+            ),
+            fbx(
+                "upside down (head under the centre of mass) from",
+                HEAD_OVER_COM,
+                Measure::FirstBelow {
                     from: 48,
                     to: 120,
                     below: 0.0,
                 },
-                endorphin: 76.0,
-                uncertainty: 3.0,
-                guard: false,
-                baseline: 62.0,
-                source: "recording, read by eye frame by frame (lesson 28)",
-            },
-            Row {
-                what: "upside down until",
-                signal: Signal::Above(
-                    Point::Body("character01", "HeadMass"),
-                    Point::Com("character01"),
-                ),
-                measure: Measure::LastBelow {
+                60.0,
+                2.0,
+                false,
+                62.0,
+            ),
+            fbx(
+                "upside down until",
+                HEAD_OVER_COM,
+                Measure::LastBelow {
                     from: 48,
                     to: 120,
                     below: 0.0,
                 },
-                endorphin: 88.0,
-                uncertainty: 3.0,
-                guard: false,
-                baseline: 83.0,
-                source: "recording, read by eye frame by frame (lesson 28)",
-            },
-            Row {
-                what: "first on the ground (a body centre under 6 cm)",
-                signal: Signal::Lowest("character01"),
-                measure: Measure::FirstBelow {
+                83.0,
+                2.0,
+                true,
+                83.0,
+            ),
+            fbx(
+                "first on the ground (a body centre under 6 cm)",
+                Signal::Lowest("character01"),
+                Measure::FirstBelow {
                     from: 60,
                     to: 140,
                     below: 0.06,
                 },
-                endorphin: 96.0,
-                uncertainty: 3.0,
-                guard: false,
-                baseline: 94.0,
-                source: "recording: feet first about frame 96, by eye (lesson 21)",
-            },
-            Row {
-                what: "landed: centre of mass x, frame 96",
-                signal: com(Axis::X),
-                measure: Measure::At(96),
-                endorphin: -0.34,
-                uncertainty: 0.1,
-                guard: false,
-                baseline: 0.147,
-                source: CAR_HIT_VIDEO,
-            },
-            Row {
-                what: "back on its feet: centre of mass x, frame 190",
-                signal: com(Axis::X),
-                measure: Measure::At(190),
-                endorphin: -1.49,
-                uncertainty: 0.12,
-                guard: true,
-                baseline: -1.517,
-                source: CAR_HIT_VIDEO,
-            },
-            Row {
-                what: "back on its feet: centre of mass height, frame 190",
-                signal: com(Axis::Y),
-                measure: Measure::At(190),
-                endorphin: 0.91,
-                uncertainty: 0.12,
-                guard: true,
-                baseline: 0.948,
-                source: CAR_HIT_VIDEO,
-            },
+                96.0,
+                2.0,
+                false,
+                94.0,
+            ),
+            fbx(
+                "landed: centre of mass x, frame 96",
+                com(Axis::X),
+                Measure::At(96),
+                -0.358,
+                0.05,
+                false,
+                -0.073,
+            ),
+            fbx(
+                "landed: centre of mass z, frame 96",
+                com(Axis::Z),
+                Measure::At(96),
+                0.063,
+                0.05,
+                false,
+                -0.326,
+            ),
+            fbx(
+                "back on its feet: centre of mass x, frame 190",
+                com(Axis::X),
+                Measure::At(190),
+                -1.517,
+                0.03,
+                true,
+                -1.517,
+            ),
+            fbx(
+                "back on its feet: centre of mass height, frame 190",
+                com(Axis::Y),
+                Measure::At(190),
+                0.948,
+                0.03,
+                true,
+                0.948,
+            ),
         ],
     },
     Scene {
         file: "Back-Flip-To-Combo.ens",
-        measured: "a user's own scene (#6): a recording of endorphin's run with its frame \
-                   counter, a camera fitted to the box and the start pose, silhouettes \
-                   (physics-design.md lessons 19 and 27)",
+        measured: "a user's own scene (#6): endorphin's own run, exported as FBX (lesson 40)",
         rows: &[
-            Row {
-                what: "lean back about the heels since frame 0, frame 44",
-                signal: BACKFLIP_LEAN,
-                measure: Measure::Change(0, 44),
-                endorphin: -1.5,
-                uncertainty: 2.0,
-                guard: false,
-                baseline: -3.5,
-                source: BACKFLIP_LEAN_SOURCE,
-            },
-            Row {
-                what: "lean back about the heels since frame 0, frame 72",
-                signal: BACKFLIP_LEAN,
-                measure: Measure::Change(0, 72),
-                endorphin: -4.0,
-                uncertainty: 2.0,
-                guard: false,
-                baseline: -6.7,
-                source: BACKFLIP_LEAN_SOURCE,
-            },
-            Row {
-                what: "lean back about the heels since frame 0, frame 100",
-                signal: BACKFLIP_LEAN,
-                measure: Measure::Change(0, 100),
-                endorphin: -6.0,
-                uncertainty: 2.0,
-                guard: false,
-                baseline: -9.6,
-                source: BACKFLIP_LEAN_SOURCE,
-            },
-            Row {
-                what: "left arm (shoulder to hand) above horizontal, frame 96",
-                signal: Signal::Elevation(
-                    Point::Joint("character01", "LUpperArm"),
-                    Point::Joint("character01", "LHand"),
-                ),
-                measure: Measure::At(96),
-                endorphin: -7.0,
-                uncertainty: 5.0,
-                guard: false,
-                baseline: 24.7,
-                source: "recording: the finger tip's pixel on a plane through the shoulder \
-                         (lesson 27)",
-            },
-            Row {
-                what: "crouching: head drop, frames 140 to 168",
-                signal: BACKFLIP_HEAD,
-                measure: Measure::Change(140, 168),
-                endorphin: -0.20,
-                uncertainty: 0.06,
-                guard: true,
-                baseline: -0.223,
-                source: BACKFLIP_HEAD_SOURCE,
-            },
-            Row {
-                what: "crouching: head drop, frames 140 to 192",
-                signal: BACKFLIP_HEAD,
-                measure: Measure::Change(140, 192),
-                endorphin: -0.10,
-                uncertainty: 0.06,
-                guard: false,
-                baseline: -0.495,
-                source: BACKFLIP_HEAD_SOURCE,
-            },
-            Row {
-                what: "springs up: head rise, frames 192 to 248",
-                signal: BACKFLIP_HEAD,
-                measure: Measure::Change(192, 248),
-                endorphin: 0.65,
-                uncertainty: 0.12,
-                guard: false,
-                baseline: -1.739,
-                source: BACKFLIP_HEAD_SOURCE,
-            },
-            Row {
-                what: "leaves the box top (a body centre 10 cm under it)",
-                signal: Signal::Lowest("character01"),
-                measure: Measure::FirstBelow {
+            fbx(
+                "lean back about the heels since frame 0, frame 44",
+                BACKFLIP_LEAN,
+                Measure::Change(0, 44),
+                -2.3,
+                1.0,
+                false,
+                -3.7,
+            ),
+            fbx(
+                "lean back about the heels since frame 0, frame 72",
+                BACKFLIP_LEAN,
+                Measure::Change(0, 72),
+                -5.3,
+                1.0,
+                false,
+                -6.7,
+            ),
+            fbx(
+                "lean back about the heels since frame 0, frame 100",
+                BACKFLIP_LEAN,
+                Measure::Change(0, 100),
+                -6.4,
+                1.0,
+                false,
+                -7.9,
+            ),
+            fbx(
+                "left arm (shoulder to hand) above horizontal, frame 96",
+                Signal::Elevation(joint("LUpperArm"), joint("LHand")),
+                Measure::At(96),
+                -2.9,
+                3.0,
+                false,
+                23.9,
+            ),
+            fbx(
+                "crouching: centre of mass height, frame 168",
+                com(Axis::Y),
+                Measure::At(168),
+                3.159,
+                0.03,
+                false,
+                3.195,
+            ),
+            fbx(
+                "crouched: centre of mass height, frame 192",
+                com(Axis::Y),
+                Measure::At(192),
+                3.158,
+                0.03,
+                false,
+                3.186,
+            ),
+            fbx(
+                "crouched: centre of mass z (behind the heels < -0.03), frame 192",
+                com(Axis::Z),
+                Measure::At(192),
+                -0.164,
+                0.05,
+                true,
+                -0.155,
+            ),
+            fbx(
+                "crouched: knee bend, frame 170",
+                bend("LThigh", "LCalf", "LFoot"),
+                Measure::At(170),
+                111.8,
+                4.0,
+                false,
+                106.4,
+            ),
+            fbx(
+                "crouched: hip bend (trunk to thigh), frame 170",
+                bend("Spine2", "LThigh", "LCalf"),
+                Measure::At(170),
+                90.3,
+                4.0,
+                false,
+                74.8,
+            ),
+            fbx(
+                "crouched: spine bend (pelvis, chest, head), frame 185",
+                bend("Pelvis", "Spine2", "Head"),
+                Measure::At(185),
+                48.2,
+                4.0,
+                false,
+                39.0,
+            ),
+            fbx(
+                "take-off: hips straightest",
+                bend("Spine2", "LThigh", "LCalf"),
+                Measure::Min(195, 235),
+                3.9,
+                4.0,
+                false,
+                16.1,
+            ),
+            fbx(
+                "take-off: arms overhead (shoulder bend least)",
+                bend("Spine1", "LUpperArm", "LForeArm"),
+                Measure::Min(200, 240),
+                60.6,
+                4.0,
+                false,
+                88.5,
+            ),
+            fbx(
+                "jump: centre of mass highest",
+                com(Axis::Y),
+                Measure::Max(192, 300),
+                3.745,
+                0.05,
+                false,
+                3.543,
+            ),
+            fbx(
+                "jump: frame it is highest",
+                com(Axis::Y),
+                Measure::MaxFrame(192, 300),
+                242.0,
+                3.0,
+                false,
+                224.0,
+            ),
+            fbx(
+                "jump: lowest body centre highest (box top 2.52 m)",
+                Signal::Lowest("character01"),
+                Measure::Max(192, 300),
+                3.602,
+                0.05,
+                false,
+                3.387,
+            ),
+            fbx(
+                "falls past the box top (a body centre 10 cm under it)",
+                Signal::Lowest("character01"),
+                Measure::FirstBelow {
                     from: 100,
                     to: 500,
                     below: 2.42,
                 },
-                endorphin: 212.0,
-                uncertainty: 6.0,
-                guard: false,
-                baseline: 213.0,
-                source: "recording, by eye: in the air above the box at 228 (lesson 27)",
-            },
-            Row {
-                what: "first on the floor (a body centre under 15 cm)",
-                signal: Signal::Lowest("character01"),
-                measure: Measure::FirstBelow {
+                296.0,
+                3.0,
+                false,
+                270.0,
+            ),
+            fbx(
+                "first on the floor (a body centre under 15 cm)",
+                Signal::Lowest("character01"),
+                Measure::FirstBelow {
                     from: 100,
                     to: 726,
                     below: 0.15,
                 },
-                endorphin: 276.0,
-                uncertainty: 6.0,
-                guard: false,
-                baseline: 281.0,
-                source: "recording, by eye: feet first behind the box (lesson 27)",
-            },
+                330.0,
+                3.0,
+                false,
+                314.0,
+            ),
+            fbx(
+                "combo: centre of mass highest, frames 500-620",
+                com(Axis::Y),
+                Measure::Max(500, 620),
+                1.667,
+                0.1,
+                false,
+                0.560,
+            ),
+        ],
+    },
+    Scene {
+        file: "Sample Scenes/Tackle.ens",
+        measured: "endorphin's own run of the tackled character, exported as FBX (lesson 40)",
+        rows: &[
+            fbx(
+                "hit: centre of mass height, frame 55",
+                com(Axis::Y),
+                Measure::At(55),
+                0.698,
+                0.03,
+                false,
+                0.819,
+            ),
+            fbx(
+                "hit: centre of mass height, frame 65",
+                com(Axis::Y),
+                Measure::At(65),
+                0.430,
+                0.05,
+                false,
+                0.586,
+            ),
+            fbx(
+                "hit: head over the centre of mass, frame 60",
+                HEAD_OVER_COM,
+                Measure::At(60),
+                0.464,
+                0.05,
+                false,
+                0.692,
+            ),
+            fbx(
+                "down: centre of mass lowest, frames 60-100",
+                com(Axis::Y),
+                Measure::Min(60, 100),
+                0.219,
+                0.03,
+                false,
+                0.239,
+            ),
+            fbx(
+                "down: frame it is lowest",
+                com(Axis::Y),
+                Measure::MinFrame(60, 100),
+                76.0,
+                3.0,
+                false,
+                77.0,
+            ),
+            fbx(
+                "down: head under the centre of mass from",
+                HEAD_OVER_COM,
+                Measure::FirstBelow {
+                    from: 41,
+                    to: 100,
+                    below: 0.0,
+                },
+                75.0,
+                2.0,
+                false,
+                77.0,
+            ),
+            fbx(
+                "carried: centre of mass z, frame 70",
+                com(Axis::Z),
+                Measure::At(70),
+                1.514,
+                0.05,
+                false,
+                1.613,
+            ),
+            fbx(
+                "lying: centre of mass x, frame 100",
+                com(Axis::X),
+                Measure::At(100),
+                0.785,
+                0.1,
+                false,
+                0.661,
+            ),
+            fbx(
+                "lying: centre of mass z, frame 100",
+                com(Axis::Z),
+                Measure::At(100),
+                1.650,
+                0.1,
+                false,
+                2.183,
+            ),
         ],
     },
     Scene {
         file: "Behaviour Scenes/Hands reach and look at2.5.ens",
-        measured: "a recording of endorphin's demo scene with its frame counter, a camera \
-                   fitted to the view (behaviours.md, Look and Reach)",
+        measured: "character01: endorphin's own run, exported as FBX (lesson 40); \
+                   character02: a recording of endorphin's demo scene with its frame \
+                   counter, a camera fitted to the view (behaviours.md, Look and Reach)",
         rows: &[
             Row {
                 what: "character01: both arms within 20° of the box from",
@@ -453,11 +676,11 @@ pub const SCENES: &[Scene] = &[
                     to: 150,
                     below: 20.0,
                 },
-                endorphin: 20.0,
-                uncertainty: 4.0,
-                guard: true,
+                endorphin: 14.0,
+                uncertainty: 3.0,
+                guard: false,
                 baseline: 17.0,
-                source: "recording, by eye: swinging in at 12, on the box by 18-24",
+                source: FBX,
             },
             Row {
                 what: "character02: far (left) arm within 20° of the box from",
@@ -492,48 +715,47 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         file: "Behaviour Scenes/Writhe in mid-air2.5.ens",
-        measured: "a front view recording of endorphin's behaviour scene with its frame \
-                   counter, arm angles read in the image (behaviours.md, Explosion)",
+        measured: "endorphin's own run, exported as FBX (lesson 40)",
         rows: &[
             Row {
                 what: "character01: upper arms highest (mean, above horizontal)",
                 signal: WRITHE_ARMS,
                 measure: Measure::Max(5, 35),
-                endorphin: 36.5,
-                uncertainty: 5.0,
+                endorphin: 36.7,
+                uncertainty: 3.0,
                 guard: true,
                 baseline: 37.1,
-                source: WRITHE_SOURCE,
+                source: FBX,
             },
             Row {
                 what: "character01: frame the arms are highest",
                 signal: WRITHE_ARMS,
                 measure: Measure::MaxFrame(5, 35),
-                endorphin: 25.0,
-                uncertainty: 5.0,
+                endorphin: 28.0,
+                uncertainty: 3.0,
                 guard: false,
                 baseline: 16.0,
-                source: WRITHE_SOURCE,
+                source: FBX,
             },
             Row {
                 what: "character01: upper arms lowest",
                 signal: WRITHE_ARMS,
                 measure: Measure::Min(30, 56),
-                endorphin: -49.0,
-                uncertainty: 9.0,
-                guard: false,
+                endorphin: -33.5,
+                uncertainty: 3.0,
+                guard: true,
                 baseline: -33.0,
-                source: WRITHE_SOURCE,
+                source: FBX,
             },
             Row {
                 what: "character01: frame the arms are lowest",
                 signal: WRITHE_ARMS,
                 measure: Measure::MinFrame(30, 56),
-                endorphin: 44.0,
+                endorphin: 47.0,
                 uncertainty: 3.0,
                 guard: false,
                 baseline: 42.0,
-                source: WRITHE_SOURCE,
+                source: FBX,
             },
             Row {
                 what: "character01: lands (a body centre under 10 cm)",
@@ -543,79 +765,68 @@ pub const SCENES: &[Scene] = &[
                     to: 120,
                     below: 0.1,
                 },
-                endorphin: 57.0,
-                uncertainty: 3.0,
-                guard: false,
+                endorphin: 54.0,
+                uncertainty: 2.0,
+                guard: true,
                 baseline: 54.0,
-                source: "recording, by eye: feet first at frame 56-58",
+                source: FBX,
             },
         ],
     },
     Scene {
         file: "Sample Scenes/Stagger Walk.ens",
-        measured: "a recording of endorphin's run with its frame counter, the feet's \
-                   footprint and the silhouette's top back-projected through a fitted \
-                   camera (behaviours.md, Stagger Walk)",
+        measured: "endorphin's own run, exported as FBX (lesson 40)",
         rows: &[
             Row {
                 what: "feet moved back (z), frames 0 to 36",
                 signal: Signal::Coord(STAGGER_FEET, Axis::Z),
                 measure: Measure::Change(0, 36),
-                endorphin: -0.46,
-                uncertainty: 0.2,
-                guard: true,
-                baseline: -0.59,
-                source: STAGGER_SOURCE,
+                endorphin: -0.264,
+                uncertainty: 0.05,
+                guard: false,
+                baseline: -0.589,
+                source: FBX,
             },
             Row {
                 what: "feet moved back (z), frames 0 to 96",
                 signal: Signal::Coord(STAGGER_FEET, Axis::Z),
                 measure: Measure::Change(0, 96),
-                endorphin: -0.88,
-                uncertainty: 0.25,
+                endorphin: -1.026,
+                uncertainty: 0.1,
                 guard: false,
-                baseline: -0.56,
-                source: STAGGER_SOURCE,
+                baseline: -0.557,
+                source: FBX,
             },
             Row {
                 what: "feet moved sideways (x), frames 0 to 96",
                 signal: Signal::Coord(STAGGER_FEET, Axis::X),
                 measure: Measure::Change(0, 96),
-                endorphin: -0.51,
-                uncertainty: 0.25,
+                endorphin: -0.577,
+                uncertainty: 0.1,
                 guard: false,
-                baseline: 0.38,
-                source: STAGGER_SOURCE,
+                baseline: 0.378,
+                source: FBX,
             },
             Row {
                 what: "still standing: top of the neck, change frames 0 to 108",
                 signal: Signal::Coord(Point::Joint("character01", "UpperNeckJoint"), Axis::Y),
                 measure: Measure::Change(0, 108),
-                endorphin: -0.12,
-                uncertainty: 0.1,
+                endorphin: -0.042,
+                uncertainty: 0.03,
                 guard: false,
-                baseline: -0.04,
-                source: "recording: the silhouette's top, 1.59 m at frame 0 and 1.47 m at \
-                         108",
+                baseline: -0.042,
+                source: FBX,
             },
         ],
     },
 ];
 
-// Back-Flip-To-Combo's character: the pelvis over the left heel, standing in for the
-// whole-body lean the recording was fitted with (the start pose turned about the heels
-// to fit the legs' and pelvis' silhouette). The two agree while the legs are straight,
-// to about frame 100; endorphin's fit at frame 0 was -1°, so its leans are given
-// relative to that.
+// Back-Flip-To-Combo's character: the pelvis over the left heel, how far its whole body
+// leans back about the heels while its legs are straight (to about frame 100).
 const BACKFLIP_LEAN: Signal = Signal::Pitch(
     Point::Joint("character01", "LFoot"),
     Point::Joint("character01", "Pelvis"),
 );
-const BACKFLIP_LEAN_SOURCE: &str = "recording: the start pose turned about the heels to fit \
-     the legs' and pelvis' silhouette, in 0.5° steps (lesson 27)";
-const BACKFLIP_HEAD: Signal = Signal::Coord(Point::Joint("character01", "Head"), Axis::Y);
-const BACKFLIP_HEAD_SOURCE: &str = "recording: the head's height in the image, about 86 px \
-     a metre at the box (lesson 27)";
 
 const REACH_TARGET: Point = Point::Body("background", "Prop0");
 
@@ -645,15 +856,11 @@ const WRITHE_ARMS: Signal = Signal::Mean(&[
         Point::Joint("character01", "RightElbowJoint"),
     ),
 ]);
-const WRITHE_SOURCE: &str = "recording, by eye: up to +35° (+38° one arm) at 20-30, down \
-     to -40 to -58° at 42-46";
 
 const STAGGER_FEET: Point = Point::Mid(&[
     Point::Joint("character01", "LeftAnkleJoint"),
     Point::Joint("character01", "RightAnkleJoint"),
 ]);
-const STAGGER_SOURCE: &str = "recording: the feet's footprint back-projected onto the \
-     ground; two steps back by frame 36, about five in all";
 
 impl Measure {
     /// Whether it gives a frame number rather than the signal's value.
@@ -737,13 +944,32 @@ impl Run<'_> {
             })
     }
 
+    /// Every rig body's world transform on the pose the character is shown in: its joint
+    /// and its frame on that joint. While simulated that is where the body is; during a
+    /// transition back to animation it is the blended pose, which is what endorphin
+    /// shows and exports, and so what its measurements were read on.
+    fn bodies(&self, character: usize, frame: i32) -> Vec<(Quat, Vec3)> {
+        let rig = self.project.characters[character].physics.as_ref().unwrap();
+        let joints = &self.state(character, frame).joints;
+        rig.bodies
+            .iter()
+            .map(|def| {
+                let (jr, jp) = joints[def.joint];
+                (
+                    jr * Quat::from_array(def.frame.rotation).normalize(),
+                    jp + jr * Vec3::from(def.frame.position),
+                )
+            })
+            .collect()
+    }
+
     fn body(&self, character: &str, body: &str, frame: i32) -> (Quat, Vec3) {
         let ci = self.character(character);
         let rig = self.project.characters[ci].physics.as_ref().unwrap();
         let bi = rig
             .body_index(body)
             .unwrap_or_else(|| panic!("{character} has no body {body:?}"));
-        self.state(ci, frame).bodies[bi]
+        self.bodies(ci, frame)[bi]
     }
 
     fn point(&self, point: Point, frame: i32) -> Vec3 {
@@ -760,7 +986,7 @@ impl Run<'_> {
             Point::Com(character) => {
                 let ci = self.character(character);
                 let rig = self.project.characters[ci].physics.as_ref().unwrap();
-                let bodies = &self.state(ci, frame).bodies;
+                let bodies = self.bodies(ci, frame);
                 let (sum, mass) = rig
                     .bodies
                     .iter()
@@ -790,8 +1016,7 @@ impl Run<'_> {
             Signal::Above(a, b) => self.point(a, frame).y - self.point(b, frame).y,
             Signal::Lowest(character) => {
                 let ci = self.character(character);
-                self.state(ci, frame)
-                    .bodies
+                self.bodies(ci, frame)
                     .iter()
                     .map(|b| b.1.y)
                     .fold(f32::MAX, f32::min)
@@ -810,6 +1035,10 @@ impl Run<'_> {
                     self.point(tip, frame) - from,
                     self.point(target, frame) - from,
                 )
+            }
+            Signal::Bend(a, b, c) => {
+                let at = self.point(b, frame);
+                180.0 - deg(self.point(a, frame) - at, self.point(c, frame) - at)
             }
             Signal::FacingOff(character, body, target) => {
                 let (rotation, at) = self.body(character, body, frame);

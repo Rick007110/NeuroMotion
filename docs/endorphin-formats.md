@@ -289,16 +289,23 @@ These are what the importer relies on:
   shapes that sit inside the neck at rest; NeuroMotion doesn't let a shape collide
   with a moving parent it already overlaps at rest (lesson 19).
 - Constraint events give a strength per axis for position and for orientation:
-  the most force (N) or torque (N·m) the lock may use on that axis, as Karma's
+  the most force or torque the lock may use on that axis, as Karma's
   relative-position-relative-orientation joint has; 0 leaves the axis free. The
-  values the scenes use read sensibly as forces on a human or a car: 25 N toe locks,
-  a 500 N ring hold, 100-1000 N·m "guides" to turn a character, and 1e5, which
-  carries a 747 kg car at up to 134 m/s² (13.6 g) and is effectively unbreakable for
-  a character. A lock that can't hold pulls towards its target with all of it
+  strengths are in kilograms-force (kgf, and kgf·m for orientation): the importer
+  multiplies a positive strength by 9.80665 into newtons (N·m). Back-Flip-To-Combo's
+  25 toe locks hold its crouch as endorphin's own run, exported as FBX, shows only
+  read that way (245 N; 25 N give way and it falls back off the box), and Tackle's
+  500 holds the pelvis level as endorphin's does (physics-design.md, lesson 41). The
+  values the scenes use are then a 245 N toe lock, a 4900 N ring hold, 1000-10 000
+  N·m "guides" to turn a character, and 1e5, effectively unbreakable. Projects
+  imported before keep the newtons they were imported with; importing the scene
+  again reads it this way. A lock that can't hold pulls towards its target with all of it
   (`physics-design.md`, lesson 20). The files don't say how fast endorphin closes
   a gap; that a strong join follows its keyed carrier, as Car Hit's car does, is
   what was checked.
-  endorphin's help doesn't document negative strengths; scenes use them as drives.
+  endorphin's help doesn't document negative strengths; scenes use them as drives,
+  and a negative strength is kept as written (N, N·m): read in kilograms-force too,
+  Back-Flip-To-Combo's drive spins it twice as far as endorphin's (lesson 41).
   Back-Flip-To-Combo spins its character into the flip with an orientation strength
   of (-100, 0, 0) on pelvis and spine. NeuroMotion reads a negative axis as a steady
   force or torque of that value along the axis (world axes for locks, the anchor's
@@ -320,3 +327,51 @@ The conventions were checked by forward kinematics on real data. With these
 conventions, the standard character's rest pose is a T-pose with its feet on the ground
 at y ≈ 0. A walk frame stands upright with the head at about 1.8 m. The other
 interpretations put limbs at impossible angles.
+
+## Exported motion
+
+endorphin exports its results (the simulated motion, not the scene) as FBX. The files
+users have exported from endorphin 2.5.2 are binary FBX 6.0 (`Kaydara FBX Binary`,
+version 6000, `FBX SDK/FBX Plugins build 20050223`). Reading one is allowed as a
+measurement of endorphin's behaviour, like a recording; the files themselves stay with
+the user, and only numbers derived from them go into the repository
+(`src/physics/reference.rs`). What they hold, read with a parser written for this
+(physics-design.md, lesson 40):
+
+- **Structure.** Binary FBX node records (32-bit end offset, property count and list
+  length, a name, typed properties; arrays may be zlib-compressed). `Objects` has one
+  `Model` per skeleton joint (`Root` for the first, `LimbNode` for the rest) named
+  exactly as the character's joints (`root`, `LowerSpineJoint`, ... for the standard
+  character, `Normal`, `Pelvis`, `LThigh`, ... for Back-Flip-To-Combo's), plus the
+  default cameras. Virtual-muscle helpers aren't exported. `Connections` (`OO`) give the
+  hierarchy, the same as NeuroMotion's import. Only one character is in each file (the
+  one the user exported): Tackle's is the tackled character01, the behaviour scenes'
+  character01.
+- **Transforms.** Each model has `Lcl Translation`, `Lcl Rotation` and `Lcl Scaling`
+  in `Properties60`; `PreRotation`, `PostRotation` and the pivots are zero and
+  `RotationOrder` is 0 (`eEulerXYZ`: the local rotation is Rz · Ry · Rx, degrees). A
+  joint's world transform is its parent's times translation times rotation.
+- **Animation.** FBX 6 `Takes`, one take (`endorphinTake`): per model a `Transform`
+  channel with `T`, `R` and `S` sub-channels, each `X`, `Y`, `Z` a curve (`KeyVer`
+  4004; keys as time, value and interpolation flags), with a key at every frame. Times
+  are in FBX ticks, 46 186 158 000 a second. The frame rate is the scene's
+  (`Version5/Settings/FrameRate`: 60, or 120 for Back-Flip-To-Combo), and the take
+  spans the scene's playback range.
+- **Units and axes.** Centimetres, Y up, the scene's own axes: the same world as
+  NeuroMotion's import, divided by 100. Every joint's world rotation equals the one
+  NeuroMotion gives the same joint (to 0.1° at the first frame of Back-Flip-To-Combo,
+  0.00 mm and 0.0° in Car Hit's animated frames), so joint frames, skeleton offsets
+  and rest orientations need no conversion.
+- **Frames.** Where the character is simulated from the scene's first frame (Back-
+  Flip-To-Combo, Stagger Walk, the behaviour scenes) the key at time f/fps is the
+  scene's frame f: frame 0 is NeuroMotion's frame 0 to 0.0 mm. Where it starts
+  animated (Car Hit, Tackle) the first key is the character's bind pose (root at the
+  origin) and the key at f/fps is frame f − 1: NeuroMotion's animated frames match it
+  to under 1 mm that way (keys up to 4 mm off at even frames, where endorphin's
+  animation keys, at 30 fps, are interpolated). The simulation starts where
+  NeuroMotion's does to within a frame (Car Hit's character goes into physics at frame
+  48 by its event; the export departs from the animation from frame 48, NeuroMotion's
+  from 49).
+
+The centre of mass and the bodies' centres come from the joints with NeuroMotion's rig
+(each body's frame on its joint, its mass), the same way on both runs.
