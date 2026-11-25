@@ -1050,9 +1050,11 @@ The first behaviour that reads its event's settings, Explosion, taught one more.
     1.81 m at 68); at frames 68 / 78 / 88 x 0.06 / 0.08 / 0.05 m and z -0.18 / -0.22 /
     -0.25 m; upside down (head below the centre of mass) from frame 63 to 83
     (endorphin 76-88); first on the ground feet first at frame 89, centre of mass at x
-    0.05, z -0.27 m (endorphin about 96, -0.3 to -0.44 m). It flies 0.2 m lower than
-    endorphin's and lands about 7 frames early: lesson 32 finds which change did
-    it.
+    0.05, z -0.27 m (endorphin about 96, at x -0.3 to -0.44 m: the recording's
+    positions are along the road, x; at frame 96 ours is at x +0.08 m, 0.42 m ahead of
+    endorphin's). It flies 0.2 m lower than endorphin's and lands about 7 frames early:
+    lesson 32 finds which change did it. `reference_scores` now checks these numbers
+    on every run ([reference-measurements.md](reference-measurements.md)).
 
 29. **What a direct solve carried mustn't warm-start sequential impulses, and a
     character a keyed body runs into is solved after the contacts.** On CI (Linux) PR
@@ -1243,6 +1245,165 @@ The first behaviour that reads its event's settings, Explosion, taught one more.
     flight comes out lower with it (a limit frame read with the wrong axes, say, which
     the swapped sizes would partly hide) is still open.
 
+Measuring why Back-Flip-To-Combo (#6) doesn't take off gave one more, not yet a fix.
+
+33. **Back-Flip-To-Combo can't jump because its crouch is already falling backwards
+    and its muscles follow their poses with a 0.1 s lag; no reading of the files found so far explains either.** Measured with
+    `dump_scene_motion`, a temporary probe of each muscle's torque and capped stiffness,
+    and the recording of endorphin's run (lesson 27's camera fit; head heights in image
+    px from the top, about 86 px a metre). Nothing in the engine changed.
+
+    - **The crouch is a slow fall.** The centre of mass is behind the heels' back edge
+      (z = -0.034 m) from frame ~40: -0.11 m at 100, -0.16 at 140, -0.26 at 168, -0.43 at
+      192, moving back at about 0.5 m/s by then. From frame 150 the feet rock back on
+      their heels (the forefoot rises 7 cm, the foot pitches 20°) and the shins go from
+      18° forward to upright. Only the 25 N / 25 N·m toe locks resist, at most about
+      2 × (25 N·m + 25 N × 0.22 m) = 61 N·m; 90 kg 8 cm behind the heels needs 70 N·m.
+      The author's own crouch (the legs' and spine's events at their stored values,
+      ankles from the legs' event, feet flat) puts the centre of mass at -0.09 m, the
+      knees over the toes and the trunk 22° forward; ours has the trunk 10° forward. In
+      the recording endorphin's lean recovers from -7° at frame 100 to -4.5° at 120 (ours
+      stays at -7.5°), so endorphin's toe locks hold more than 61 N·m. Counting a body a
+      lock holds in place as grounded for the spring cap (which keeps the toe muscle
+      stiff, 4500 N·m/rad instead of 20-45 once the toe lifts) changes nothing.
+    - **The take-off is a backwards rotation, not a jump.** From 190 the legs' event
+      (knees 59°, hips 22°) and the strength-5 spine event start, and the pose's
+      plantarflexed ankles (139°, from the legs' event, lesson 27) tip the shins back
+      with the centre of mass behind the heels: the pelvis turns -98° by frame 216 with the
+      feet still on the box, the centre of mass rises 6 cm at most (0.8 m/s), and the
+      knees, at 70° when the strength-2.5 extension starts at 202, reach 39° by 216. In
+      the recording endorphin is upright with bent knees at 204, straight-legged on its
+      toes with its back arched and arms overhead at 210-218 (the author's pose at 202
+      with crouched ankles: centre of mass 7.5 cm in front of the heels), tilted back 45°
+      at 222, horizontal and about a metre above the box top at 226, upside down at
+      ~242, highest at ~248 (head 180 px), tucked at 254, upright at box-top height just
+      behind its back edge at ~276, then it tumbles to the floor (face down by ~315).
+    - **The muscles aren't force-limited; the damping sets their speed.** Apart from
+      the first frame or two of each event, the knee and hip torques stay under 100-500
+      N·m against limits of 800-2500 N·m, and the knee and hip springs aren't capped (two
+      feet on the box).
+      DesiredPoseCalibration has damping 1000 for stiffness 10 000 at every joint, and
+      strength scales both, so each joint closes on its target exponentially with a time
+      constant of 0.1 s whatever the strength: at 50° from its target the knee turns
+      at 9 rad/s and needs nothing more. To straighten in the ~8 frames endorphin takes
+      the time constant would have to be about 0.03-0.05 s.
+
+    Experiments (each a temporary environment switch; head height at frames 204 / 216 /
+    228 / 240 / 248, then the first frame the lowest body is 10 cm below the box top and
+    the first on the floor, and the pelvis' turn by frame 297):
+
+    | Change | Head px | Off the box / floor | Turn by 297 |
+    |---|---|---|---|
+    | endorphin | 223 / 197 / 213 / 199 / 180 | (lands back at box height ~276) / ~315 | about -400° |
+    | none | 259 / 260 / 262 / 255 / 290 | 242 / 294 | -581° |
+    | strength capped at 1, or strength^0.5 | 259-261 / 263-264 / 261-264 / 254-259 / 289-294 | 241-242 / 293-295 | -559 to -599° |
+    | the strength-5 spine event left out | 245 / 248 / 258 / 280 / 290 | 246 / 295 | -479° |
+    | force limits × 10 | 258 / 261 / 261 / 253 / 286 | 243 / 295 | -575° |
+    | no spring caps at all | 230 / 256 / 229 / 267 / 286 | 244 / 299 | -995° |
+    | damping not scaled by strength, with toe locks × 10 | 234 / 236 / 236 / 229 / 271 | 252 / 297 | -595° |
+    | damping scaled by √strength | 251 / 245 / 243 / 233 / 267 | 254 / 298 | -579° |
+    | toe locks × 10 | 224 / 215 / 208 / 226 / 225 | 266 / 306 | -542° |
+    | active poses' damping × 0.5 | 285 / 300 / 286 / 354 / 371 (falls off backwards) | 193 / 272 | -504° |
+    | damping × 0.5, toe locks × 3 / × 5 / × 10 | 204-224 / 216-221 / 204-210 / 182-192 / 204-232 | 276-292 / 317-323 | -538 to -625° |
+    | damping × 0.3, toe locks × 10 | 178 / 194 / 171 / 135 / 167 (0.4 m too high) | 308 / 360 | -626° |
+    | the old swing reading (lesson 27), alone / with damping × 0.5 and toe locks × 5 | 264 / 274 / 270 / 271 / 331; 250 / 272 / 269 / 291 / 339 | 213-232 / 286-287 | -594 to -643° |
+
+    With half the damping and three to ten times the toe locks' strength the character
+    leans like endorphin's (three times: -6 / -4.5 / -5.5° at frames 96 / 112 / 120,
+    endorphin -7 / -6 / -4.5), its arms come round as endorphin's do (far hand 460-461 px
+    at 96-100, as endorphin's; 464-465 without), it springs up off the box and its head follows
+    endorphin's within about 20 px to frame 248 and it reaches the floor at 317-323. Both
+    are needed: either alone falls off backwards or barely rises. They are fits, not
+    readings of the files: nothing yet says why endorphin's muscles would be damped half
+    as much as its presets say, or why its toe locks would hold three to ten times their
+    strength, and both would change every imported scene, so neither is in the engine.
+    Still open, besides those two: the spin. Even then the pelvis turns 540-625° by frame
+    297, against endorphin's ~400°; the -100 N·m drive (246-297) adds 120-150° of it
+    (-458° with no drive at all, -392° with the fitted changes and no drive), so endorphin
+    either reads the negative strength more weakly or the take-off spins less.
+
+With `reference_scores` (36 measurements in five scenes) every reading of the files can
+be scored on all scenes at once. That gave one more lesson, again not yet a fix.
+
+34. **No reading of the files found so far improves every scene; what holds Car Hit and Back-Flip-To-Combo back most is the limb
+    spring cap, a limit of the solver, not of the files.** Each reading below was a
+    temporary environment switch, scored with `reference_scores` on all five scenes
+    (rows within endorphin's uncertainty, and the mean error in uncertainties per scene,
+    counting a row at most 4) and, where it looked useful, with `NM_NUDGES=2` and the
+    sample sweep. Nothing in the engine changed.
+
+    | Reading | Car Hit | Back-Flip | Look and Reach | Explosion | Stagger Walk | In all (error sum) |
+    |---|---|---|---|---|---|---|
+    | as now (lessons up to 28) | 5/15, 2.0 | 2/9, 2.4 | 2/3, 1.2 | 3/5, 1.1 | 3/4, 0.9 | 15/36 (64.3) |
+    | lesson 27's swing sizes the old way round | 9/15, 1.0 | 2/9, 2.3 | 2/3, 1.1 | 3/5, 1.1 | 2/4, 1.9 | 18/36 (52.1) |
+    | positive lock strengths × 3 | 5/15, 2.0 | 4/9, 2.2 | 2/3, 1.2 | 3/5, 1.1 | 3/4, 0.9 | 17/36 (62.5) |
+    | lock strengths × 9.81 (kilograms-force), drives as now or × 9.81 too | 5/15, 2.0 | 3/9, 2.1 | 2/3, 1.2 | 3/5, 1.1 | 3/4, 0.9 | 16/36 (61.6) |
+    | active poses' damping × 0.5 | 5/15, 2.0 | 2/9, 2.3 | 2/3, 1.2 | 3/5, 1.1 | 3/4, 0.9 | 15/36 (63.4) |
+    | the same with toe locks × 3 / × 9.81 | 5/15 | 2/9 / 4/9 (a crouch guard fails) | | | | 15-17/36 |
+    | every muscle's damping × 0.5 | 8/15, 1.4 | 2/9, 2.3 | 0/3, 2.9 (guards fail) | 2/5, 1.4 | 1/4, 1.9 | 13/36 (65.0) |
+    | strength scales stiffness by its square (damping and force limit by it, so the damping ratio stays and the muscle gets faster) | 5/15, 2.0 | 4/9, 2.3 | 2/3, 1.2 | 3/5, 1.1 | 3/4, 0.9 | 17/36 (63.4) |
+    | `DrivePosAndVel`: damping acts on the joint's speed relative to its target's | 7/15, 1.4 | 1/9, 2.4 | 1/3, 2.6 | 2/5, 1.5 | 1/4, 2.1 | 12/36 (66.3), guards fail |
+    | the same for animation and poses only, not behaviours | 5/15, 2.0 | 1/9, 2.4 (a crouch guard fails) | 2/3, 1.2 | 3/5, 1.1 | 3/4, 0.9 | 14/36 (64.3) |
+    | limb spring cap (lesson 27) 10 Hz instead of 5 | 8/15, 1.3 | 2/9, 2.5 | 2/3, 1.3 | 3/5, 1.1 | 3/4, 1.0 | 18/36 (55.4) |
+    | limb spring cap 30 Hz | 11/15, 0.9 | 2/9, 2.5 | 2/3, 1.3 | 3/5, 1.1 | 0/4, 1.9 (a guard fails) | 18/36 (53.0) |
+    | limb spring cap 20 Hz for limbs of 5 kg and more, 5 Hz below | 9/15, 1.5 | 2/9, 2.5 | 2/3, 1.2 | 3/5, 1.1 | 2/4, 2.0 | 18/36 (62.1) |
+
+    - **The swing sizes stay as lesson 27 reads them**, although the old reading scores
+      better (Car Hit flies to 1.77 m at frame 69, endorphin 1.81 m at 68). Read on Car
+      Hit's own character, the limit frames make anatomical sense only this way: the
+      wrist bends 172° in all up and down and 29° sideways (the old way, 29° and 172°),
+      the toes 57° up and down and 11° sideways (11° and 57°), the ankle 86° up and down
+      and 57° in and out. Car Hit's gain comes from the ankles (alone 1.68 m) and
+      clavicles (alone 1.67 m) turning further than their limits allow: it compensates
+      for something else, so it isn't kept. (The frame offsets' Euler attributes, which
+      NeuroMotion ignores, don't describe their matrices in Car Hit: one convention fits
+      34 of Back-Flip-To-Combo's 36 frames but 11 of Car Hit's, and left and right wrists
+      store the same angles with mirrored matrices. The matrices are the data.)
+    - **Lock strengths three to ten times stronger** hold Back-Flip-To-Combo's crouch
+      (its lean at frame 100 -5.9° with × 3, endorphin -6 ± 2°, now -8.8°, the same in
+      every nudged run) and would let Car Hit's car keep up with its carrier from the
+      first frames as endorphin's does (lesson 20: largest drift 0.21 m at frame 2 with
+      × 3, 0.13 m with × 9.81, against 0.38 m at frame 5 now). But reading the strength
+      in kilograms-force (× 9.81) overshoots the lean (-3.8°), and the same reading for
+      the flip's drive (lesson 13) would spin it even further past endorphin's single
+      turn. Nothing moves elsewhere in the reference rows, and the take-off doesn't come
+      (it leaves the box at 259-266 instead of 242, endorphin 212). Not kept: a factor,
+      not a reading.
+    - **Damping.** No reading that changes the damping relative to the stiffness was
+      better everywhere: halving all of it lifts Car Hit's flight to 1.93 m but makes
+      Look and Reach and Stagger Walk fail their guards; halving only the active poses'
+      doesn't spring Back-Flip-To-Combo up on its own (lesson 33); making strength a
+      speed (stiffness × strength², damping × strength: a strength-2.5 pose then closes
+      in 0.04 s) holds the lean better but still goes over the back. The effectors'
+      `angularDriveMode="DrivePosAndVel"`, read as damping relative to the target's own
+      speed, helps Car Hit only through Explosion's moving targets, which are
+      NeuroMotion's design, not endorphin's, and breaks Look and Reach's and Stagger's;
+      for active poses alone the targets' speed is mostly the jump of an event starting
+      without an ease-in, which then acts as one huge kick. Not kept.
+    - **The limb spring cap is the largest lever.** Raising lesson 27's 5 Hz on the whole
+      limb moves Car Hit steadily towards endorphin (1.66 m at 10 Hz, 1.70 m at 20, 1.74 m
+      at frame 68 at 30 Hz, 11 of 15 rows, the same in every nudged run) and lifts
+      Back-Flip-To-Combo's head at frame 248 by 0.5 m (the rise from frame 192 -1.34 m
+      now, -0.77 m at 30 Hz; still no jump). It isn't a reading: endorphin applies its
+      presets as they are, and the cap is there because sequential impulses solve each
+      muscle with only its joint's two bodies. At 10 Hz and up the sample sweep fails:
+      Multi Martial's fingers tear 6-28 cm out of their joint at frame 256 (25-34 m/s),
+      with 16 iterations or 8 substeps too (14 and 10 cm); at 20 Hz Car Hit's knee opens
+      5.8 cm. Limiting the higher cap to limbs of 5 kg or more keeps the sweep clean but
+      keeps only part of the gain (Car Hit 1.66 m), and Stagger Walk, whose standing is on
+      a knife edge, moves either way (its feet 0.05-0.43 m back by frame 96 over nudged
+      runs). The way forward is in the solver: stiff muscles solved with the limb they
+      move (as locked groups are, lesson 12), so the cap can go up without tearing light
+      bodies.
+    - **What the files don't explain.** Each effector also stores a `Calibration` block
+      (stiffness 1 or 100, damping 10 to 200, force limit 0 to 100, linear 10 / 10 / 50
+      in the sample scenes; 10 / 20 / 10 in Back-Flip-To-Combo). Its values follow none
+      of the presets, the same effector has the same block in Car Hit, Stagger Walk,
+      Tackle and Multi Martial, and as multipliers
+      they would make Back-Flip-To-Combo's legs slower still (damping 20 against
+      stiffness 10). NeuroMotion ignores them; how endorphin scales the gains of its
+      virtual muscles (presets of 1 in every field) is still unknown.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over
@@ -1265,6 +1426,13 @@ set-up (ground, rigs, events, constraint targets and settings).
 
 Each failure also gets a stand-in built in code (`src/physics/scenes.rs`) with the
 same pattern, so it can be worked on without endorphin's files.
+
+Clean is not the same as like endorphin. `reference_scores` simulates the scenes
+endorphin's own runs were measured in (Car Hit, Back-Flip-To-Combo, Stagger Walk and
+the Look and Reach and Explosion behaviour scenes) and scores how close NeuroMotion's
+numbers are; the measurements, the scores and what is still estimated from recordings
+are in [reference-measurements.md](reference-measurements.md). On the build with
+lessons up to 28, 15 of 36 measurements are within endorphin's uncertainty.
 
 Last run, over each scene's whole range, with lessons 1-30 and
 imported behaviours actually running (until the behaviour names were matched,

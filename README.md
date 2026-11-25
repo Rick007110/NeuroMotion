@@ -190,7 +190,8 @@ kind is welcome, and you don't need to write Rust to help.
      [a new issue](https://github.com/Rick007110/NeuroMotion/issues/new/choose).
    - **Measure endorphin.** If you have it, record how a scene behaves (frames, angles,
      timings) with the *Reference measurement* issue template. These numbers become
-     tests that keep NeuroMotion's physics close to endorphin's.
+     tests that keep NeuroMotion's physics close to endorphin's
+     ([docs/reference-measurements.md](docs/reference-measurements.md)).
    - **Take an issue.** Those labelled
      [good first issue](https://github.com/Rick007110/NeuroMotion/labels/good%20first%20issue)
      are small and self-contained;

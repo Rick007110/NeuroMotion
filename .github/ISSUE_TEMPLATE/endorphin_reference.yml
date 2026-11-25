@@ -27,12 +27,25 @@ body:
     id: measurements
     attributes:
       label: Measurements
-      description: Frame numbers with what happens there. Angles, heights and contact times are most useful.
+      description: |
+        Frame numbers with what happens there. Angles, heights and contact times are most useful.
+        Each becomes a row in NeuroMotion's reference table (docs/reference-measurements.md), so name the
+        character and body part, the frame (endorphin's View Frame), the value with its unit, and how far off it could be.
       placeholder: |
-        frame 246: pelvis upright (0°), feet on the box
-        frame 297: pelvis rotated -74° about X
-        frame 329: feet leave the box
-        frame 393: lands on the floor behind the box
+        frame 246: character01's pelvis upright (0°, ±3°), feet on the box
+        frame 297: pelvis rotated -74° about X (±5°)
+        frame 329 (±2): feet leave the box
+        frame 393 (±2): lands on the floor behind the box, feet first
+    validations:
+      required: true
+  - type: textarea
+    id: method
+    attributes:
+      label: How you measured it
+      description: |
+        For example: read off a screen recording frame by frame with the View Frame counter; measured in the viewport
+        with a grid; exported the simulated motion as BVH or FBX (most precise: say which joints and frames). This sets
+        how much uncertainty each number gets.
     validations:
       required: true
   - type: textarea
