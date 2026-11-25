@@ -11,7 +11,7 @@ target is the same model, the same parameters, and the same behaviour.
 |---|---|
 | One rigid body per bone; mass from inertial shape × density | Same, imported per body (`document::physics::BodyDef`) |
 | Spherical inertia by default | Same (`isotropic_inertia`), full tensors available |
-| Collision spheres, boxes, cylinders, capsules ("sphyls") with self-collision flags | Same shapes and flags. Long cylinders collide as capsules, flat ones (wider than long) as discs with a rounded rim |
+| Collision spheres, boxes, cylinders, capsules ("sphyls") with self-collision flags | Same shapes and flags. Cylinders are exact: flat caps and a sharp rim (lesson N) |
 | Ball joints: twist range + swing cone between a parent-side and a child-side limit frame; soft zone inside a hard stop | Same frames, ranges and soft-zone springs (elliptical cone) |
 | Effectors: force-limited PD on twist and swing; calibration presets | Same gains and presets, solved as implicit force-capped springs |
 | Velocity-level constraint solver at 120 Hz | Velocity-level sequential-impulse solver at the scene's rate (120 Hz), substepped |
@@ -137,7 +137,9 @@ The scenes with props, several characters and moving scenery taught four more:
    character going fully simulated while colliding).
 8. **Box-box contacts and flat cylinders are needed for scenery.** Character feet are
    often boxes, and so are floors and balconies, so without box-box contacts feet sank
-   into them. A flat cylinder (a turntable) collided as a sphere of its radius.
+   into them. A flat cylinder (a turntable) collided as a sphere of its radius. (It
+   then collided as a disc with a rounded rim, and a long cylinder as a capsule, until
+   lesson N made cylinders exact.)
 
 Making characters balance (docs/behaviours.md) added a ninth:
 
@@ -715,6 +717,58 @@ Tracing Back-Flip-To-Combo itself (#6), with the user's scene file, showed two m
     whether a pose holds its joints after it ends (here the ankles are driven by
     nothing between frames 102 and 199), and how `strength` scales the preset.
 
+Making cylinders exact (#14) taught one more.
+
+N. **A cylinder lying on its side rests on its side line, not on points that turn
+    with it.** Cylinders used to collide as capsules (long ones) or as discs with a
+    rounded rim (flat ones), so a short post or a forearm stood on a round end and
+    tipped over, and a ball landing just inside a cap's rim rolled off it. They are
+    now exact (`physics::collide`): flat caps, a sharp rim. A cap facing what it
+    touches within 60° rests on six points around its rim (a hexagon, like a box's
+    corners; clipped to a box's face where it overhangs); a cylinder lying on its side,
+    or tilted onto its rim, rests on its side line: the point of each cap's rim
+    furthest towards what it touches, worked out afresh each step. Against a sphere or
+    capsule the nearest points are exact; between two cylinders, each one's cap rim
+    and side line touch the other, and where the side line comes nearest the other's
+    axis.
+
+    Three things made it rest still. First, rim points on a lying cylinder: they are
+    fixed to the body, so as it rolls a point near the bottom moves behind the line of
+    support, and with the millimetre the solver leaves in contacts it still overlaps
+    and pushes up there, which turns the cylinder further the way it was going. A log
+    on its side started rolling by itself, faster and faster. The rim is now used only
+    while its cap faces what it touches. Second, the nearest points of two shapes found
+    by alternating projections are anywhere along a line contact, and anywhere inside
+    both when they overlap, so they too landed beside the line and rolled a log lying
+    on a plate (5 cm in 3 s). The deepest point is now taken on the side line itself
+    (the point nearest the other's axis). Third, a point on a rim's very edge, where a
+    disc stacked on one as wide or a log beside one as long has its corners, is as
+    near the side as the cap, and pushing it out sideways let a stacked disc fall
+    through; points are now pushed out the way the two touch.
+
+    Stand-ins (`cylinders_rest_on_caps_and_sides`, `cylinder_pile_settles`): a post
+    dropped onto its cap leaning 3° toppled onto its round end before (centre 0.15 m
+    up instead of 0.25 m), one on a box fell off it, and a ball 3 cm inside a pillar's
+    rim rolled off to the ground; now every cylinder rests at its height to the
+    millimetre, upright or level within 0.5°, never sinking a millimetre, moving under
+    2 mm/s; the rolled log keeps 2/3 of its push (0.667 m/s, a solid cylinder rolling)
+    straight along its line. Turntable still carries its dancer (lowest body 6.8 cm at
+    the end); its largest joint stretch, as the falling dancer's shoulder hits the
+    disc, went from 0.16 to 0.86 cm. Cost: the two cylinder stand-ins take about 1.2×
+    (the pile, 12 free cylinders: about 245 µs per step against 200) and 1.4× as long,
+    as caps rest on six points where round ends rested on one or two.
+
+    Every character endorphin ships has cylinder forearms (and some, hands), and
+    Balcony (chairs, railings), Gymnast Rings (rings, frame), Car Crash, Trapeze and
+    Walk With Gun have cylinder scenery, so 15 of the 16 sample scenes change (not
+    Stagger Walk). The sweep stays 16 of 16 clean: largest stretch Arrows 1.27 to
+    0.55 cm, Balcony 0.78 to 0.46, Car Crash 1.26 to 0.93, Car Hit 2.94 to 2.52, Multi
+    Martial 1.74 to 1.30, Trapeze 1.09 to 0.66 (its fastest body 29 to 13 m/s, buried
+    7.7 cm to 0), Sword Play 0.46 to 0.55, Gymnast Rings 0.20 to 1.19 (a finger on a
+    ring), Walk With Gun 0.76 to 1.03 (its finger 2.5 to 3.4 cm in the ground, the
+    hands' join drift 14.6 to 5.4 cm); lock drift Catch Rope 1.2 to 0.3 cm, Heli Leap
+    2.4 to 4.2 cm.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over
@@ -738,7 +792,7 @@ set-up (ground, rigs, events, constraint targets and settings).
 Each failure also gets a stand-in built in code (`src/physics/scenes.rs`) with the
 same pattern, so it can be worked on without endorphin's files.
 
-Last run, over each scene's whole range, with lessons 1-24 and
+Last run, over each scene's whole range, with lessons 1-24, N and
 imported behaviours actually running (until the behaviour names were matched,
 `docs/behaviours.md`, none of them ran in these scenes); 16 scenes, Bridge Escape is
 skipped for size:
@@ -748,11 +802,11 @@ skipped for size:
 | Clean | All 16: Arrows, Balcony, Bendy Stick, Car Crash, Car Hit, Catch Rope, Catch Run, Gymnast Rings, Heli Leap, Multi Martial, Rotating Floor, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
 | Failing | None |
 
-Max joint stretch per scene over its whole range: Arrows 1.27 cm, Balcony 1.16,
-Bendy Stick 0.61, Car Crash 1.26, Car Hit 2.94, Catch Rope 1.12, Catch Run 1.41,
-Gymnast Rings 0.40, Heli Leap 0.29, Multi Martial 1.74, Rotating Floor 0.41, Stagger
-Walk 0.46, Sword Play 0.46, Tackle 0.66, Trapeze 0.82, Walk With Gun 0.78 (the whole
-sweep takes about 12 s). Heli Leap's lowest body is 2.16 m and Rotating Floor's 4.69 m
+Max joint stretch per scene over its whole range: Arrows 0.55 cm, Balcony 0.46,
+Bendy Stick 0.61, Car Crash 0.93, Car Hit 2.52, Catch Rope 1.16, Catch Run 1.41,
+Gymnast Rings 1.19, Heli Leap 0.29, Multi Martial 1.30, Rotating Floor 0.57, Stagger
+Walk 0.46, Sword Play 0.55, Tackle 0.61, Trapeze 0.66, Walk With Gun 1.03 (the whole
+sweep takes about 14 s). Heli Leap's lowest body is 1.91 m and Rotating Floor's 4.74 m
 below y = 0, in scenes without a ground (lesson 23). Over the first two seconds only,
 as the sweep used to run, Car Hit was the last to fail: a clavicle 7.9 cm out, which
 lessons 15 and 17 (fixed in the Car carry stand-in) didn't cure because the real
@@ -788,6 +842,8 @@ What each stand-in reproduces:
 | Heli Leap | A 1.7 t helicopter (fuselage, tail, skids) held by a Lock; a character jumps off | 17 cm drift | 0 |
 | Rotating Floor | No ground; a thin collision-only slab spinning and rocking | sinks through | rides it |
 | Turntable | No ground; a flat cylinder spinning | floats 0.9 m above it | rests on it |
+| Cylinders | Free cylinders on the ground and on boxes: one dropped on its cap leaning 3°, a log rolled at 1 m/s, a disc dropped tilted 10°, one dropped on a box leaning 3°, logs lying on a box and on the ground; balls dropped on a pillar's cap 3 cm inside and 2 cm outside its rim (lesson N) | the standing ones topple onto their round ends (one off its box); the inner ball rolls off the cap | all rest to the millimetre, upright or level within 0.5°, still; the log rolls straight at 0.667 m/s; the inner ball stays on the cap, the outer one is thrown off the rim |
+| Cylinder pile | Cylinders on cylinders: three discs stacked, a post on a disc, a log on a plate, a pyramid of three logs (lesson N) | the post topples | all rest to the millimetre |
 | Hanging weight | A 20-80 kg weight on a rope locked at the top, hanging straight (lesson 10) | 0.36 m stretch, 63 m/s | 1.5 cm, 0.6 m/s |
 | Car carry | Car Hit: a 747 kg car joined (1e5) to a keyed carrier drives into a standing character with clavicles at 8 m/s, catches its arm against its ribs, carries it on the bonnet and stops dead at 1.65 s (lesson 15). The join gives way by 23 cm as the carrier stops, by design. After the stop the pedestrian slides off and the arm whips round against its own chest and neck. Coulomb friction, and the car 15 cm off the ground, as Car Hit's is (lesson 21) | 5.8 cm (shoulder) at the hit; 7.0 cm after the stop (#23) | Over 201 nudged runs, up to the stop: 0.7 cm at most for the body (shoulder included), toes and fingers 0.5-2.2 cm at the hit. After the stop: 1.1 cm at most (lessons 17 and 21) |
 | Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps, Coulomb friction (lesson 21) | floats above the box | standing (Balance until the drive): flips backwards, 1° at frame 246, -76° at 297, leaves the box at 319, lands behind it at 385, -281° in all. Left alone: tips forwards and falls off the front at 338, landing at 412 (changed by lessons 16 and 21) |
@@ -814,8 +870,9 @@ hasn't been re-run against endorphin's scene since.
   endorphin's own option names for them are unverified (`endorphin-formats.md`), and
   a severed joint can't be re-attached later.
 - Virtual-muscle reach springs.
-- Exact cylinders: long ones have rounded ends; flat ones a rounded rim, touching
-  flat things at six rim points, the lowest rim point and the point nearest them.
+- Cylinders (lesson N) rest a cap on six points of its rim, not on the whole circle,
+  and a log resting on a free plate creeps (1.3 mm in 3 s). A rim point exactly on
+  the edge of what it rests on counts as on it for 1 mm past the edge.
 - An exact solve for joint anchors where no lock holds the chain, nothing heavy
   presses on it and no joint has opened 1.5 cm yet (lessons 12, 15 and 17 cover
   those). Keyed bodies pressing on a character don't count as heavy yet: lesson 15

@@ -69,15 +69,17 @@ NeuroMotion, and we need numbers to prove it.
   lessons 20-24. Next: more scenes, and exports of endorphin's results (BVH/FBX)
   instead of recordings, turned into tests. Anyone with endorphin can help, using the
   *Reference measurement* issue template
-- ⬜ **Walk With Gun**: since Coulomb friction its hands' join drifts up to 0.15 m and
-  a finger sits 2.5 cm in the ground as the character falls with its 549 kg gun
-  (within the sweep's checks)
+- ⬜ **Walk With Gun**: since Coulomb friction its hands' join drifts (up to 5 cm
+  since exact cylinders, 15 cm before) and a finger sits 3.4 cm in the ground as the
+  character falls with its 549 kg gun (within the sweep's checks)
 - ✅ **Sever events**: cut a joint or switch its muscle off
   ([#13](https://github.com/Rick007110/NeuroMotion/issues/13)); endorphin's own setting
   names for them still need checking against a real scene
 - ⬜ **Virtual muscles**: the chest-to-hand and pelvis-to-foot springs endorphin uses for
   reaching and planting (now skipped on import)
-- ⬜ **Exact cylinders** ([#14](https://github.com/Rick007110/NeuroMotion/issues/14))
+- ✅ **Exact cylinders** ([#14](https://github.com/Rick007110/NeuroMotion/issues/14)):
+  flat caps and a sharp rim against every shape, resting still on a cap or a side
+  (lesson N). A cap rests on six rim points, not the whole circle
 - ⬜ **Interpolated output** between physics ticks, for smooth 60 fps playback
 - ⬜ **Large scenes**: Bridge Escape and other big scenes simulate at a usable speed
 - ⬜ Legacy poses that store muscle targets (`dp.nma`)
