@@ -184,7 +184,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: 1.81,
                 uncertainty: 0.06,
                 guard: false,
-                baseline: 1.620,
+                baseline: 1.730,
                 source: CAR_HIT_VIDEO,
             },
             Row {
@@ -194,7 +194,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: 68.0,
                 uncertainty: 2.0,
                 guard: false,
-                baseline: 65.0,
+                baseline: 67.0,
                 source: CAR_HIT_VIDEO,
             },
             Row {
@@ -204,7 +204,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: 0.01,
                 uncertainty: 0.1,
                 guard: true,
-                baseline: 0.051,
+                baseline: 0.073,
                 source: CAR_HIT_VIDEO,
             },
             Row {
@@ -214,7 +214,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -0.11,
                 uncertainty: 0.1,
                 guard: false,
-                baseline: 0.074,
+                baseline: 0.109,
                 source: CAR_HIT_VIDEO,
             },
             Row {
@@ -224,7 +224,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -0.12,
                 uncertainty: 0.1,
                 guard: false,
-                baseline: 0.047,
+                baseline: 0.145,
                 source: CAR_HIT_VIDEO,
             },
             Row {
@@ -234,7 +234,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: 1.62,
                 uncertainty: 0.08,
                 guard: false,
-                baseline: 1.377,
+                baseline: 1.568,
                 source: CAR_HIT_VIDEO,
             },
             Row {
@@ -244,7 +244,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: 1.26,
                 uncertainty: 0.08,
                 guard: false,
-                baseline: 0.838,
+                baseline: 1.134,
                 source: CAR_HIT_VIDEO,
             },
             Row {
@@ -292,7 +292,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: 96.0,
                 uncertainty: 3.0,
                 guard: false,
-                baseline: 89.0,
+                baseline: 94.0,
                 source: "recording: feet first about frame 96, by eye (lesson 21)",
             },
             Row {
@@ -302,7 +302,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -0.34,
                 uncertainty: 0.1,
                 guard: false,
-                baseline: 0.068,
+                baseline: 0.147,
                 source: CAR_HIT_VIDEO,
             },
             Row {
@@ -340,7 +340,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -1.5,
                 uncertainty: 2.0,
                 guard: false,
-                baseline: -3.4,
+                baseline: -3.5,
                 source: BACKFLIP_LEAN_SOURCE,
             },
             Row {
@@ -350,7 +350,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -4.0,
                 uncertainty: 2.0,
                 guard: false,
-                baseline: -6.5,
+                baseline: -6.7,
                 source: BACKFLIP_LEAN_SOURCE,
             },
             Row {
@@ -360,7 +360,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -6.0,
                 uncertainty: 2.0,
                 guard: false,
-                baseline: -8.9,
+                baseline: -9.6,
                 source: BACKFLIP_LEAN_SOURCE,
             },
             Row {
@@ -373,7 +373,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -7.0,
                 uncertainty: 5.0,
                 guard: false,
-                baseline: 19.0,
+                baseline: 24.7,
                 source: "recording: the finger tip's pixel on a plane through the shoulder \
                          (lesson 27)",
             },
@@ -384,7 +384,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -0.20,
                 uncertainty: 0.06,
                 guard: true,
-                baseline: -0.193,
+                baseline: -0.223,
                 source: BACKFLIP_HEAD_SOURCE,
             },
             Row {
@@ -394,7 +394,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -0.10,
                 uncertainty: 0.06,
                 guard: false,
-                baseline: -0.270,
+                baseline: -0.495,
                 source: BACKFLIP_HEAD_SOURCE,
             },
             Row {
@@ -404,7 +404,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: 0.65,
                 uncertainty: 0.12,
                 guard: false,
-                baseline: -1.342,
+                baseline: -1.739,
                 source: BACKFLIP_HEAD_SOURCE,
             },
             Row {
@@ -418,7 +418,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: 212.0,
                 uncertainty: 6.0,
                 guard: false,
-                baseline: 241.0,
+                baseline: 213.0,
                 source: "recording, by eye: in the air above the box at 228 (lesson 27)",
             },
             Row {
@@ -432,7 +432,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: 276.0,
                 uncertainty: 6.0,
                 guard: false,
-                baseline: 293.0,
+                baseline: 281.0,
                 source: "recording, by eye: feet first behind the box (lesson 27)",
             },
         ],
@@ -456,7 +456,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: 20.0,
                 uncertainty: 4.0,
                 guard: true,
-                baseline: 18.0,
+                baseline: 17.0,
                 source: "recording, by eye: swinging in at 12, on the box by 18-24",
             },
             Row {
@@ -470,7 +470,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: 55.0,
                 uncertainty: 8.0,
                 guard: false,
-                baseline: 31.0,
+                baseline: 29.0,
                 source: "recording, by eye: out until 24-30, across the chest at 40, on \
                          the box by about 60",
             },
@@ -502,7 +502,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: 36.5,
                 uncertainty: 5.0,
                 guard: true,
-                baseline: 38.3,
+                baseline: 37.1,
                 source: WRITHE_SOURCE,
             },
             Row {
@@ -522,7 +522,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -49.0,
                 uncertainty: 9.0,
                 guard: false,
-                baseline: -33.7,
+                baseline: -33.0,
                 source: WRITHE_SOURCE,
             },
             Row {
@@ -564,7 +564,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -0.46,
                 uncertainty: 0.2,
                 guard: true,
-                baseline: -0.38,
+                baseline: -0.59,
                 source: STAGGER_SOURCE,
             },
             Row {
@@ -574,7 +574,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -0.88,
                 uncertainty: 0.25,
                 guard: false,
-                baseline: -0.61,
+                baseline: -0.56,
                 source: STAGGER_SOURCE,
             },
             Row {
@@ -584,7 +584,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -0.51,
                 uncertainty: 0.25,
                 guard: false,
-                baseline: -0.20,
+                baseline: 0.38,
                 source: STAGGER_SOURCE,
             },
             Row {
@@ -594,7 +594,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -0.12,
                 uncertainty: 0.1,
                 guard: false,
-                baseline: -0.14,
+                baseline: -0.04,
                 source: "recording: the silhouette's top, 1.59 m at frame 0 and 1.47 m at \
                          108",
             },

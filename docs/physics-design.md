@@ -1730,8 +1730,7 @@ Making cylinders exact (#14) taught one more.
 
     Still open: locks and contacts aren't in a character's system, so the cap can't go
     yet (above); the guess of which stops push is wrong about half the time when a limb
-    rests against one, which costs time; the reference baselines in `reference.rs` are
-    still the old build's.
+    rests against one, which costs time.
 
 ## Status against endorphin's sample scenes
 
