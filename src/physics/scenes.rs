@@ -4336,6 +4336,62 @@ mod tests {
         );
     }
 
+    /// A contact is a spring on its body's own mass, so a planted foot carrying the body
+    /// sinks into what it stands on: Back-Flip-To-Combo's heels sank 4.5 mm into the box
+    /// at 60 Hz, tilting the feet 1.3° about their locked toes and the whole body back
+    /// with them, where endorphin's sink 0.5 mm (lesson 48). The back flip stand-in,
+    /// left standing on its box with its toes locked: the deepest corner of a foot's box
+    /// below the box top over frames 30-200, at 60 Hz (NeuroMotion's own projects) and
+    /// at 120 Hz (imported scenes, as stiff as the substep allows).
+    #[test]
+    fn stiff_contacts_keep_a_planted_foot_on_top() {
+        let sink = |hertz: f32| {
+            let mut project = backflip(false);
+            project.physics.contact_hertz = hertz;
+            project.settings.range.end = 200;
+            let sim = check(project.clone());
+            let ci = project
+                .characters
+                .iter()
+                .position(|c| c.name == "flipper")
+                .unwrap();
+            let rig = project.characters[ci].physics.as_ref().unwrap();
+            let mut deepest = 0.0f32;
+            for f in 30..=200 {
+                let cf = sim.frame(f).unwrap()[ci].as_ref().unwrap();
+                for (body, &(r, p)) in rig.bodies.iter().zip(&cf.bodies) {
+                    if !body.name.contains("ankle") {
+                        continue;
+                    }
+                    for shape in &body.shapes {
+                        let Geometry::Box { size } = shape.geometry else {
+                            continue;
+                        };
+                        let (sr, sp) = (
+                            Quat::from_array(shape.frame.rotation),
+                            Vec3::from(shape.frame.position),
+                        );
+                        for corner in 0..8 {
+                            let sign = |bit: usize| if corner & bit == 0 { -0.5 } else { 0.5 };
+                            let local =
+                                Vec3::new(size[0] * sign(1), size[1] * sign(2), size[2] * sign(4));
+                            let y = (p + r * (sp + sr * local)).y;
+                            deepest = deepest.max(2.5 - y);
+                        }
+                    }
+                }
+            }
+            deepest
+        };
+        let (soft, stiff) = (sink(60.0), sink(120.0));
+        println!(
+            "planted foot: deepest {:.1} mm into the box at 60 Hz, {:.1} mm at 120 Hz",
+            soft * 1000.0,
+            stiff * 1000.0
+        );
+        assert!(stiff < 0.6 * soft, "{stiff} m against {soft} m");
+    }
+
     /// A legacy pose's muscle targets drive the joints to their angles as an active
     /// pose. Before, the pose didn't import at all ("stores muscle (effector) targets
     /// instead of joint transforms"). Now, held for two seconds: knees 57° (the target

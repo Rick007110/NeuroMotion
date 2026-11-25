@@ -248,6 +248,7 @@ fn build(project: &Project) -> Running {
     let settings = &project.physics;
     let mut world = World::new(Vec3::from(settings.gravity), settings.contact);
     world.spring_cap = settings.spring_cap;
+    world.contact_hertz = settings.contact_hertz;
 
     // Materials: every name used by the ground or any shape.
     let mut materials: Vec<String> = Vec::new();

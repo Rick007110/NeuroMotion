@@ -2390,6 +2390,67 @@ Measured joint by joint against Back-Flip-To-Combo's export, the trunk gave one 
       1000 N·m × 0.8; halving the twist's force limit everywhere doesn't raise the jump
       (3.62 m) and 0.35 of it loses the crouch (lesson 46).
 
+48. **A contact is a spring on its body's own mass, so a planted foot sank into the box
+    and tipped the whole character back; imported scenes' contacts are as stiff as the
+    substep allows.** (Number to be assigned at integration.) Back-Flip-To-Combo's
+    feet stand on the box with their toes locked (lesson 41). In endorphin's own run
+    the foot's box never moves: its lowest corner stays within 0.5 mm of the box top
+    and the heel-to-toe line at -33.3° from frame 0 to the take-off. NeuroMotion's heel
+    corner was 4.5 mm into the box by frame 15 (the toe, held by its lock, stays on
+    top), tilting each foot 1.3° back about its toe, and the whole body with it: the
+    centre of mass 0.045 m behind the ankles at frame 140 where endorphin's is 0.026 m,
+    and the crouch went on falling back from there (0.21 m behind the heels by 192,
+    endorphin 0.16 m, a guard near its edge).
+
+    The cause is lesson 25's: contacts are soft constraints at 60 Hz on the effective
+    mass of the row, here a 1 kg foot carrying half of a 90 kg body, and the character's
+    whole-body solve (lesson 38), which has the last word each iteration, pushes the
+    foot back into the box after the contact pass. The damping ratio doesn't matter
+    (1, 3 or 10 sink the same); the frequency does. It is capped at a quarter of the
+    substep rate (120 Hz at 120 ticks a second, four substeps), where the soft step
+    stays well behaved. At the cap the heel corner is 1.3 mm into the box at frame 100
+    and 2.6 mm at 150 (60 Hz: 2.7 and 6.3 mm), the foot tilted 0.2° and 1.3° back
+    (0.5° and 1.7°); with the cap lifted, 240 Hz sinks 0.4 mm and the crouch follows
+    endorphin's to the centimetre (centre of mass z -0.013 / -0.022 / -0.067 / -0.118 /
+    -0.221 m at frames 100 / 140 / 160 / 180 / 200, endorphin -0.020 / -0.026 / -0.051
+    / -0.118 / -0.217), but Car Hit and Stagger Walk move away from endorphin (error
+    sum 148.7) and it is past what the soft step is meant for. Putting contacts into the
+    whole-body solve would make them rigid; that is lesson 38's open item and a larger
+    change.
+
+    So `contact_hertz` is now a project setting: imported scenes use 120 (the cap),
+    NeuroMotion's own projects keep 60 and simulate bit for bit as before
+    (`simulations_are_bit_identical_everywhere`, `nudge_survey` and the push tests
+    don't change). `reference_scores` (`NM_NUDGES=2`), every guard holding:
+
+    | Contacts (imported scenes) | All 71 rows: within / error sum | Back-Flip-To-Combo |
+    |---|---|---|
+    | 60 Hz (before) | 29 / 145.2 | 10 of 21, 34.2 |
+    | 90 Hz | 28 / 147.2 | 10 of 21, 30.9 |
+    | 105 Hz | 28 / 145.1 | 10 of 21, 29.1 |
+    | 120 Hz (now) | 29 / 140.6 | 10 of 21, 28.1 |
+    | 240 Hz, the cap lifted | 28 / 148.7 | 11 of 21, 27.7 |
+
+    | Back-Flip-To-Combo | endorphin | 60 Hz | 120 Hz |
+    |---|---|---|---|
+    | Lean at frames 44 / 72 / 100 | -2.3 / -5.3 / -6.4° | -1.6 / -5.4 / -7.0° | -1.4 / -5.1 / -6.5° |
+    | Crouched at 192: centre of mass height / behind the heels | 3.16 / -0.16 m | 3.17 / -0.21 m | 3.18 / -0.17 m |
+    | Highest centre of mass | 3.745 m at 242 | 3.61 m at 233 | 3.69 m at 236 |
+    | Lowest body at its highest | 3.60 m | 3.47 m | 3.54 m |
+    | Past the box top / on the floor | 296 / 330 | 289 / 326 | 292 / 328 |
+    | Trunk turned since 190, at 260 / 297 / 330 | -247 / -523 / -689° | -262 / -524 / -645° | -263 / -527 / -655° |
+    | Combo jump | 1.67 m | 0.93 m | 0.70 m |
+
+    The other scenes move within their nudged spread: Car Hit 35.0 → 35.6 (its flight
+    1.84 m, its x at 68 0.19 m, endorphin 1.79 and -0.07), Tackle 17.2 → 19.2 (lying z
+    1.95 → 2.05 m, endorphin 1.65), Stagger Walk 12.7 → 11.5 (feet 0.41 m back by 36,
+    endorphin 0.26, 0.59 before). The sample sweep stays clean, 51 of 51 with gravity
+    scaled by 1 ± 1e-4 (largest stretch, before → after: Balcony 0.43 → 0.61 cm, Multi
+    Martial 0.57 → 0.77, Catch Rope 0.90 → 0.67, Stagger Walk 0.22 → 0.07, the others
+    within 0.05; fastest bodies within 3.7 m/s). Stand-in `stiff_contacts_keep_a_planted_foot_on_top`: the back flip
+    stand-in left standing on its box, toes locked; its deepest foot corner over frames
+    30-200 is 4.7 mm into the box at 60 Hz, 1.2 mm at 120 Hz.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over

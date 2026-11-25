@@ -201,6 +201,23 @@ pub(super) fn settings_group(ui: &mut Ui, doc: &mut Document) {
             );
             ui.end_row();
 
+            ui.label("Contact stiffness");
+            g.drag(
+                &ui.add(
+                    DragValue::new(&mut p.contact_hertz)
+                        .range(1.0..=120.0)
+                        .speed(1.0)
+                        .suffix(" Hz"),
+                )
+                .on_hover_text(
+                    "How stiffly contacts push back, as a spring's frequency on the body \
+                     that touches. At most a quarter of the physics rate (120 Hz at 120 \
+                     ticks a second). Imported scenes use 120, so feet don't sink into \
+                     what they stand on; your own projects use 60.",
+                ),
+            );
+            ui.end_row();
+
             ui.label("Ground");
             match &p.ground {
                 Some(ground) => ui.weak(format!(

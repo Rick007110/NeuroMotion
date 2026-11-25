@@ -45,6 +45,7 @@ Pretty-printed JSON, chosen over RON because every language and diff tool reads 
       "contact": "coulomb",
       "spring_cap": "bodies",
       "pose_swing_share": 1.0,
+      "contact_hertz": 60.0,
       "interactions": {
         "Default": { "restitution": 0.2, "friction": 100.0, "adhesion": 0.0, "softness": 0.0 }
       },
@@ -80,6 +81,12 @@ Pretty-printed JSON, chosen over RON because every language and diff tool reads 
   own projects use; imported scenes get `0.0625`, as endorphin's own runs bend
   (physics-design.md, lesson 46). A file without it gets `1.0`, so a scene imported and
   saved before keeps simulating as it did; the version stays 2.
+- `physics.contact_hertz` is how stiffly contacts push back, as a spring's natural
+  frequency (Hz) on the body that touches, capped at a quarter of the solver's substep
+  rate (120 Hz at 120 ticks a second). `60.0` is the default and what NeuroMotion's own
+  projects use; imported scenes get `120.0`, so a planted foot doesn't sink into what it
+  stands on (physics-design.md, lesson 48). A file without it gets `60.0`; the version
+  stays 2.
 - A character's physics rig may list `virtual_muscles`: springs between two of its
   bodies (endorphin's chest-to-hand and pelvis-to-heel virtual muscles), each with
   `name`, `muscle` (its preset entry), `parent_body`, `body`, `point` (metres, in the
@@ -98,7 +105,7 @@ Pretty-printed JSON, chosen over RON because every language and diff tool reads 
   file now simulates with Coulomb friction; a file that stores its settings keeps them.
   `rate` is physics ticks per second (each frame is split into `round(rate / fps)` steps,
   at least one); `gravity` is in m/s²; `ground` is `null` for a scene without a ground
-  plane; `contact`, `spring_cap` and `pose_swing_share` are described above; each interaction has `restitution`, `friction`,
+  plane; `contact`, `spring_cap`, `pose_swing_share` and `contact_hertz` are described above; each interaction has `restitution`, `friction`,
   `adhesion` (N) and `softness`; each pair is `[material, material, interaction]`, in
   either order, and unlisted pairs use the `Default` interaction. The editor's Physics
   group on the project page edits all of these (docs/layout.md). Adding the editing needed

@@ -15,13 +15,14 @@ use glam::{Mat3, Quat, Vec3};
 use super::collide::{self, Placed};
 
 mod limb;
-use crate::document::physics::{ContactModel, Gains, Geometry, Interaction, Limits, SpringCap};
+use crate::document::physics::{
+    CONTACT_HERTZ, ContactModel, Gains, Geometry, Interaction, Limits, SpringCap,
+};
 use limb::Articulation;
 
 pub const SUBSTEPS: usize = 4;
 const ITERATIONS: usize = 4;
 const RELAX_ITERATIONS: usize = 1;
-const CONTACT_HERTZ: f32 = 60.0;
 const CONTACT_DAMPING_RATIO: f32 = 10.0;
 /// Fraction of a joint's positional error corrected per substep. Joints are rigid
 /// (not mass-normalised soft constraints) so light limbs on long levers don't stretch.
@@ -320,6 +321,8 @@ pub struct World {
     pub ground: Option<(f32, usize)>,
     pub contact_model: ContactModel,
     pub spring_cap: SpringCap,
+    /// Contacts' natural frequency, Hz, capped at a quarter of the substep rate.
+    pub contact_hertz: f32,
     material_count: usize,
     /// `interactions[a * material_count + b]`.
     interactions: Vec<Interaction>,
@@ -644,6 +647,7 @@ impl World {
             ground: None,
             contact_model,
             spring_cap: SpringCap::default(),
+            contact_hertz: CONTACT_HERTZ,
             material_count: 0,
             interactions: Vec::new(),
             contact_cache: HashMap::new(),
@@ -775,7 +779,7 @@ impl World {
             l.apply(&mut sb, l.impulse);
         }
 
-        let contact_soft = soft(CONTACT_HERTZ.min(0.25 / h), CONTACT_DAMPING_RATIO, h);
+        let contact_soft = soft(self.contact_hertz.min(0.25 / h), CONTACT_DAMPING_RATIO, h);
         let joint_soft = Softness {
             bias_rate: JOINT_CORRECTION / h,
             mass_scale: 1.0,
