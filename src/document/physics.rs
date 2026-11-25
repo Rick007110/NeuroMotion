@@ -286,6 +286,21 @@ pub struct PhysicsSettings {
     /// What the solver's muscle spring cap counts as the mass a muscle moves.
     #[serde(default)]
     pub spring_cap: SpringCap,
+    /// The share of their preset's stiffness and damping active poses drive a joint's
+    /// swing axes with (its bend, as opposed to the twist about the bone). endorphin's
+    /// own runs bend their swing joints as if driven at a sixteenth of the preset, its
+    /// hinges (knees, elbows: twist only) at all of it, so imported scenes use 1/16
+    /// (docs/physics-design.md, lesson 46). NeuroMotion's own projects use 1.
+    #[serde(default = "full_share")]
+    pub pose_swing_share: f32,
+    /// Natural frequency (Hz) of contacts as springs on the bodies they touch, capped at
+    /// what the solver's substep allows (a quarter of its rate: 120 Hz at 120 ticks a
+    /// second). A contact is a spring for its body's own mass, so a 1 kg foot carrying
+    /// half the body sinks 4.5 mm at 60 Hz and tilts 1.3° about its locked toe, where
+    /// endorphin's sinks 0.5 mm; imported scenes use the cap (lesson 48). NeuroMotion's
+    /// own projects use 60.
+    #[serde(default = "contact_hertz")]
+    pub contact_hertz: f32,
     pub interactions: BTreeMap<String, Interaction>,
     /// `(material, material) -> interaction name`, order-insensitive.
     pub pairs: Vec<(String, String, String)>,
@@ -330,6 +345,18 @@ pub enum SpringCap {
     Limbs,
 }
 
+fn full_share() -> f32 {
+    1.0
+}
+
+/// Contacts' natural frequency in NeuroMotion's own projects, and in files saved before
+/// it was stored.
+pub const CONTACT_HERTZ: f32 = 60.0;
+
+fn contact_hertz() -> f32 {
+    CONTACT_HERTZ
+}
+
 /// How two materials behave when they touch.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Interaction {
@@ -361,6 +388,8 @@ impl Default for PhysicsSettings {
             }),
             contact: ContactModel::Coulomb,
             spring_cap: SpringCap::Bodies,
+            pose_swing_share: 1.0,
+            contact_hertz: CONTACT_HERTZ,
             interactions,
             pairs: vec![
                 ("rubber".into(), "tarmac".into(), "Grippy".into()),

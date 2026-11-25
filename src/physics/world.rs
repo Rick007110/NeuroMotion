@@ -15,13 +15,14 @@ use glam::{Mat3, Quat, Vec3};
 use super::collide::{self, Placed};
 
 mod limb;
-use crate::document::physics::{ContactModel, Gains, Geometry, Interaction, Limits, SpringCap};
+use crate::document::physics::{
+    CONTACT_HERTZ, ContactModel, Gains, Geometry, Interaction, Limits, SpringCap,
+};
 use limb::Articulation;
 
 pub const SUBSTEPS: usize = 4;
 const ITERATIONS: usize = 4;
 const RELAX_ITERATIONS: usize = 1;
-const CONTACT_HERTZ: f32 = 60.0;
 const CONTACT_DAMPING_RATIO: f32 = 10.0;
 /// Fraction of a joint's positional error corrected per substep. Joints are rigid
 /// (not mass-normalised soft constraints) so light limbs on long levers don't stretch.
@@ -320,6 +321,8 @@ pub struct World {
     pub ground: Option<(f32, usize)>,
     pub contact_model: ContactModel,
     pub spring_cap: SpringCap,
+    /// Contacts' natural frequency, Hz, capped at a quarter of the substep rate.
+    pub contact_hertz: f32,
     material_count: usize,
     /// `interactions[a * material_count + b]`.
     interactions: Vec<Interaction>,
@@ -644,6 +647,7 @@ impl World {
             ground: None,
             contact_model,
             spring_cap: SpringCap::default(),
+            contact_hertz: CONTACT_HERTZ,
             material_count: 0,
             interactions: Vec::new(),
             contact_cache: HashMap::new(),
@@ -775,7 +779,7 @@ impl World {
             l.apply(&mut sb, l.impulse);
         }
 
-        let contact_soft = soft(CONTACT_HERTZ.min(0.25 / h), CONTACT_DAMPING_RATIO, h);
+        let contact_soft = soft(self.contact_hertz.min(0.25 / h), CONTACT_DAMPING_RATIO, h);
         let joint_soft = Softness {
             bias_rate: JOINT_CORRECTION / h,
             mass_scale: 1.0,
@@ -969,7 +973,17 @@ impl World {
                 .anchor
                 .map_or(Mat3::IDENTITY, |a| Mat3::from_quat(self.bodies[a].rotation));
             let force = frame * lock.linear.min(Vec3::ZERO) * h;
-            let torque = frame * lock.angular.min(Vec3::ZERO) * h;
+            // A turning drive weakens as the body turns away from where it was when the
+            // lock began and pushes back past half a turn: its torque is the strength
+            // times cos(θ/2), θ the turn since then (the w of the body's rotation
+            // relative to the lock's target, followed continuously). Measured on
+            // Back-Flip-To-Combo's flip in endorphin's own run (lesson 47).
+            let relative = match lock.anchor {
+                Some(a) => self.bodies[a].rotation.inverse() * self.bodies[lock.body].rotation,
+                None => self.bodies[lock.body].rotation,
+            };
+            let turned = relative.dot(lock.target.0);
+            let torque = frame * lock.angular.min(Vec3::ZERO) * (h * turned);
             for (body, sign) in [(Some(lock.body), 1.0), (lock.anchor, -1.0)] {
                 let Some(body) = body.map(|b| &mut self.bodies[b]).filter(|b| b.is_dynamic())
                 else {
@@ -3384,9 +3398,12 @@ mod tests {
     }
 
     /// A negative angular strength turns with that many newton-metres about the world
-    /// axis: -100 N·m about X spins a ball of 1 kg·m² at -100 rad/s².
+    /// axis at first, times cos(θ/2) as the body turns θ from where the lock began
+    /// (lesson 47): -100 N·m about X spins a ball of 1 kg·m² at -100 rad/s² to start
+    /// with, fastest (20 rad/s, from ω² = 400 sin(-θ/2)) after half a turn, and to a stop
+    /// after a whole one.
     #[test]
-    fn negative_angular_strength_turns_with_a_steady_torque() {
+    fn negative_angular_strength_turns_with_a_torque_that_fades_over_a_turn() {
         let mut w = world();
         w.ground = None;
         let b = ball(&mut w, Vec3::new(0.0, 10.0, 0.0), 0.5, 10.0);
@@ -3398,24 +3415,35 @@ mod tests {
             linear: Vec3::ZERO,
             angular: Vec3::new(-100.0, 0.0, 0.0),
         });
-        run(&mut w, 0.2);
+        run(&mut w, 1.0 / 60.0);
         let spin = w.bodies[b].angular_velocity;
-        let expected = -100.0 * 0.2 / inertia;
+        let start = -100.0 / 60.0 / inertia;
         assert!(
-            (spin.x - expected).abs() < 1e-3,
-            "{spin}, expected {expected} rad/s about X"
+            (spin.x - start).abs() < 0.02,
+            "{spin}, expected about {start} rad/s"
         );
-        assert!(spin.y.abs() < 1e-5 && spin.z.abs() < 1e-5, "{spin}");
-        // Half of -100 rad/s² times (0.2 s)²: -2 rad about X.
-        let off = w.bodies[b]
-            .rotation
-            .angle_between(Quat::from_rotation_x(-2.0));
-        assert!(off < 0.05, "{off} rad away from a -2 rad turn about X");
+        let mut fastest = 0.0f32;
+        for _ in 0..240 {
+            run(&mut w, 1.0 / 120.0);
+            let spin = w.bodies[b].angular_velocity;
+            assert!(spin.y.abs() < 1e-4 && spin.z.abs() < 1e-4, "{spin}");
+            fastest = fastest.max(-spin.x);
+            if spin.x >= 0.0 {
+                break;
+            }
+        }
+        assert!((fastest - 20.0).abs() < 0.3, "fastest {fastest} rad/s");
+        // Stopped after a whole turn: cos(θ/2) back at -1, the body's w at -1.
+        let w_now = w.bodies[b].rotation.w;
+        assert!(
+            w_now < -0.99,
+            "stopped at w = {w_now}, not after a whole turn"
+        );
     }
 
     /// Driving axes and holding axes on one lock: X and Y-rotation hold, the rest push.
     /// The ball stays at x = 0 and stops turning about Y, while it falls faster than
-    /// gravity and spins about X.
+    /// gravity and spins about X as the fading drive (lesson 47) says.
     #[test]
     fn negative_axes_drive_while_positive_axes_of_the_same_lock_hold() {
         let mut w = world();
@@ -3447,10 +3475,14 @@ mod tests {
             "held rotation still turning: {}",
             body.angular_velocity
         );
+        // The X drive's torque fades with the turn (cos(θ/2)): from rest, with 1 kg·m²,
+        // ω² = 400 sin(-θ/2), sin(θ/2) being the rotation's x.
+        let (spin, q) = (body.angular_velocity.x, body.rotation);
+        assert!(q.w < 0.0, "drive axis didn't turn it past half a turn: {q}");
         assert!(
-            (body.angular_velocity.x + 50.0).abs() < 0.5,
-            "{}",
-            body.angular_velocity
+            (spin * spin + 400.0 * q.x).abs() < 4.0,
+            "spin {spin} rad/s after a turn of {} rad",
+            2.0 * libm::atan2f(q.x, q.w)
         );
     }
 

@@ -1412,6 +1412,11 @@ fn read_physics_settings(project: &mut Project, scene: Node, engine: Node) {
     settings.contact = ContactModel::Coulomb;
     // endorphin's muscles move whole limbs (lesson 27).
     settings.spring_cap = SpringCap::Limbs;
+    // Its active poses bend swing joints as if at a sixteenth of the preset (lesson 46).
+    settings.pose_swing_share = 1.0 / 16.0;
+    // Its feet don't sink into what they stand on: contacts as stiff as the substep
+    // allows (lesson 48).
+    settings.contact_hertz = 120.0;
     settings.ground = (scene.attribute("useDefaultGround") != Some("false")).then(|| Ground {
         height: 0.0,
         material: "tarmac".into(),
@@ -2558,6 +2563,8 @@ mod tests {
         assert!((joint.hard.swing2 - 0.85).abs() < 1e-5, "{:?}", joint.hard);
         assert!((joint.hard.swing1 - 0.55).abs() < 1e-5, "{:?}", joint.hard);
         assert_eq!(project.physics.spring_cap, SpringCap::Limbs);
+        assert_eq!(project.physics.pose_swing_share, 1.0 / 16.0);
+        assert_eq!(project.physics.contact_hertz, 120.0);
     }
 
     /// A virtual muscle (pelvis to heel here) becomes a spring in the rig: the body it

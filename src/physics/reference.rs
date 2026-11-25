@@ -95,6 +95,9 @@ pub enum Measure {
     At(i32),
     /// The value at the second frame minus the value at the first.
     Change(i32, i32),
+    /// How far an angle (degrees) has turned from the first frame to the second,
+    /// followed frame by frame, so whole turns count (a flip's -500°).
+    Turned(i32, i32),
     /// The largest value over frames `from..=to`.
     Max(i32, i32),
     /// The frame of the largest value over `from..=to`.
@@ -223,7 +226,7 @@ pub const SCENES: &[Scene] = &[
                 1.790,
                 0.03,
                 false,
-                1.83,
+                1.84,
             ),
             fbx(
                 "flight: frame it is highest",
@@ -241,7 +244,7 @@ pub const SCENES: &[Scene] = &[
                 -0.073,
                 0.05,
                 false,
-                0.20,
+                0.19,
             ),
             fbx(
                 "flight: centre of mass x, frame 78",
@@ -250,7 +253,7 @@ pub const SCENES: &[Scene] = &[
                 -0.114,
                 0.05,
                 false,
-                0.31,
+                0.30,
             ),
             fbx(
                 "flight: centre of mass x, frame 88",
@@ -259,7 +262,7 @@ pub const SCENES: &[Scene] = &[
                 -0.155,
                 0.05,
                 false,
-                0.42,
+                0.41,
             ),
             fbx(
                 "flight: centre of mass z, frame 68",
@@ -268,7 +271,7 @@ pub const SCENES: &[Scene] = &[
                 -0.056,
                 0.05,
                 false,
-                -0.21,
+                -0.20,
             ),
             fbx(
                 "flight: centre of mass height, frame 78",
@@ -286,7 +289,7 @@ pub const SCENES: &[Scene] = &[
                 1.270,
                 0.05,
                 false,
-                1.37,
+                1.38,
             ),
             fbx(
                 "flight: left knee bend, frame 60",
@@ -295,7 +298,7 @@ pub const SCENES: &[Scene] = &[
                 61.1,
                 4.0,
                 false,
-                59.2,
+                60.4,
             ),
             fbx(
                 "flight: right knee bend, frame 60",
@@ -304,7 +307,7 @@ pub const SCENES: &[Scene] = &[
                 32.6,
                 4.0,
                 false,
-                32.1,
+                32.0,
             ),
             fbx(
                 "flight: trunk to left thigh bend, frame 70",
@@ -352,7 +355,7 @@ pub const SCENES: &[Scene] = &[
                 96.0,
                 2.0,
                 false,
-                96.0,
+                97.0,
             ),
             fbx(
                 "landed: centre of mass x, frame 96",
@@ -361,7 +364,7 @@ pub const SCENES: &[Scene] = &[
                 -0.358,
                 0.05,
                 false,
-                0.20,
+                0.19,
             ),
             fbx(
                 "landed: centre of mass z, frame 96",
@@ -370,7 +373,7 @@ pub const SCENES: &[Scene] = &[
                 0.063,
                 0.05,
                 false,
-                -0.26,
+                -0.22,
             ),
             fbx(
                 "back on its feet: centre of mass x, frame 190",
@@ -403,7 +406,7 @@ pub const SCENES: &[Scene] = &[
                 -2.3,
                 1.0,
                 false,
-                -3.7,
+                -1.4,
             ),
             fbx(
                 "lean back about the heels since frame 0, frame 72",
@@ -411,8 +414,8 @@ pub const SCENES: &[Scene] = &[
                 Measure::Change(0, 72),
                 -5.3,
                 1.0,
-                false,
-                -6.7,
+                true,
+                -5.1,
             ),
             fbx(
                 "lean back about the heels since frame 0, frame 100",
@@ -421,7 +424,7 @@ pub const SCENES: &[Scene] = &[
                 -6.4,
                 1.0,
                 false,
-                -7.9,
+                -6.5,
             ),
             fbx(
                 "left arm (shoulder to hand) above horizontal, frame 96",
@@ -430,7 +433,7 @@ pub const SCENES: &[Scene] = &[
                 -2.9,
                 3.0,
                 false,
-                23.9,
+                -4.4,
             ),
             fbx(
                 "crouching: centre of mass height, frame 168",
@@ -439,7 +442,7 @@ pub const SCENES: &[Scene] = &[
                 3.159,
                 0.03,
                 false,
-                3.195,
+                3.19,
             ),
             fbx(
                 "crouched: centre of mass height, frame 192",
@@ -447,8 +450,8 @@ pub const SCENES: &[Scene] = &[
                 Measure::At(192),
                 3.158,
                 0.03,
-                false,
-                3.186,
+                true,
+                3.18,
             ),
             fbx(
                 "crouched: centre of mass z (behind the heels < -0.03), frame 192",
@@ -457,7 +460,7 @@ pub const SCENES: &[Scene] = &[
                 -0.164,
                 0.05,
                 true,
-                -0.155,
+                -0.17,
             ),
             fbx(
                 "crouched: knee bend, frame 170",
@@ -466,7 +469,7 @@ pub const SCENES: &[Scene] = &[
                 111.8,
                 4.0,
                 false,
-                106.4,
+                105.2,
             ),
             fbx(
                 "crouched: hip bend (trunk to thigh), frame 170",
@@ -474,8 +477,8 @@ pub const SCENES: &[Scene] = &[
                 Measure::At(170),
                 90.3,
                 4.0,
-                false,
-                74.8,
+                true,
+                92.1,
             ),
             fbx(
                 "crouched: spine bend (pelvis, chest, head), frame 185",
@@ -483,8 +486,8 @@ pub const SCENES: &[Scene] = &[
                 Measure::At(185),
                 48.2,
                 4.0,
-                false,
-                39.0,
+                true,
+                45.8,
             ),
             fbx(
                 "take-off: hips straightest",
@@ -493,7 +496,7 @@ pub const SCENES: &[Scene] = &[
                 3.9,
                 4.0,
                 false,
-                16.1,
+                18.9,
             ),
             fbx(
                 "take-off: arms overhead (shoulder bend least)",
@@ -502,7 +505,7 @@ pub const SCENES: &[Scene] = &[
                 60.6,
                 4.0,
                 false,
-                88.5,
+                70.4,
             ),
             fbx(
                 "jump: centre of mass highest",
@@ -511,7 +514,7 @@ pub const SCENES: &[Scene] = &[
                 3.745,
                 0.05,
                 false,
-                3.543,
+                3.69,
             ),
             fbx(
                 "jump: frame it is highest",
@@ -520,7 +523,7 @@ pub const SCENES: &[Scene] = &[
                 242.0,
                 3.0,
                 false,
-                224.0,
+                236.0,
             ),
             fbx(
                 "jump: lowest body centre highest (box top 2.52 m)",
@@ -529,7 +532,7 @@ pub const SCENES: &[Scene] = &[
                 3.602,
                 0.05,
                 false,
-                3.387,
+                3.54,
             ),
             fbx(
                 "falls past the box top (a body centre 10 cm under it)",
@@ -542,7 +545,7 @@ pub const SCENES: &[Scene] = &[
                 296.0,
                 3.0,
                 false,
-                270.0,
+                292.0,
             ),
             fbx(
                 "first on the floor (a body centre under 15 cm)",
@@ -555,7 +558,34 @@ pub const SCENES: &[Scene] = &[
                 330.0,
                 3.0,
                 false,
-                314.0,
+                328.0,
+            ),
+            fbx(
+                "flip: trunk (pelvis to head) turned since frame 190, frame 260",
+                BACKFLIP_TRUNK,
+                Measure::Turned(190, 260),
+                -246.7,
+                10.0,
+                false,
+                -263.4,
+            ),
+            fbx(
+                "flip: trunk (pelvis to head) turned since frame 190, frame 297",
+                BACKFLIP_TRUNK,
+                Measure::Turned(190, 297),
+                -522.8,
+                10.0,
+                false,
+                -527.0,
+            ),
+            fbx(
+                "flip: trunk (pelvis to head) turned since frame 190, frame 330",
+                BACKFLIP_TRUNK,
+                Measure::Turned(190, 330),
+                -688.5,
+                10.0,
+                false,
+                -654.9,
             ),
             fbx(
                 "combo: centre of mass highest, frames 500-620",
@@ -564,7 +594,7 @@ pub const SCENES: &[Scene] = &[
                 1.667,
                 0.1,
                 false,
-                0.560,
+                0.70,
             ),
         ],
     },
@@ -579,7 +609,7 @@ pub const SCENES: &[Scene] = &[
                 0.698,
                 0.03,
                 false,
-                0.83,
+                0.84,
             ),
             fbx(
                 "hit: centre of mass height, frame 65",
@@ -588,7 +618,7 @@ pub const SCENES: &[Scene] = &[
                 0.430,
                 0.05,
                 false,
-                0.586,
+                0.61,
             ),
             fbx(
                 "hit: head over the centre of mass, frame 60",
@@ -606,7 +636,7 @@ pub const SCENES: &[Scene] = &[
                 0.219,
                 0.03,
                 false,
-                0.239,
+                0.25,
             ),
             fbx(
                 "down: frame it is lowest",
@@ -615,7 +645,7 @@ pub const SCENES: &[Scene] = &[
                 76.0,
                 3.0,
                 false,
-                76.0,
+                77.0,
             ),
             fbx(
                 "down: head under the centre of mass from",
@@ -637,7 +667,7 @@ pub const SCENES: &[Scene] = &[
                 1.514,
                 0.05,
                 false,
-                1.58,
+                1.60,
             ),
             fbx(
                 "lying: centre of mass x, frame 100",
@@ -646,7 +676,7 @@ pub const SCENES: &[Scene] = &[
                 0.785,
                 0.1,
                 false,
-                0.75,
+                0.79,
             ),
             fbx(
                 "lying: centre of mass z, frame 100",
@@ -655,7 +685,7 @@ pub const SCENES: &[Scene] = &[
                 1.650,
                 0.1,
                 false,
-                1.93,
+                2.05,
             ),
         ],
     },
@@ -784,7 +814,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -0.264,
                 uncertainty: 0.05,
                 guard: false,
-                baseline: -0.589,
+                baseline: -0.41,
                 source: FBX,
             },
             Row {
@@ -794,7 +824,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -1.026,
                 uncertainty: 0.1,
                 guard: false,
-                baseline: -0.557,
+                baseline: -0.65,
                 source: FBX,
             },
             Row {
@@ -804,7 +834,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -0.577,
                 uncertainty: 0.1,
                 guard: false,
-                baseline: 0.378,
+                baseline: 0.07,
                 source: FBX,
             },
             Row {
@@ -814,7 +844,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -0.042,
                 uncertainty: 0.03,
                 guard: false,
-                baseline: -0.042,
+                baseline: -0.02,
                 source: FBX,
             },
         ],
@@ -853,7 +883,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: 4.472,
                 uncertainty: 0.2,
                 guard: false,
-                baseline: -9.03,
+                baseline: -9.08,
                 source: FBX,
             },
             Row {
@@ -867,7 +897,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: 341.0,
                 uncertainty: 3.0,
                 guard: false,
-                baseline: 369.0,
+                baseline: 362.0,
                 source: FBX,
             },
             Row {
@@ -877,7 +907,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: 0.736,
                 uncertainty: 0.05,
                 guard: false,
-                baseline: 0.48,
+                baseline: 0.26,
                 source: FBX,
             },
             Row {
@@ -887,7 +917,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: 0.732,
                 uncertainty: 0.05,
                 guard: false,
-                baseline: 0.20,
+                baseline: 0.34,
                 source: FBX,
             },
         ],
@@ -945,6 +975,13 @@ const BACKFLIP_LEAN: Signal = Signal::Pitch(
     Point::Joint("character01", "Pelvis"),
 );
 
+// Back-Flip-To-Combo's flip: the line from the pelvis to the head, whose turn about
+// the side axis (negative backwards) counts the somersault.
+const BACKFLIP_TRUNK: Signal = Signal::Pitch(
+    Point::Joint("character01", "Pelvis"),
+    Point::Joint("character01", "Head"),
+);
+
 const REACH_TARGET: Point = Point::Body("background", "Prop0");
 
 /// How far an arm of the demo's characters (shoulder joint to finger tips) points off
@@ -995,7 +1032,7 @@ impl Measure {
     fn last_frame(self) -> i32 {
         match self {
             Measure::At(f) => f,
-            Measure::Change(a, b) => a.max(b),
+            Measure::Change(a, b) | Measure::Turned(a, b) => a.max(b),
             Measure::Max(_, to)
             | Measure::MaxFrame(_, to)
             | Measure::Min(_, to)
@@ -1198,6 +1235,12 @@ impl Run<'_> {
                     change
                 })
             }
+            Measure::Turned(a, b) => Some(
+                frames(a, b)
+                    .zip(frames(a + 1, b))
+                    .map(|(f, g)| (v(g) - v(f) + 180.0).rem_euclid(360.0) - 180.0)
+                    .sum(),
+            ),
             Measure::Max(a, b) => extreme(a, b, 1.0).map(|e| e.1),
             Measure::MaxFrame(a, b) => extreme(a, b, 1.0).map(|e| e.0 as f32),
             Measure::Min(a, b) => extreme(a, b, -1.0).map(|e| e.1),

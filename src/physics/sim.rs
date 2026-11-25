@@ -248,6 +248,7 @@ fn build(project: &Project) -> Running {
     let settings = &project.physics;
     let mut world = World::new(Vec3::from(settings.gravity), settings.contact);
     world.spring_cap = settings.spring_cap;
+    world.contact_hertz = settings.contact_hertz;
 
     // Materials: every name used by the ground or any shape.
     let mut materials: Vec<String> = Vec::new();
@@ -632,7 +633,17 @@ fn update_constraints(running: &mut Running, frame: i32) {
                 } => (position, orientation),
                 LockKind::Join | LockKind::Parent => (true, true),
             };
-            lock_pairs(c.kind, &c.bodies, |b| bodies[b].parent)
+            let pairs = lock_pairs(c.kind, &c.bodies, |b| bodies[b].parent);
+            // A drive (a negative strength) is the event's, shared among the bodies it
+            // names: Back-Flip-To-Combo's flip, -100 N·m on the pelvis and upper spine,
+            // turns endorphin's character with 100 N·m in all (lesson 47). Holding
+            // strengths stay each body's.
+            let share = |v: Vec3| {
+                let n = pairs.len().max(1) as f32;
+                Vec3::select(v.cmplt(Vec3::ZERO), v / n, v)
+            };
+            let (linear, angular) = (share(c.linear), share(c.angular));
+            pairs
                 .into_iter()
                 .map(|(anchor, b)| {
                     let (ar, ap) = anchor.map_or((Quat::IDENTITY, Vec3::ZERO), |a| {
@@ -645,8 +656,8 @@ fn update_constraints(running: &mut Running, frame: i32) {
                             ar.inverse() * bodies[b].rotation,
                             ar.inverse() * (bodies[b].position - ap),
                         ),
-                        linear: if position { c.linear } else { Vec3::ZERO },
-                        angular: if orientation { c.angular } else { Vec3::ZERO },
+                        linear: if position { linear } else { Vec3::ZERO },
+                        angular: if orientation { angular } else { Vec3::ZERO },
                     }
                 })
                 .collect()
@@ -1195,7 +1206,13 @@ fn set_muscles(
             };
             for &(p, ramp) in poses.iter().filter(|(p, _)| p.named[by]) {
                 let pose = p.pose[jd.joint];
-                let held = gains_of(pose_set, &jd.muscle, p.strength);
+                let mut held = gains_of(pose_set, &jd.muscle, p.strength);
+                // endorphin's swing muscles hold a pose at a sixteenth of what its preset
+                // says, its twist muscles (the knees' and elbows' only axis) at all of it
+                // (lesson 46); the force limit is the preset's either way.
+                let share = project.physics.pose_swing_share;
+                held.swing.stiffness *= share;
+                held.swing.damping *= share;
                 target = target.slerp(pose, ramp);
                 gains = MuscleGains {
                     twist: blend(gains.twist, held.twist, ramp),

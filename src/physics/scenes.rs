@@ -3122,6 +3122,58 @@ pub fn virtual_reach(vm: Option<(Gains, Gains)>, named: bool) -> Project {
     p
 }
 
+/// Back-Flip-To-Combo's crouch, the trunk's part: hung by the hips, the placeholder
+/// bends its spine and chest forward 12° each and its knees 90° from frame 10, with an
+/// active pose at strength 0.55 (as the scene's first pose) and the scene's pose preset
+/// (10 000 N·m/rad, 1000 N·m·s/rad, 1000 N·m on every muscle), active poses bending
+/// swing joints with `share` of it (lesson 46). The trunk leans forward, so the spine
+/// and chest hold its weight on their swing axes; the knees, hinges, hold the shins on
+/// their twist.
+pub fn bent_over(share: f32) -> Project {
+    let mut p = new_scene("Bent over", 3.0);
+    p.physics.spring_cap = SpringCap::Limbs;
+    p.physics.pose_swing_share = share;
+    let (skeleton, mut rig) = person_rig();
+    let preset = Gains {
+        stiffness: 10_000.0,
+        damping: 1000.0,
+        force_limit: 1000.0,
+    };
+    let set = rig
+        .muscle_sets
+        .iter_mut()
+        .find(|s| s.name == "DesiredPoseCalibration")
+        .unwrap();
+    set.muscles.clear();
+    set.fallback = MuscleGains {
+        twist: preset,
+        swing: preset,
+    };
+    let at = Vec3::new(0.0, 1.5, 0.0);
+    let id = add_person(&mut p, "poser", (skeleton, rig), at, 0.0, &[]);
+    constrain(
+        &mut p,
+        id,
+        0,
+        180,
+        "Lock",
+        &["poser.MetaBodies.hips"],
+        (STRONG, STRONG),
+    );
+    let mut pose = vec![
+        held("spine", Property::RotX, 12.0),
+        held("chest", Property::RotX, 12.0),
+    ];
+    pose.extend(["l", "r"].map(|side| held(&format!("{side}_knee"), Property::RotX, 90.0)));
+    active_pose(&mut p, id, 10, 180, &[], pose);
+    p.clips
+        .last_mut()
+        .unwrap()
+        .source
+        .insert("strength".into(), "0.55".into());
+    p
+}
+
 /// Back-Flip-To-Combo's crouch: one event names the knees and stores the ankles
 /// bent too; nothing names the ankles. Hung by the hips, the placeholder bends its knees
 /// by 60° and (stored, unnamed) its ankles by 30° from frame 10.
@@ -3324,6 +3376,8 @@ mod tests {
             "arms_out" => arms_out(SpringCap::Limbs),
             "arms_out_bodies" => arms_out(SpringCap::Bodies),
             "unnamed_ankles" => unnamed_ankles(),
+            "bent_over" => bent_over(1.0 / 16.0),
+            "bent_over_full" => bent_over(1.0),
             "mid_air" => mid_air(false, true),
             "mid_air_limp" => mid_air(false, false),
             "mid_air_t_pose" => mid_air(true, true),
@@ -3389,8 +3443,9 @@ mod tests {
     ///   included (they follow their animation). This is the pose the viewport draws
     ///   and exports write: while a transition blends back to animation the joints
     ///   are blended and the bodies aren't;
-    /// - `rig.csv`: every body's mass and its frame relative to the joint it hangs
-    ///   from, to place bodies on the joints;
+    /// - `rig.csv`: every body's mass, its principal moments of inertia (kg·m², about
+    ///   its frame's axes) and its frame relative to the joint it hangs from, to place
+    ///   bodies on the joints;
     /// - `shapes.csv`: every collision shape, relative to its body, for drawing.
     ///
     /// `NM_SECONDS` sets how long to simulate from the start of the range, past its
@@ -3467,7 +3522,7 @@ mod tests {
                 }
             }
         }
-        let mut bodies_on_joints = format!("character,body,joint,mass,{POSE}\n");
+        let mut bodies_on_joints = format!("character,body,joint,mass,ix,iy,iz,{POSE}\n");
         let mut shapes =
             format!("character,body,mass,shape,geometry,radius,length,sx,sy,sz,{POSE}\n");
         let frame_of = |f: &crate::document::physics::Frame| {
@@ -3477,7 +3532,18 @@ mod tests {
             let Some(rig) = &c.physics else { continue };
             for body in &rig.bodies {
                 let joint = &c.skeleton.joints[body.joint].name;
-                let head = format!("{},{},{joint},{}", c.name, body.name, body.mass);
+                // The principal moments the simulation uses (kg·m², about the body frame's
+                // axes).
+                let inertia = if rig.isotropic_inertia {
+                    [body.inertia.iter().sum::<f32>() / 3.0; 3]
+                } else {
+                    body.inertia
+                };
+                let [ix, iy, iz] = inertia;
+                let head = format!(
+                    "{},{},{joint},{},{ix},{iy},{iz}",
+                    c.name, body.name, body.mass
+                );
                 row(&mut bodies_on_joints, &head, frame_of(&body.frame));
                 for (si, shape) in body.shapes.iter().enumerate() {
                     let (kind, r, l, size) = match shape.geometry {
@@ -4227,6 +4293,103 @@ mod tests {
             "ankles turned {}°",
             ankle - rest
         );
+    }
+
+    /// Active poses bend a swing joint with a sixteenth of the preset in imported scenes,
+    /// a twist joint (a hinge) with all of it (lesson 46). Hung by the hips, the
+    /// placeholder bends its spine and chest 12° forward each and its knees 90°: at the
+    /// preset its trunk (spine to neck) leans 18° at frame 150; at a sixteenth it sags
+    /// to 26° under its own weight, as endorphin's spine does, while the knees hold
+    /// 90° either way.
+    #[test]
+    fn a_pose_bends_swing_joints_with_a_sixteenth() {
+        let measure = |share: f32| {
+            let project = bent_over(share);
+            let sim = check(project.clone());
+            let skeleton = &project.characters[0].skeleton;
+            let at = |name: &str| {
+                sim.frame(150).unwrap()[0].as_ref().unwrap().joints
+                    [skeleton.joint_index(name).unwrap()]
+                .1
+            };
+            let trunk = at("neck") - at("spine");
+            let lean = libm::atan2f(libm::hypotf(trunk.x, trunk.z), trunk.y).to_degrees();
+            (lean, bend(&project, &sim, 150, "l_knee", "l_ankle"))
+        };
+        let (full, share) = (measure(1.0), measure(1.0 / 16.0));
+        println!(
+            "bent over: trunk leans {:.1}° / {:.1}°, knees {:.1}° / {:.1}° at the full \
+             preset / a sixteenth",
+            full.0, share.0, full.1, share.1
+        );
+        assert!(
+            share.0 > full.0 + 4.0,
+            "trunk {}° against {}°",
+            share.0,
+            full.0
+        );
+        assert!(
+            (full.1 - share.1).abs() < 1.0,
+            "knees {}° against {}°",
+            share.1,
+            full.1
+        );
+    }
+
+    /// A contact is a spring on its body's own mass, so a planted foot carrying the body
+    /// sinks into what it stands on: Back-Flip-To-Combo's heels sank 4.5 mm into the box
+    /// at 60 Hz, tilting the feet 1.3° about their locked toes and the whole body back
+    /// with them, where endorphin's sink 0.5 mm (lesson 48). The back flip stand-in,
+    /// left standing on its box with its toes locked: the deepest corner of a foot's box
+    /// below the box top over frames 30-200, at 60 Hz (NeuroMotion's own projects) and
+    /// at 120 Hz (imported scenes, as stiff as the substep allows).
+    #[test]
+    fn stiff_contacts_keep_a_planted_foot_on_top() {
+        let sink = |hertz: f32| {
+            let mut project = backflip(false);
+            project.physics.contact_hertz = hertz;
+            project.settings.range.end = 200;
+            let sim = check(project.clone());
+            let ci = project
+                .characters
+                .iter()
+                .position(|c| c.name == "flipper")
+                .unwrap();
+            let rig = project.characters[ci].physics.as_ref().unwrap();
+            let mut deepest = 0.0f32;
+            for f in 30..=200 {
+                let cf = sim.frame(f).unwrap()[ci].as_ref().unwrap();
+                for (body, &(r, p)) in rig.bodies.iter().zip(&cf.bodies) {
+                    if !body.name.contains("ankle") {
+                        continue;
+                    }
+                    for shape in &body.shapes {
+                        let Geometry::Box { size } = shape.geometry else {
+                            continue;
+                        };
+                        let (sr, sp) = (
+                            Quat::from_array(shape.frame.rotation),
+                            Vec3::from(shape.frame.position),
+                        );
+                        for corner in 0..8 {
+                            let sign = |bit: usize| if corner & bit == 0 { -0.5 } else { 0.5 };
+                            let local =
+                                Vec3::new(size[0] * sign(1), size[1] * sign(2), size[2] * sign(4));
+                            let y = (p + r * (sp + sr * local)).y;
+                            deepest = deepest.max(2.5 - y);
+                        }
+                    }
+                }
+            }
+            deepest
+        };
+        let (soft, stiff) = (sink(60.0), sink(120.0));
+        println!(
+            "planted foot: deepest {:.1} mm into the box at 60 Hz, {:.1} mm at 120 Hz",
+            soft * 1000.0,
+            stiff * 1000.0
+        );
+        assert!(stiff < 0.6 * soft, "{stiff} m against {soft} m");
     }
 
     /// A legacy pose's muscle targets drive the joints to their angles as an active

@@ -184,6 +184,40 @@ pub(super) fn settings_group(ui: &mut Ui, doc: &mut Document) {
                 .on_hover_text(spring_cap_hint(p.spring_cap));
             ui.end_row();
 
+            ui.label("Pose bend strength");
+            g.drag(
+                &ui.add(
+                    DragValue::new(&mut p.pose_swing_share)
+                        .range(0.0..=1.0)
+                        .speed(0.005)
+                        .max_decimals(4),
+                )
+                .on_hover_text(
+                    "How much of their preset's stiffness and damping active poses bend a \
+                     joint with (its swing; the twist about the bone, all a knee or elbow \
+                     has, always gets all of it). Imported scenes use 1/16 (0.0625), \
+                     as endorphin's own runs bend; your own projects use 1.",
+                ),
+            );
+            ui.end_row();
+
+            ui.label("Contact stiffness");
+            g.drag(
+                &ui.add(
+                    DragValue::new(&mut p.contact_hertz)
+                        .range(1.0..=120.0)
+                        .speed(1.0)
+                        .suffix(" Hz"),
+                )
+                .on_hover_text(
+                    "How stiffly contacts push back, as a spring's frequency on the body \
+                     that touches. At most a quarter of the physics rate (120 Hz at 120 \
+                     ticks a second). Imported scenes use 120, so feet don't sink into \
+                     what they stand on; your own projects use 60.",
+                ),
+            );
+            ui.end_row();
+
             ui.label("Ground");
             match &p.ground {
                 Some(ground) => ui.weak(format!(
