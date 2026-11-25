@@ -1040,6 +1040,13 @@ The first behaviour that reads its event's settings, Explosion, taught one more.
     and the other changes: Multi Martial's fingers whipped round at 21 m/s, 9.9 cm out
     of their joint at frame 75, and Car Hit's knee opened 5.2 cm at frame 83. Counting
     the whole arm: 1.9 cm and 1.0 cm, and the sweep is 16 of 16 clean again.
+    Car Hit on the combined build (with lessons 25-27; `dump_scene_motion`): centre of
+    mass highest 1.62 m at frame 65 (Explosion's branch alone 1.75 m at 68, endorphin
+    1.81 m at 68); at frames 68 / 78 / 88 x 0.06 / 0.08 / 0.05 m and z -0.18 / -0.22 /
+    -0.25 m; upside down (head below the centre of mass) from frame 63 to 83
+    (endorphin 76-88); first on the ground feet first at frame 89, centre of mass at x
+    0.05, z -0.27 m (endorphin about 96, -0.3 to -0.44 m). It flies 0.2 m lower than
+    endorphin's and lands about 7 frames early; not yet looked into.
 
 ## Status against endorphin's sample scenes
 

@@ -335,6 +335,16 @@ stronger too, and Balance then holds only 3 of its 8 hard backward pushes (the t
 wants 4; 51 of 84 in `push_sweep`): the controllers were tuned on the capped
 muscles. That change needs Balance retuned with it, which is the next step.
 
+Imported scenes now count a muscle's whole limb in the cap (`SpringCap::Limbs`, lesson
+27 in `physics-design.md`), which is close to that whole-side estimate, without
+touching NeuroMotion's own projects. Measured on the combined build
+(`dump_scene_motion`): Stagger Walk's character now steps back. Its right foot goes
+1.0 m back over frames 5-60 in two low strides (5-9 cm off the ground), its left 0.37
+m in shorter ones; it stops by frame 60 and stands, head 1.54-1.74 m up and pelvis
+0.86-0.97 m, until the scene's animation takes over at frame 145. endorphin's takes
+about five steps; ours takes two or three, low and long, and hasn't been compared
+frame by frame.
+
 **Not yet.** Settings on the behaviour event (ArmsWindmill, MaxSteps, ArmsSpeed,
 ArmsStrength in Stagger Walk) aren't read, the arms don't windmill, and nothing but
 Stagger Walk's first second has been compared with endorphin. It inherits Balance's
@@ -666,14 +676,17 @@ characters fell with their arms out and landed limp.
 
 **Car Hit** (key numbers from the frame-by-frame comparison with endorphin's run):
 
-| | endorphin | before | Explosion |
-|---|---|---|---|
-| Centre of mass highest | 1.81 m at frame 68 | 1.49 m at 64 | 1.75 m at 68 |
-| Centre of mass x at frames 68 / 78 / 88 | 0.02 / -0.11 / -0.11 m | -0.14 / -0.15 / -0.17 m | 0.03 / 0.05 / 0.06 m |
-| Upside down | frames 76-88 | about 74 | about 75 |
-| First touches the ground | feet first, about frame 96, at -0.3 to -0.44 m | frame 90 (toes), at -0.17 m | feet coming down at 96 (toes' centres 7 cm up), then the hands, at frame 100, at -0.31 m |
+| | endorphin | before | Explosion | merged with lessons 25-27 |
+|---|---|---|---|---|
+| Centre of mass highest | 1.81 m at frame 68 | 1.49 m at 64 | 1.75 m at 68 | 1.62 m at 65 |
+| Centre of mass x at frames 68 / 78 / 88 | 0.02 / -0.11 / -0.11 m | -0.14 / -0.15 / -0.17 m | 0.03 / 0.05 / 0.06 m | 0.06 / 0.08 / 0.05 m |
+| Upside down | frames 76-88 | about 74 | about 75 | head below the centre of mass 63-83 |
+| First touches the ground | feet first, about frame 96, at -0.3 to -0.44 m | frame 90 (toes), at -0.17 m | feet coming down at 96 (toes' centres 7 cm up), then the hands, at frame 100, at -0.31 m | toes at frame 89, centre of mass at -0.27 m (z) |
 
 So the flight is higher and longer, as endorphin's is, and lands in the same place.
+Merged with the limb cap and the other engine changes (the last column, and the
+arms' damping counting the whole arm, lesson 28) it flies 0.2 m lower than
+endorphin's and comes down about 7 frames early; not yet looked into.
 NeuroMotion already turned the pedestrian over head first before (the trunk turned
 360°, with the car and "Guide character to roll"); it still turns over a few frames
 early, and drifts slightly forward (+0.06 m) where endorphin's drifts back (-0.11 m).

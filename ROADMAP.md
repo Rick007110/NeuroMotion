@@ -120,8 +120,9 @@ scenes then run something sensible.
   stepping, 50 before its swing foot was raised), up to 3 m/s forwards; sideways
   is still weakest, because the foot on the falling side carries the weight and
   can't lift ([details](docs/behaviours.md#not-yet)). On endorphin's own character
-  (Stagger Walk) it doesn't step at all: the engine's spring cap weakens that rig's
-  hips, knees and ankles several times over
+  (Stagger Walk) it didn't step at all, the engine's spring cap weakening that rig's
+  hips, knees and ankles several times over; with imported scenes on the whole-limb
+  cap it now steps back two or three times (endorphin about five) and stays up
   ([details](docs/behaviours.md#stagger-walk))
 - 🟡 **Stagger** ([#8](https://github.com/Rick007110/NeuroMotion/issues/8)): Balance
   that keeps stepping with a loose trunk; its event settings aren't read and it
@@ -137,8 +138,9 @@ scenes then run something sensible.
 - ✅ **Explosion** ("Writhe in mid-air", 8 scenes with its 2.5 name WritheInMidAir):
   arms flapping, legs pedalling, back arched while in the air, limp once landed;
   matched to a recording of endorphin's behaviour scene and reads its event settings
-  ([details](docs/behaviours.md#explosion-writhe-in-mid-air)). Car Hit: see
-  milestone 1
+  ([details](docs/behaviours.md#explosion-writhe-in-mid-air)). In Car Hit the
+  pedestrian's centre of mass now rises to 1.62 m at frame 65 (endorphin 1.81 m at 68)
+  and it comes down feet first at frame 89 (endorphin about 96)
 - 🟡 **Behaviour settings imported**: every behaviour event now carries its settings
   and targets; Look and Reach and Explosion read them, the others don't yet
 - ✅ **Arms found on endorphin's characters**: the limb finder took the collarbone for
