@@ -5393,25 +5393,41 @@ mod endorphin_scenes {
                 continue;
             }
             // The whole range: a scene can go wrong long after its first seconds.
-            let project = crate::io::endorphin::import_scene(&path).unwrap().project;
-            let report = sweep(&project);
-            let ok = report.ok();
-            println!(
-                "{} {name:<16} {:>4} frames in {:>6.0?}  {report}",
-                if ok { "ok  " } else { "FAIL" },
-                project.settings.range.len() + 1,
-                report.elapsed
-            );
-            // What to look at: where the worst values happened and the set-up behind them.
-            let constrained = project
-                .clips
-                .iter()
-                .any(|c| matches!(&c.kind, ClipKind::Event { event } if event == "Constraint"));
-            if !ok || constrained || report.drift >= 0.05 || report.buried > 0.0 {
-                print!("{}{}", report.places(), describe(&project));
-            }
-            if !ok {
-                failures.push(name);
+            let imported = crate::io::endorphin::import_scene(&path).unwrap().project;
+            // `NM_GRAVITY_NUDGES=1e-4,-2e-4` also runs each scene with gravity scaled by
+            // 1 + each of these: chaotic scenes can pass by luck (lesson 45).
+            let gravity_nudges: Vec<f32> = std::env::var("NM_GRAVITY_NUDGES")
+                .map(|s| s.split(',').filter_map(|n| n.trim().parse().ok()).collect())
+                .unwrap_or_default();
+            for nudge in std::iter::once(0.0).chain(gravity_nudges) {
+                let mut project = imported.clone();
+                for g in &mut project.physics.gravity {
+                    *g *= 1.0 + nudge;
+                }
+                let report = sweep(&project);
+                let ok = report.ok();
+                let name = if nudge == 0.0 {
+                    name.clone()
+                } else {
+                    format!("{name} (g {nudge:+e})")
+                };
+                println!(
+                    "{} {name:<16} {:>4} frames in {:>6.0?}  {report}",
+                    if ok { "ok  " } else { "FAIL" },
+                    project.settings.range.len() + 1,
+                    report.elapsed
+                );
+                // What to look at: where the worst values happened and the set-up behind them.
+                let constrained = project
+                    .clips
+                    .iter()
+                    .any(|c| matches!(&c.kind, ClipKind::Event { event } if event == "Constraint"));
+                if !ok || constrained || report.drift >= 0.05 || report.buried > 0.0 {
+                    print!("{}{}", report.places(), describe(&project));
+                }
+                if !ok {
+                    failures.push(name);
+                }
             }
         }
         assert!(failures.is_empty(), "{failures:?}");
