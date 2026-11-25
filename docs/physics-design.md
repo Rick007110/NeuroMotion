@@ -1729,8 +1729,105 @@ Making cylinders exact (#14) taught one more.
     switching (15 %).
 
     Still open: locks and contacts aren't in a character's system, so the cap can't go
-    yet (above); the guess of which stops push is wrong about half the time when a limb
+    yet (above; lesson N found the cap is not only a limit of the solver); the guess of which stops push is wrong about half the time when a limb
     rests against one, which costs time.
+
+With muscles as stiff as their presets, lessons 33 and 34's readings could be scored
+again on the new solve.
+
+N. **On the whole-character solve, Back-Flip-To-Combo's crouch is held back by its toe
+    locks' strength and its take-off by how fast its legs straighten; neither is a
+    limit of the solve, and no general reading found so far improves the score.**
+    (Number to be assigned at integration.) Nothing in the engine changed. Each reading
+    was a temporary environment switch scored with `reference_scores` on the five
+    scenes (rows within endorphin's uncertainty, and the sum of each row's error in
+    uncertainties, counting a row at most 4), the two most promising also with
+    `NM_NUDGES=2`, and probed with `dump_scene_motion` and a temporary print of each
+    joint's error and muscle torque and each lock's force.
+
+    - **The toe locks sit at their strength.** From frame ~100 both toe locks (25 N, 25
+      N·m) pull with all of it on all six axes (probed at 120 and 170), and the left toe
+      is 19 cm from its target by frame 202. Three times the strength holds it to 9 cm,
+      a hundred times to 4 mm. A row at its bound is at its bound whichever solver
+      finds it, so putting the locks and the feet's contacts into the character's own
+      system (lesson 38's open item) wouldn't change this; it isn't what the crouch
+      needs, and it wasn't done.
+    - **The crouch is the pose.** With the toes held (strength × 100) the knees, hips
+      and spine follow their targets within 1-6° at frame 170. The ankles' muscles are
+      at their 450 N·m limit, but on the axis whose sign mirrors left to right (the
+      feet rolling against each other through the pelvis); their pitch is within 0.5°.
+      Held that way the centre of mass stays 15 cm behind the ankles from 168 to 192.
+    - **The take-off is a rotation because the trunk straightens faster than the
+      legs.** From 192 to 216 the knees go from 101° to 39° of flexion, at most 7 rad/s;
+      the trunk against the thighs (hips and the strength-5 spine event together) from
+      92° to -56°, at most 13 rad/s. At 212 the hips are still 34°, the knees 26° and
+      the ankles 23° from their targets, the spine 11-13°. endorphin straightens its
+      knees in 6-8 frames (about 20 rad/s, lesson 33).
+
+    | Reading | In all (error sum) | Back-Flip: lean at 100 / crouch 140-192 / head rise 192-248 / off the box / floor |
+    |---|---|---|
+    | endorphin | | -6 ± 2° / -0.10 ± 0.06 m / +0.65 ± 0.12 m / 212 ± 6 / 276 ± 6 |
+    | as now | 18/36 (54.5) | -9.6° / -0.49 / -1.74 / 213 / 281 |
+    | positive lock strengths × 3 | 17/36 (58.3) | -8.0° / -0.18 / -0.69 / 267 / 310 |
+    | × 9.81 (kilograms-force); × 100 or × 120 the same within 0.1 m and 4 frames | 17/36 (58.4) | -7.9° / -0.18 / -0.63 / 270 / 314, every nudged run |
+    | active poses' damping × 0.5 | 16/36 (58.5) | -10.5° / -0.67 / -1.34 / 199 / 263 |
+    | the same with locks × 3, × 10 or × 100 (× 0.3 and × 0.2 too) | a crouch guard fails (140-168: -0.01 to -0.08 m, endorphin -0.20) | |
+    | damping not scaled by strength; with locks × 100 | 17/36 (59.6); 18/36 (58.6) | -8.4° / -0.31 / -0.93 / 254 / 306; -7.1° / -0.26 / -0.73 / 264 / 314 |
+    | strength as a speed (stiffness × strength²); with locks × 3 | 18/36 (59.7); 19/36 (58.6) | -8.2° / -0.33 / -1.03 / 251 / 307; -7.6° / -0.27 / -0.66 / 268 / 319 |
+    | strength capped at 1, or at 2, with locks × 100 | 17/36 (58.3) | -7.9° / -0.17 / -0.62 to -0.68 / 268-270 / 318 |
+    | active poses' gains × 10, with locks × 3 | 17/36 (59.2) | -6.4° / -0.24 / -0.92 / 253 / 306 |
+    | limb spring cap 60 Hz, or none | 14/34: Car Hit's x at 68 and Stagger Walk's feet at 36 guards fail | -9.6° / -0.38 / -1.48 to -1.53 / 233-234 / 287-288 |
+    | an active pose's muscle at most critically damped on its limb, with locks × 3 | 19/36 (57.8), every nudged run | -7.9° / -0.15 / +0.22 / 280 / 332 |
+    | the same on every muscle | Car Hit and Look and Reach guards fail | |
+
+    - **Why the score doesn't move.** As now, the character falls backwards off the
+      box at 213 and reaches the floor at 281, which happen to match the frames at
+      which endorphin's leaves the box by jumping (212) and lands behind it (276). Any
+      reading that holds the crouch stays on the box longer and loses those two rows
+      (8 in the error sum) while the crouch's rows get far closer: the lean at 100 comes
+      within endorphin's uncertainty, the crouch is 0.08 m too deep by 192 instead of
+      0.39 m, the head 1-2 m closer to endorphin's at 248. Read the rows, not only the
+      sum, until the take-off works.
+    - **Lock strength.** The crouch needs at least three times the toe locks' strength
+      read in newtons, as Car Hit's car needs it to keep up with its carrier (lessons 20
+      and 34); above that no measured row tells the factors apart. Read as
+      kilograms-force (× 9.81) the sample sweep stays 17 of 17 clean, and the locks
+      hold what their names say: Car Crash's "hold car in place" drifts 0.1 cm instead
+      of 33 cm, Car Hit's join 12.5 cm instead of 38, Gymnast Rings' rings 0.9 cm
+      instead of 56; Rotating Floor's dancer ends up 4 cm into its floor (0 before).
+      Not kept: the score doesn't improve, and the same unit for the flip's drive (a
+      negative strength, lesson 13) would spin it further, where endorphin spins less.
+    - **Damping.** Only a faster take-off springs the character up: with half the
+      damping and locks × 10 its centre of mass rises 0.8 m above the crouch (4 m/s at
+      198), but the crouch then comes too early for the 140-168 guard. Capping each
+      active pose's muscle at critical damping for the limb it moves keeps the crouch
+      and springs up (+0.22 m, the centre of mass 0.53 m above the crouch at 236), but
+      it turns about four times by frame 300 where endorphin's turns once, and it lands
+      back on the box. Both are fits, not readings of the files, and neither is in.
+    - **Raising the limb cap** keeps every joint together now (Car Hit 3.3 mm, Stagger
+      Walk 2.3 mm with no cap at all), but Car Hit's pedestrian and Stagger Walk's
+      feet move away from endorphin's. The cap isn't only a limit of the solver: at 30
+      Hz the muscles behave closer to endorphin's than at their presets. endorphin's
+      arms point the same way: its left arm is 7° below the horizontal at frame 96,
+      32° below NeuroMotion's, whose shoulder holds the pose at 5500 N·m/rad (the
+      preset × the event's 0.55); sagging that far under the arm's own 15 N·m or so
+      takes a muscle of 30-60 N·m/rad.
+      Something scales its presets that NeuroMotion doesn't read (perhaps the
+      effectors' `Calibration` blocks, lesson 34: stiffness 10, damping 20, force limit
+      10 and a `timeDelay` of 10 on every effector in this scene). Until that is known,
+      removing the cap isn't progress, so the locks and contacts stay out of the
+      characters' systems.
+    - **Gymnast Rings' lock drift (56 cm since lesson 38) is the scene, not a fault.**
+      Frame by frame, the 43.5 kg ring (held to the world by 500 N on y and z, hung on
+      a 2 m cable that is a character with muscles) swings 0.55 m back over frames
+      300-330 and rises 10 cm, as a ring swinging on its cable, then back; every joint
+      holds (1.5 mm). With stiffer arms the gymnast pulls itself up to a centre of mass
+      3.79 m high (3.42 m before lesson 38) and swings it ±0.5 m from frame 300 to 420,
+      pulling the rings with more than the locks' 500 N. Not compared with endorphin;
+      with locks read in kilograms-force the rings drift 0.9 cm.
+
+    Speed: `reference_scores` takes 4 s (23 s with `NM_NUDGES=2`), the sample sweep 38
+    s on four cores, Back-Flip-To-Combo 1.6 s for its 727 frames (6 s).
 
 ## Status against endorphin's sample scenes
 
