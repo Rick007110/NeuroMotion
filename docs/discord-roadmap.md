@@ -2,7 +2,7 @@
 
 ### ✅ Done
 - Opens **endorphin 2.5** scenes, characters and poses (`.ens`, `.nmc`, `.nma`)
-- Own physics engine at **120 Hz**: all **17 endorphin sample scenes** simulate stably over their **full length**, faster than real time (Bridge Escape too)
+- Own physics engine at **120 Hz**: **16 of the 17 endorphin sample scenes** simulate stably over their **full length**, faster than real time (Bridge Escape's tumbling truck fails about one run in five, being looked at)
 - **Car Hit matches endorphin**: compared frame by frame with endorphin's own run
 - Friction and constraints that behave like endorphin's, smooth transitions back to animation
 - Balance and Stagger on endorphin's friction, now used by NeuroMotion's own projects too
@@ -13,7 +13,7 @@
 - Smooth playback on 60 Hz+ displays: frames are interpolated between physics frames
 - **Same results on Windows, macOS and Linux**, bit for bit
 - **Exact cylinders**: flat caps and a sharp rim, so posts, forearms and logs rest on them as they should
-- **Scored against endorphin**: 36 measurements of endorphin's own runs in 5 scenes, checked by a test on every change
+- **Scored against endorphin**: 68 measurements of endorphin's own runs in 8 scenes, checked by a test on every change
 - Edit the scene's **physics settings** (gravity, rate, materials) in the app, and browse the scene's bodies in a **scene tree**
 - **v0.1.0 beta** with downloads for Windows, macOS and Linux, and our new logo
 
