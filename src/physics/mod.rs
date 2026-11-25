@@ -13,6 +13,8 @@ pub mod behaviour;
 pub mod collide;
 pub mod interp;
 #[cfg(test)]
+mod reference;
+#[cfg(test)]
 mod scenes;
 pub mod sim;
 pub mod world;

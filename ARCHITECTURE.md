@@ -77,6 +77,8 @@ Keep these boundaries: `document`, `timeline` and `physics` must never depend on
   events, and caches the results for the timeline.
 - `scenes.rs` (tests only): small test scenes ("stand-ins") that pin down physical
   behaviour, plus sweeps over endorphin's sample scenes when it is installed.
+- `reference.rs` (tests only): measurements of endorphin's own runs and the test
+  that scores NeuroMotion against them ([docs/reference-measurements.md](docs/reference-measurements.md)).
 
 The design, the numbers behind it, the lessons learned from endorphin's scenes and
 what is still missing are in [docs/physics-design.md](docs/physics-design.md).

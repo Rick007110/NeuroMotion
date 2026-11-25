@@ -64,13 +64,17 @@ NeuroMotion, and we need numbers to prove it.
   171). It doesn't flip yet: where endorphin's springs up off the box, it arches back
   over the edge and lands behind it at 294 (endorphin: about 276, feet first), turning
   too far
-- 🟡 **Reference measurements**: scenes measured in endorphin (frames, positions,
-  angles) and compared with NeuroMotion, so "behaves like endorphin" is checked, not
-  eyeballed. Car Hit is the first: measured from a recording of endorphin's own run
-  with its frame counter, against `dump_scene_motion`'s CSV of ours, which found
-  lessons 20-24. Next: more scenes, and exports of endorphin's results (BVH/FBX)
-  instead of recordings, turned into tests. Anyone with endorphin can help, using the
-  *Reference measurement* issue template
+- ✅ **Reference measurements**: scenes measured in endorphin (frames, positions,
+  angles) and scored against NeuroMotion by a test, `reference_scores`, so "behaves
+  like endorphin" is checked, not eyeballed. 36 measurements in five scenes: Car Hit,
+  Back-Flip-To-Combo, Stagger Walk and the Look and Reach and Explosion behaviour
+  scenes; 15 are within endorphin's uncertainty, 10 of them guarded against
+  regressions, and the known gaps print their error so progress shows
+  ([details](docs/reference-measurements.md)). Every number is still read from
+  recordings of endorphin's runs (frame counter, fitted camera, silhouettes), not from
+  exports of its results (BVH/FBX), which would be far more precise; Tackle, Stagger
+  Walk's steps and turn and the other scenes aren't measured yet. Anyone with
+  endorphin can add rows, using the *Reference measurement* issue template
 - ✅ **Walk With Gun**: since Coulomb friction its hands' join drifted up to 0.15 m and
   a finger sat 2.5 cm in the ground as the character fell with its 549 kg gun. Locks
   now get the last word over contacts in groups nothing pins, and the ground contacts
@@ -234,10 +238,10 @@ Planned once 1.0 is in sight:
 What moves NeuroMotion closest to endorphin quality now, in order:
 
 1. **Compare more scenes with endorphin, by numbers.** The Car Hit comparison found
-   five general differences in one go. Next: recordings with the frame counter, or
-   better exports (BVH/FBX) of endorphin's own results, for a spread of scenes
-   (Tackle, Stagger Walk, a few Behaviour Scenes, Back-Flip-To-Combo), turned into
-   tests that score how close NeuroMotion is.
+   five general differences in one go, and `reference_scores` now scores five scenes
+   (docs/reference-measurements.md). Next: exports (BVH/FBX) of endorphin's own
+   results instead of recordings, and more scenes (Tackle, the other sample and
+   behaviour scenes).
 2. **Back-Flip-To-Combo's jump** ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)): active poses now apply as endorphin's do and
    the character crouches as endorphin's does; what's left is the take-off (frames
    190-220: a strength-5 spine pose and the legs' extension) and how endorphin reads

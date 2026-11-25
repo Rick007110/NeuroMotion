@@ -345,6 +345,13 @@ m in shorter ones; it stops by frame 60 and stands, head 1.54-1.74 m up and pelv
 about five steps; ours takes two or three, low and long, and hasn't been compared
 frame by frame.
 
+`reference_scores` ([reference-measurements.md](reference-measurements.md)) compares
+it with the recording's feet: by frame 36 they have gone back 0.43 m (endorphin 0.46),
+by 96 0.66 m back and 0.11 m along +x (endorphin 0.88 m back, 0.51 m along -x). Its
+standing is on a knife edge: with gravity nudged by up to 4e-4, the top of the neck
+ends 0.02 to 0.51 m lower at frame 108 than at frame 0, so in some runs it sinks or
+falls.
+
 **Not yet.** Settings on the behaviour event (ArmsWindmill, MaxSteps, ArmsSpeed,
 ArmsStrength in Stagger Walk) aren't read, the arms don't windmill, and nothing but
 Stagger Walk's first second has been compared with endorphin. It inherits Balance's
@@ -681,7 +688,7 @@ characters fell with their arms out and landed limp.
 | Centre of mass highest | 1.81 m at frame 68 | 1.49 m at 64 | 1.75 m at 68 | 1.62 m at 65 |
 | Centre of mass x at frames 68 / 78 / 88 | 0.02 / -0.11 / -0.11 m | -0.14 / -0.15 / -0.17 m | 0.03 / 0.05 / 0.06 m | 0.06 / 0.08 / 0.05 m |
 | Upside down | frames 76-88 | about 74 | about 75 | head below the centre of mass 63-83 |
-| First touches the ground | feet first, about frame 96, at -0.3 to -0.44 m | frame 90 (toes), at -0.17 m | feet coming down at 96 (toes' centres 7 cm up), then the hands, at frame 100, at -0.31 m | toes at frame 89, centre of mass at -0.27 m (z) |
+| First touches the ground | feet first, about frame 96, at -0.3 to -0.44 m | frame 90 (toes), at -0.17 m | feet coming down at 96 (toes' centres 7 cm up), then the hands, at frame 100, at -0.31 m | toes at frame 89, centre of mass at x +0.05 m (+0.08 m at frame 96) |
 
 So the flight is higher and longer, as endorphin's is, and lands in the same place.
 Merged with the limb cap and the other engine changes (the last column, and the

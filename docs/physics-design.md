@@ -1045,8 +1045,11 @@ The first behaviour that reads its event's settings, Explosion, taught one more.
     1.81 m at 68); at frames 68 / 78 / 88 x 0.06 / 0.08 / 0.05 m and z -0.18 / -0.22 /
     -0.25 m; upside down (head below the centre of mass) from frame 63 to 83
     (endorphin 76-88); first on the ground feet first at frame 89, centre of mass at x
-    0.05, z -0.27 m (endorphin about 96, -0.3 to -0.44 m). It flies 0.2 m lower than
-    endorphin's and lands about 7 frames early; not yet looked into.
+    0.05, z -0.27 m (endorphin about 96, at x -0.3 to -0.44 m: the recording's
+    positions are along the road, x; at frame 96 ours is at x +0.08 m, 0.42 m ahead of
+    endorphin's). It flies 0.2 m lower than endorphin's and lands about 7 frames early;
+    not yet looked into. `reference_scores` now checks these numbers on every run
+    ([reference-measurements.md](reference-measurements.md)).
 
 ## Status against endorphin's sample scenes
 
@@ -1070,6 +1073,13 @@ set-up (ground, rigs, events, constraint targets and settings).
 
 Each failure also gets a stand-in built in code (`src/physics/scenes.rs`) with the
 same pattern, so it can be worked on without endorphin's files.
+
+Clean is not the same as like endorphin. `reference_scores` simulates the scenes
+endorphin's own runs were measured in (Car Hit, Back-Flip-To-Combo, Stagger Walk and
+the Look and Reach and Explosion behaviour scenes) and scores how close NeuroMotion's
+numbers are; the measurements, the scores and what is still estimated from recordings
+are in [reference-measurements.md](reference-measurements.md). On the build with
+lessons up to 28, 15 of 36 measurements are within endorphin's uncertainty.
 
 Last run, over each scene's whole range, with lessons 1-27 and
 imported behaviours actually running (until the behaviour names were matched,
