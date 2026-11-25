@@ -238,7 +238,8 @@ impl Joint {
         if radius > 1e-6 {
             let dir = s / radius;
             let (y, z) = (l.swing1.max(1e-4), l.swing2.max(1e-4));
-            let boundary = 1.0 / ((dir.x / y).powi(2) + (dir.y / z).powi(2)).sqrt();
+            let (u, v) = (dir.x / y, dir.y / z);
+            let boundary = 1.0 / (u * u + v * v).sqrt();
             if radius > boundary {
                 swing_vec = Vec3::new(0.0, dir.x * boundary, dir.y * boundary);
             }
@@ -1049,11 +1050,8 @@ impl World {
             let dir = s / radius;
             let boundary = |l: &Limits| {
                 let (y, z) = (l.swing1.max(1e-3), l.swing2.max(1e-3));
-                (
-                    1.0 / ((dir.x / y).powi(2) + (dir.y / z).powi(2)).sqrt(),
-                    y,
-                    z,
-                )
+                let (u, v) = (dir.x / y, dir.y / z);
+                (1.0 / (u * u + v * v).sqrt(), y, z)
             };
             let (hard_r, y, z) = boundary(&hard);
             let n = glam::Vec2::new(s.x / (y * y), s.y / (z * z)).normalize_or_zero();

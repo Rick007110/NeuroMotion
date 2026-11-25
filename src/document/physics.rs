@@ -137,7 +137,7 @@ impl Geometry {
     pub fn volume(&self) -> f32 {
         use std::f32::consts::PI;
         match *self {
-            Geometry::Sphere { radius } => 4.0 / 3.0 * PI * radius.powi(3),
+            Geometry::Sphere { radius } => 4.0 / 3.0 * PI * radius * radius * radius,
             Geometry::Capsule { radius, length } => {
                 PI * radius * radius * (length + 4.0 / 3.0 * radius)
             }

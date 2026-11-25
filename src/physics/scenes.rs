@@ -3571,15 +3571,14 @@ mod tests {
 
     /// A fingerprint of everything a simulation produced: every frame's joints, bodies
     /// and level for every character, bit for bit (64-bit FNV-1a).
-    fn fingerprint(project: &Project, sim: &Simulation) -> u64 {
+    fn fingerprint(sim: &Simulation, frames: std::ops::RangeInclusive<i32>) -> u64 {
         let mut hash = 0xcbf2_9ce4_8422_2325u64;
         let mut eat = |bits: u32| {
             for byte in bits.to_le_bytes() {
                 hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
             }
         };
-        let range = project.settings.range;
-        for frame in range.start..=range.end {
+        for frame in frames {
             for c in sim.frame(frame).unwrap().iter().flatten() {
                 eat(c.level as u32);
                 for (q, v) in c.joints.iter().chain(&c.bodies) {
@@ -3615,10 +3614,17 @@ mod tests {
         let mut wrong = Vec::new();
         for (name, project, expected) in scenes {
             let (sim, _) = simulate(&project);
-            let hash = fingerprint(&project, &sim);
+            let range = project.settings.range;
+            let hash = fingerprint(&sim, range.start..=range.end);
             println!("{name}: {hash:#018x}");
             if hash != expected {
                 wrong.push(format!("{name}: {hash:#018x}, expected {expected:#018x}"));
+                // Frame by frame, to compare with a platform that agrees and find
+                // where they part.
+                let frames: Vec<String> = (range.start..=range.end)
+                    .map(|f| format!("{:04x}", fingerprint(&sim, f..=f) & 0xffff))
+                    .collect();
+                println!("{name} by frame: {}", frames.join(" "));
             }
         }
         assert!(wrong.is_empty(), "{}", wrong.join("; "));

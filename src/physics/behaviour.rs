@@ -697,7 +697,7 @@ impl Drive<'_> {
             .length()
             .clamp(0.3 * (thigh_len + shin_len), thigh_len + shin_len);
         let along = reach.normalize_or(Vec3::NEG_Y);
-        let cos = ((thigh_len.powi(2) + span.powi(2) - shin_len.powi(2))
+        let cos = ((thigh_len * thigh_len + span * span - shin_len * shin_len)
             / (2.0 * thigh_len * span))
             .clamp(-1.0, 1.0);
         let (forward, _) = self.facing(upright, i);
@@ -803,7 +803,8 @@ impl Drive<'_> {
         if matches!(phase, Phase::Land) {
             // Landing, no further from the hip than the leg reaches the ground, or the
             // foot hangs in the air short of it.
-            let reach = (length * length - (hip.y - y).powi(2)).max(0.0).sqrt();
+            let below = hip.y - y;
+            let reach = (length * length - below * below).max(0.0).sqrt();
             goal = flat(hip) + (goal - flat(hip)).clamp_length_max(reach);
         }
         let (thigh, shin) = self.bend_leg(i, upright, goal.with_y(y));
