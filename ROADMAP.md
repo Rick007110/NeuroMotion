@@ -85,18 +85,22 @@ NeuroMotion, and we need numbers to prove it.
   are now as stiff as the solver's substep allows, so its feet no longer sink into the
   box and tip it back (lesson 48): crouched 0.17 m behind the heels (0.16), it jumps
   to 3.69 m at 236 (3.745 m at 242), passes the box top at 292 (296) and lands at 328
-  (330). Still short: the take-off pushes in a spike where endorphin's pushes a steady
-  2.9 kN, because its unnamed ankles follow the legs' pose where endorphin's are limp
-  (lesson 49: going limp at the take-off reaches 3.75 m at 238, 296 and 332, but limp
-  through the crouch it falls back while its feet still sink 1-3 mm); its knees bend
-  6.5° less in the crouch (endorphin's hold a quarter of their preset); the trunk is
-  34° short by frame 330 (endorphin's flip gains angular momentum after 290 with
-  nothing touching it); and its combo jumps reach 0.70 m (1.67 m)
+    (330). Its contacts that carry a load are now rigid, solved with the rest of the
+  character, and its knees push at most 400 N·m whatever the pose's strength, as
+  endorphin's (lesson 50): it jumps to 3.74 m at 239 (3.745 m at 242), passes the box
+  top at 294 (296) and lands at 332 (330), all within endorphin's uncertainty, with
+  14 of 21 rows within. Still short: the trunk turns 18° too far by frame 260 and is
+  35° short by 330 (endorphin's flip gains angular momentum after 290 with nothing
+  touching it), so #6 stays open; its knees bend 6.6° less in the crouch (endorphin's
+  hold a quarter of their preset, which here loses the jump); its unnamed ankles still
+  follow the legs' pose where endorphin's are limp (limp, it jumps 3.67 m); the
+  crouch's height guard is near its edge (3.186 m, bound 3.188); and its combo jumps
+  reach 1.10 m (1.67 m)
 - ✅ **Reference measurements**: scenes measured in endorphin (frames, positions,
   angles) and scored against NeuroMotion by a test, `reference_scores`, so "behaves
   like endorphin" is checked, not eyeballed. 71 measurements in eight scenes: Car Hit,
   Back-Flip-To-Combo, Tackle, Stagger Walk, Trapeze, Balcony and the Look and Reach
-  and Explosion behaviour scenes; 29 are within endorphin's uncertainty, 14 of them
+  and Explosion behaviour scenes; 32 are within endorphin's uncertainty, 14 of them
   guarded against regressions, and the known gaps print their error so progress shows
   ([details](docs/reference-measurements.md)). 69 are read from endorphin's own runs
   exported as FBX (every joint at every frame, lesson 40; `tools/fbx_motion.py`
@@ -293,12 +297,11 @@ What moves NeuroMotion closest to endorphin quality now, in order:
    results instead of recordings, and more scenes (Tackle, the other sample and
    behaviour scenes).
 2. **Back-Flip-To-Combo's jump** ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)): it now holds its poses as endorphin's does up to
-   the take-off (lesson 46), its feet stay on the box (lesson 48) and it springs to
-   3.69 m at 236 (3.745 m at 242). Next (lesson 49): contacts rigid enough (in the
-   characters' whole-body solve) that a joint no event names can go limp as
-   endorphin's does, which brings the jump to endorphin's; then the knees at a quarter
-   of their preset with a force limit near 400 N·m, and what turns endorphin's flip
-   after frame 290.
+   the take-off (lesson 46), its planted feet are rigid (lesson 50) and its jump,
+   the frames it passes the box top and lands are within endorphin's uncertainty.
+   Next: what turns endorphin's flip after frame 290 (and 18° less by 260), then the
+   knees at a quarter of their preset and limp unnamed joints without losing the
+   jump (lesson 50).
 3. **The other missing behaviours** in the inventory's order (JumpDive, Jump,
    LandCrouch; Look and Reach and Explosion are done).
 4. **Stepping on endorphin's characters** (Stagger Walk steps and stays up since

@@ -1729,7 +1729,8 @@ Making cylinders exact (#14) taught one more.
     Stagger Walk), the time goes to the solves (20 %), the factor (15 %) and the
     switching (15 %).
 
-    Still open: locks and contacts aren't in a character's system, so the cap can't go
+    Still open: locks and contacts aren't in a character's system (contacts that carry a
+    load are since lesson 50), so the cap can't go
     yet (above; lesson 39 found the cap is not only a limit of the solver); the guess of which stops push is wrong about half the time when a limb
     rests against one, which costs time.
 
@@ -2526,6 +2527,128 @@ Measured joint by joint against Back-Flip-To-Combo's export, the trunk gave one 
     Nothing in the engine changed with this lesson; the numbers above are temporary
     environment switches scored with `reference_scores` (`NM_NUDGES=0`; lesson 48 build:
     29 of 71 within, 140.6).
+
+50. **A character's contacts that carry a load are solved rigidly with the rest of it; a
+    new contact still goes to the contact pass first. With rigid footing a fixed force
+    limit on the knees lifts Back-Flip-To-Combo's jump to endorphin's; limp ankles and
+    quarter-strength knees still don't.** (Number to be assigned at integration.) Lesson
+    48 left a planted foot a spring on its own 1 kg, and lesson 38 left contacts out of
+    the character's own system: the whole-character solve, which has the last word each
+    iteration, pushed the foot back into the box after the contact pass, 1.2 mm at 120
+    Hz.
+
+    Now, with whole-limb muscles and `rigid_contacts` (imported scenes), each contact of
+    a character against the ground or fixed scenery that carries a load (it pushed at
+    the end of the last substep and is within 1 cm) is three rows of the character's
+    system (`world/limb.rs`): a normal that only pushes (or pulls up to its adhesion)
+    and two friction rows, bounded at ±μ times the normal impulse so far (Coulomb; a
+    force cap with that model), switched onto and off their bounds by the block pivoting
+    that already handles the joint stops. A body's contacts join the block of the joint
+    above it (the root body's get a block of their own), so the tree still factors
+    without fill-in; a block holds at most 48 rows, and contacts beyond that stay with
+    the contact pass. Fixed scenery is massless scenery (lesson 11) or keyed scenery
+    standing still. Each row gives by a ten-thousandth of its body's own inverse mass
+    along it: a foot's four corners on a floor repeat each other (four normals on a body
+    its ankle leaves three ways to move), and scenery level with the ground plane gives
+    a body every contact twice. The contact pass leaves those contacts alone.
+
+    What didn't work, and the rules that came of it:
+    - **Every contact rigid.** Lying and landing characters came apart in the sweep:
+      Multi Martial 41 cm, Trapeze 33 cm, Balcony 61 cm, Catch Rope 32 cm with gravity
+      nudged. Traced, a foot or hand landing (or wedged against a ledge, friction
+      pressing it into a second face) took impulses of hundreds of N·s in one pass and
+      flipped sign in the next, and the block pivoting ran out of rounds. A contact that
+      first touches now goes to the contact pass as before and joins the character's
+      system once it carries a load.
+    - **Soft rows in the system** (every contact's spring, solved implicitly with the
+      whole body) at 120, 240 and 480 Hz: Back-Flip-To-Combo's error 45.0, 40.3 and 32.7
+      (28.1 with the 120 Hz contact pass), and Balcony, Multi Martial and Trapeze still
+      came apart at 480 Hz. Rigid it is.
+    - **Material softness.** The contact pass uses it only to scale each correction, so
+      it converges to a rigid contact over the iterations; as a true compliance in the
+      direct solve, fingers sank up to 2.7 cm into the ground (Balcony). It is left out
+      of these rows.
+    - **More rounds.** A hand landing in Catch Rope (gravity × (1 + 1e-4)) ran out of
+      the 24 rounds with its finger contacts held at no impulse while they closed at 7
+      m/s, and the finger joint opened 20 cm. Passes with contacts get two more rounds
+      per contact row (one was enough there, but with the twist limit below left
+      Balcony's wrist 5.6 cm open), and a pass that runs out now solves once more with
+      what its rounds settled on instead of keeping the last round's solution, which was
+      stale.
+
+    Stand-in `rigid_contacts_hold_a_planted_foot_on_top`: the back flip stand-in left
+    standing on its box (keyed, still), toes locked; its deepest foot corner over frames
+    30-200 is 1.18 mm into the box with 120 Hz spring contacts, 0.01 mm rigid.
+
+    With rigid footing, lesson 49's readings again (Back-Flip-To-Combo alone, unnudged;
+    error over its 21 rows, each counted up to 4 uncertainties):
+
+    | Reading | Crouch at 192: height / behind the heels | Knees at 170 | Highest | Past the box / floor | Turned by 260 / 297 / 330 | Error |
+    |---|---|---|---|---|---|---|
+    | endorphin | 3.16 / -0.16 m | 111.8° | 3.745 m at 242 | 296 / 330 | -247 / -523 / -689° | |
+    | 120 Hz spring contacts (before) | 3.18 / -0.17 | 105.2° | 3.69 at 236 | 292 / 328 | -263 / -527 / -655 | 28.1 |
+    | rigid | 3.19 / -0.14 (height guard fails) | 105.2° | 3.75 at 238 | 293 / 330 | -267 / -531 / -660 | 26.3 |
+    | rigid, twist force limit 0.4 of the preset (now) | 3.19 / -0.13 | 105.2° | 3.74 at 239 | 294 / 332 | -264 / -525 / -653 | 26.4 |
+    | rigid, unnamed joints limp (Default preset) | 3.18 / -0.18 | 105.1° | 3.67 at 235 | 292 / 329 | -259 / -517 / -643 | 30.2 |
+    | the same, limit 0.4 | 3.17 / -0.17 | 105.1° | 3.67 at 237 | 295 / 328 | -249 / -498 / -621 | 29.4 |
+    | rigid, twist at a quarter of the preset | 3.16 / -0.20 | 111.7° | 3.61 at 233 | 275 / 324 | -241 / -492 / -624 | 35.6 |
+    | the same, limit 0.4 | 3.15 / -0.20 | 111.7° | 3.57 at 233 | 274 / 323 | -244 / -495 / -628 | 36.1 |
+    | limp, quarter, limit 0.4 | 3.12 / -0.27 (both guards fail) | 111.2° | 3.39 at 227 | 267 / 317 | -241 / -484 / -622 | 44.0 |
+    | limp from 190 only, limit 0.4 | 3.19 / -0.13 | 105.2° | 3.81 at 241 | 300 / 335 | -238 / -483 / -605 | 32.8 |
+
+    - **(b) Limp unnamed joints.** Rigid footing does keep the crouch with limp ankles
+      (0.18 m behind the heels; 0.24 m and the guard failing on 120 Hz contacts, lesson
+      49), as lesson 49 expected, but the jump drops to 3.67 m, where rigid feet with
+      the ankles following the legs' pose reach 3.75 m. Not adopted.
+    - **The knees at a quarter of their preset** bend as endorphin's (111.7°, 111.8°)
+      and keep the crouch, but the jump reaches only 3.57-3.61 m and it falls past the
+      box top 21-22 frames early. Not adopted; the `pose_swing_share` doc comment now
+      says the twist keeps the whole preset here although endorphin's measures at about
+      a quarter.
+    - **(a) A twist force limit that doesn't grow with strength**, 0.4 of the preset
+      (400 N·m on the knees at any strength), is now a project setting,
+      `pose_twist_limit`, 0.4 in imported scenes. Rigid footing alone already brings the
+      jump to endorphin's (3.75 m at 238); with the limit the crouch sits a little lower
+      and the height guard holds (3.1863 m at 192, its bound 3.188; nudged
+      3.1861-3.1863), at the cost of 0.1 in Back-Flip-To-Combo's error.
+      `a_pose_twist_limit_does_not_grow_with_strength`: the bent-over placeholder held
+      by its shins, knees posed to 90° at strength 2.5 from frame 10, bends them 34.5°
+      in four frames with the limit times the strength (2500 N·m) and 8.1° at 0.4 of the
+      preset.
+    - **(c) The turn after frame 290.** One reading tested: that endorphin's drive is a
+      spring towards the orientation half a turn away whose error quaternion is taken
+      the short way round, which would make it drive again once the body has turned a
+      whole turn since the drive began. It doesn't fit: the pelvis turns 343° by frame
+      297 in NeuroMotion's run, and endorphin's push changes sign near frame 291, when
+      its bodies have turned about 285° (lesson 47's -276° at 290). Not explained.
+
+    `reference_scores` (`NM_NUDGES=2`): 29 → 32 of 71 within, the error sum 140.6 →
+    138.5, every guard holding. Back-Flip-To-Combo 28.1 → 26.4 (10 → 14 of 21 within):
+    its jump, the frame of it, its lowest body at the top (3.58 m, endorphin 3.60), the
+    box top (294) and the floor (332) are now within endorphin's uncertainty, and its
+    combo jumps reach 1.10 m (0.70; endorphin 1.67). Tackle 19.2 → 17.6 (lying at z 1.95
+    m at frame 100, 2.05 before, endorphin 1.65). Stagger Walk 11.5 → 12.7: its feet go
+    0.36 m back by frame 36 (0.41; endorphin 0.26) and 0.74 m by 96 (0.65; 1.03), but
+    the top of its neck is 0.29 m lower at 108 than at 0 (0.02; endorphin 0.04). The
+    other scenes don't change.
+
+    The sample sweep is 17 of 17 clean and 51 of 51 with gravity scaled by 1 ± 1e-4.
+    Largest stretch, before → after (cm): Arrows 0.44 → 0.70, Balcony 0.61 → 0.58, Catch
+    Rope 0.67 → 0.70, Trapeze 0.54 → 0.57, the others within 0.01; lowest body: Bridge
+    Escape 0.18 → 0.80 m, Catch Rope 0.017 → 0.050 m, Heli Leap's (no ground) 0.00 →
+    -0.20 m (nothing under or inside scenery more than before; not looked into further),
+    Multi Martial -0.013 → 0.008 m. The sweep (three runs a scene) takes 105 → 123 s
+    on four cores, run back to back: the passes with contacts need more rounds.
+
+    NeuroMotion's own projects use neither setting and no whole-character solve:
+    `simulations_are_bit_identical_everywhere` and every stand-in on them are unchanged.
+
+    Still open: the knees bend 6.6° less in the crouch than endorphin's, which stiff
+    knees with a fixed limit keep; the take-off's hips stay 19° bent (endorphin 4°) and
+    the arms 9° short of overhead; the trunk is 35° short by frame 330 (the turn after
+    290 above); the combo jumps reach 1.10 m of endorphin's 1.67. The block pivoting is
+    still the weak point with many contacts: a lying character with a few dozen contact
+    rows needs 20-50 rounds a pass.
 
 ## Status against endorphin's sample scenes
 

@@ -406,7 +406,7 @@ pub const SCENES: &[Scene] = &[
                 -2.3,
                 1.0,
                 false,
-                -1.4,
+                -1.3,
             ),
             fbx(
                 "lean back about the heels since frame 0, frame 72",
@@ -415,7 +415,7 @@ pub const SCENES: &[Scene] = &[
                 -5.3,
                 1.0,
                 true,
-                -5.1,
+                -4.8,
             ),
             fbx(
                 "lean back about the heels since frame 0, frame 100",
@@ -424,7 +424,7 @@ pub const SCENES: &[Scene] = &[
                 -6.4,
                 1.0,
                 false,
-                -6.5,
+                -6.1,
             ),
             fbx(
                 "left arm (shoulder to hand) above horizontal, frame 96",
@@ -442,7 +442,7 @@ pub const SCENES: &[Scene] = &[
                 3.159,
                 0.03,
                 false,
-                3.19,
+                3.20,
             ),
             fbx(
                 "crouched: centre of mass height, frame 192",
@@ -451,7 +451,7 @@ pub const SCENES: &[Scene] = &[
                 3.158,
                 0.03,
                 true,
-                3.18,
+                3.19,
             ),
             fbx(
                 "crouched: centre of mass z (behind the heels < -0.03), frame 192",
@@ -460,7 +460,7 @@ pub const SCENES: &[Scene] = &[
                 -0.164,
                 0.05,
                 true,
-                -0.17,
+                -0.13,
             ),
             fbx(
                 "crouched: knee bend, frame 170",
@@ -478,7 +478,7 @@ pub const SCENES: &[Scene] = &[
                 90.3,
                 4.0,
                 true,
-                92.1,
+                92.7,
             ),
             fbx(
                 "crouched: spine bend (pelvis, chest, head), frame 185",
@@ -487,7 +487,7 @@ pub const SCENES: &[Scene] = &[
                 48.2,
                 4.0,
                 true,
-                45.8,
+                46.2,
             ),
             fbx(
                 "take-off: hips straightest",
@@ -496,7 +496,7 @@ pub const SCENES: &[Scene] = &[
                 3.9,
                 4.0,
                 false,
-                18.9,
+                19.1,
             ),
             fbx(
                 "take-off: arms overhead (shoulder bend least)",
@@ -505,7 +505,7 @@ pub const SCENES: &[Scene] = &[
                 60.6,
                 4.0,
                 false,
-                70.4,
+                69.4,
             ),
             fbx(
                 "jump: centre of mass highest",
@@ -514,7 +514,7 @@ pub const SCENES: &[Scene] = &[
                 3.745,
                 0.05,
                 false,
-                3.69,
+                3.74,
             ),
             fbx(
                 "jump: frame it is highest",
@@ -523,7 +523,7 @@ pub const SCENES: &[Scene] = &[
                 242.0,
                 3.0,
                 false,
-                236.0,
+                239.0,
             ),
             fbx(
                 "jump: lowest body centre highest (box top 2.52 m)",
@@ -532,7 +532,7 @@ pub const SCENES: &[Scene] = &[
                 3.602,
                 0.05,
                 false,
-                3.54,
+                3.58,
             ),
             fbx(
                 "falls past the box top (a body centre 10 cm under it)",
@@ -545,7 +545,7 @@ pub const SCENES: &[Scene] = &[
                 296.0,
                 3.0,
                 false,
-                292.0,
+                294.0,
             ),
             fbx(
                 "first on the floor (a body centre under 15 cm)",
@@ -558,7 +558,7 @@ pub const SCENES: &[Scene] = &[
                 330.0,
                 3.0,
                 false,
-                328.0,
+                332.0,
             ),
             fbx(
                 "flip: trunk (pelvis to head) turned since frame 190, frame 260",
@@ -567,7 +567,7 @@ pub const SCENES: &[Scene] = &[
                 -246.7,
                 10.0,
                 false,
-                -263.4,
+                -264.2,
             ),
             fbx(
                 "flip: trunk (pelvis to head) turned since frame 190, frame 297",
@@ -576,7 +576,7 @@ pub const SCENES: &[Scene] = &[
                 -522.8,
                 10.0,
                 false,
-                -527.0,
+                -524.9,
             ),
             fbx(
                 "flip: trunk (pelvis to head) turned since frame 190, frame 330",
@@ -585,7 +585,7 @@ pub const SCENES: &[Scene] = &[
                 -688.5,
                 10.0,
                 false,
-                -654.9,
+                -653.2,
             ),
             fbx(
                 "combo: centre of mass highest, frames 500-620",
@@ -594,7 +594,7 @@ pub const SCENES: &[Scene] = &[
                 1.667,
                 0.1,
                 false,
-                0.70,
+                1.10,
             ),
         ],
     },
@@ -609,7 +609,7 @@ pub const SCENES: &[Scene] = &[
                 0.698,
                 0.03,
                 false,
-                0.84,
+                0.83,
             ),
             fbx(
                 "hit: centre of mass height, frame 65",
@@ -618,7 +618,7 @@ pub const SCENES: &[Scene] = &[
                 0.430,
                 0.05,
                 false,
-                0.61,
+                0.59,
             ),
             fbx(
                 "hit: head over the centre of mass, frame 60",
@@ -627,7 +627,7 @@ pub const SCENES: &[Scene] = &[
                 0.464,
                 0.05,
                 false,
-                0.70,
+                0.69,
             ),
             fbx(
                 "down: centre of mass lowest, frames 60-100",
@@ -636,7 +636,7 @@ pub const SCENES: &[Scene] = &[
                 0.219,
                 0.03,
                 false,
-                0.25,
+                0.24,
             ),
             fbx(
                 "down: frame it is lowest",
@@ -645,7 +645,7 @@ pub const SCENES: &[Scene] = &[
                 76.0,
                 3.0,
                 false,
-                77.0,
+                76.0,
             ),
             fbx(
                 "down: head under the centre of mass from",
@@ -676,7 +676,7 @@ pub const SCENES: &[Scene] = &[
                 0.785,
                 0.1,
                 false,
-                0.79,
+                0.74,
             ),
             fbx(
                 "lying: centre of mass z, frame 100",
@@ -685,7 +685,7 @@ pub const SCENES: &[Scene] = &[
                 1.650,
                 0.1,
                 false,
-                2.05,
+                1.95,
             ),
         ],
     },
@@ -814,7 +814,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -0.264,
                 uncertainty: 0.05,
                 guard: false,
-                baseline: -0.41,
+                baseline: -0.36,
                 source: FBX,
             },
             Row {
@@ -824,7 +824,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -1.026,
                 uncertainty: 0.1,
                 guard: false,
-                baseline: -0.65,
+                baseline: -0.74,
                 source: FBX,
             },
             Row {
@@ -834,7 +834,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -0.577,
                 uncertainty: 0.1,
                 guard: false,
-                baseline: 0.07,
+                baseline: 0.02,
                 source: FBX,
             },
             Row {
@@ -844,7 +844,7 @@ pub const SCENES: &[Scene] = &[
                 endorphin: -0.042,
                 uncertainty: 0.03,
                 guard: false,
-                baseline: -0.02,
+                baseline: -0.29,
                 source: FBX,
             },
         ],
