@@ -5018,26 +5018,87 @@ mod settings_tests {
 
     #[test]
     fn edited_gravity_sets_how_fast_it_falls() {
-        let project = dropped_box(5.0);
+        // Released 10 m up: at 9.81 m/s² a box released 5 m up was already on the
+        // ground (centre 0.25 m up) by frame 59, so it seemed to fall 4.72 m (lesson 32).
+        let project = dropped_box(10.0);
         // After one second of free fall from rest: g / 2 metres.
         let drop_after_one_second = |g: f32| {
             let moon = edited(&project, |p| p.gravity = [0.0, -g, 0.0]);
             let (sim, _) = simulate(&moon);
-            5.0 - box_at(&sim, 60).y
+            10.0 - box_at(&sim, 60).y
         };
         let earth = drop_after_one_second(9.81);
         let moon = drop_after_one_second(1.62);
-        eprintln!("one second of fall: {earth:.3} m at 9.81, {moon:.3} m at 1.62");
-        // Free fall is g / 2: 4.905 and 0.81 m. The engine measures 4.72 and 0.81 (a
-        // little damping on fast bodies), so the bounds are about the trend, not the digit.
-        assert!((4.5..5.0).contains(&earth), "{earth}");
-        assert!((0.75..0.87).contains(&moon), "{moon}");
+        eprintln!("one second of fall: {earth:.4} m at 9.81, {moon:.4} m at 1.62");
+        // Free fall is g / 2: 4.905 and 0.81 m. Semi-implicit Euler at 480 substeps a
+        // second adds g·h·t / 2: 4.9152 and 0.8117 m.
+        assert!((earth - 4.905).abs() < 0.015, "{earth}");
+        assert!((moon - 0.81).abs() < 0.005, "{moon}");
         assert!(earth > 5.0 * moon, "{earth} vs {moon}");
         // Sideways gravity too.
         let sideways = edited(&project, |p| p.gravity = [3.0, 0.0, 0.0]);
         let (sim, _) = simulate(&sideways);
         let p = box_at(&sim, 60);
-        assert!((p.x - 1.5).abs() < 0.05 && (p.y - 5.0).abs() < 1e-3, "{p}");
+        assert!((p.x - 1.5).abs() < 0.01 && (p.y - 10.0).abs() < 1e-3, "{p}");
+    }
+
+    /// Stand-in for lesson 32: a free body falls g·t²/2 and a thrown one follows the
+    /// parabola, with nothing taking energy from it at speed. Free fall has no knife
+    /// edge (nothing in it is chaotic), so the bounds are the integrator's own error.
+    #[test]
+    fn a_free_body_follows_the_parabola() {
+        let g = 9.81;
+        // Semi-implicit Euler: n substeps of h after a start at rest fall g·h²·n(n+1)/2,
+        // which is g·t²/2 plus g·h·t/2 (1.0 cm after a second at 480 substeps a second).
+        let h = 1.0 / 480.0;
+        let euler = |t: f32| {
+            let n = (t / h).round();
+            g * h * h * n * (n + 1.0) / 2.0
+        };
+        let project = dropped_box(10.0);
+        let (sim, _) = simulate(&project);
+        let fallen = 10.0 - box_at(&sim, 60).y;
+        let start = Vec3::new(0.0, 10.0, 0.0);
+        let thrown = {
+            let mut p = project.clone();
+            let id = p.characters[0].id;
+            push(
+                &mut p,
+                id,
+                0,
+                "box.MetaBodies.body",
+                Vec3::new(3.0, 4.0, -2.0),
+            );
+            p
+        };
+        let (flight, _) = simulate(&thrown);
+        let mut worst = 0.0f32;
+        for frame in [10, 30, 60, 90] {
+            let t = frame as f32 / 60.0;
+            let p = box_at(&flight, frame);
+            let parabola = start + Vec3::new(3.0, 4.0, -2.0) * t - Vec3::Y * (g * t * t / 2.0);
+            let off = (p - parabola).length();
+            eprintln!(
+                "thrown, frame {frame}: {p} against {parabola}, {off:.4} m off ({:.4} m \
+                 for the integrator)",
+                (p.y - (start.y + 4.0 * t - euler(t))).abs()
+            );
+            assert!(off < 0.02, "frame {frame}: {p} against {parabola}");
+            // Nothing velocity-dependent: the integrator's own error, to 1 mm.
+            assert!(
+                (p.y - (start.y + 4.0 * t - euler(t))).abs() < 1e-3,
+                "frame {frame}: {p}"
+            );
+            assert!((p.x - 3.0 * t).abs() < 1e-3 && (p.z + 2.0 * t).abs() < 1e-3);
+            worst = worst.max(off);
+        }
+        eprintln!(
+            "free fall in one second: {fallen:.4} m (g/2 4.905, the integrator {:.4}); \
+             thrown, at most {worst:.4} m off the parabola",
+            euler(1.0)
+        );
+        assert!((fallen - euler(1.0)).abs() < 1e-3, "fell {fallen} m");
+        assert!((fallen - 4.905).abs() < 0.015, "fell {fallen} m");
     }
 
     #[test]

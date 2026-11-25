@@ -52,6 +52,10 @@ NeuroMotion, and we need numbers to prove it.
   now pulls with its full strength, and imported friction is Coulomb, μ = friction
   / 100 (lessons 20 and 21). NeuroMotion's own projects use it too now; projects
   saved before keep force-capped friction
+- 🟡 Free fall and thrown bodies follow g·t²/2 to the integrator's 1 cm a second;
+  nothing damps a fast body (lesson 32). Car Hit's pedestrian, merged with the other
+  changes, flies 1.62 m high where endorphin's reaches 1.81 m: that comes from
+  reading endorphin's swing limits the way lesson 27 does, and why is still open
 - ✅ A force pushes the bodies it names, a massless body never moves, and a
   transition ends exactly on the animation (lessons 22-24); scenes run as long as
   endorphin runs them, and the sweep checks each scene's whole range

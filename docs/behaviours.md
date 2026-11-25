@@ -695,7 +695,11 @@ characters fell with their arms out and landed limp.
 So the flight is higher and longer, as endorphin's is, and lands in the same place.
 Merged with the limb cap and the other engine changes (the last column, and the
 arms' damping counting the whole arm, lesson 28) it flies 0.2 m lower than
-endorphin's and comes down about 7 frames early; not yet looked into.
+endorphin's and comes down about 7 frames early. It isn't gravity (free fall is
+right, docs/physics-design.md lesson 32): it is the swing sizes read the way lesson 27
+reads them. Read the old way round it flies 1.80 m high at frame 69 and drifts back as
+endorphin's does, but lands on a hand at 99; why it flies lower with the reading that
+fits endorphin's stored poses is still open.
 NeuroMotion already turned the pedestrian over head first before (the trunk turned
 360°, with the car and "Guide character to roll"); it still turns over a few frames
 early, and drifts slightly forward (+0.06 m) where endorphin's drifts back (-0.11 m).

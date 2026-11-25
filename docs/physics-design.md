@@ -1051,7 +1051,8 @@ The first behaviour that reads its event's settings, Explosion, taught one more.
     -0.25 m; upside down (head below the centre of mass) from frame 63 to 83
     (endorphin 76-88); first on the ground feet first at frame 89, centre of mass at x
     0.05, z -0.27 m (endorphin about 96, -0.3 to -0.44 m). It flies 0.2 m lower than
-    endorphin's and lands about 7 frames early; not yet looked into.
+    endorphin's and lands about 7 frames early: lesson 32 finds which change did
+    it.
 
 29. **What a direct solve carried mustn't warm-start sequential impulses, and a
     character a keyed body runs into is solved after the contacts.** On CI (Linux) PR
@@ -1192,6 +1193,55 @@ The first behaviour that reads its event's settings, Explosion, taught one more.
     0.1 s left up to 9.3 cm/s, 0.3 s up to 16; 0.02 s gave 3.1. Car Hit's and Stagger's
     hashes don't change; in the endorphin sweep, 16 of 16 clean, only Multi Martial
     moves (worst joint 0.94 to 0.81 cm).
+
+32. **Before blaming the integrator, check the body hasn't landed.** The physics
+    settings' test seemed to show energy lost at speed: a box released 5 m up fell 4.72 m in one second at 9.81 m/s² (g/2 is
+    4.905 m) but 0.812 m at 1.62 m/s² (0.81 m). There is no damping, drag or speed
+    clamp on a free body's linear velocity in the engine (`World::substep` adds
+    gravity and integrates; only the angular speed has a cap). The box had landed: its
+    centre, 0.25 m above its underside, reached the ground at frame 59 (4.75 m down)
+    and rebounded at restitution 0.2 to 0.280 m by frame 60. Released 10 m up, it
+    falls 4.9152 m in the second, which is exactly semi-implicit Euler's
+    g·h²·n(n+1)/2 for n = 480 substeps of h = 1/480 s: g·t²/2 plus g·h·t/2, 1.0 cm too
+    far after one second (1.5 cm after 1.5 s). A body thrown at (3, 4, -2) m/s
+    follows the parabola to 1 mm of that formula, sideways to 0.05 mm
+    (`a_free_body_follows_the_parabola`). So nothing was fixed in the engine and no
+    scene moved; the test now drops the box from 10 m and checks 4.905 m ± 1.5 cm
+    (the integrator's own 1.0 cm, not a ± 1 cm the scheme can't meet) and 0.81 m ±
+    5 mm. endorphin's measurements don't call for damping either: none of the research
+    in docs/endorphin-physics.md points to air drag, and Car Hit's pedestrian flies
+    higher in endorphin's run than here, not lower.
+
+    Car Hit's lower flight (lesson 28) came instead from one of the three parts of
+    lesson 27 (active poses as endorphin applies them). `dump_scene_motion` of Car Hit
+    at each step, pedestrian's centre of mass highest / first within 2 cm of the
+    ground after it:
+
+    | Build | Highest | First down |
+    |---|---|---|
+    | Explosion branch alone | 1.745 m at 68 | 97, a shin |
+    | it merged with lessons 25 (locks) or 25-26 (Coulomb) | identical, bit for bit | |
+    | it merged with lessons 25-27 | 1.625 m at 65 | 88, toes |
+    | the merge with look-and-reach, scene panels (the integrated merge) | identical to the line above | |
+    | lessons 25-27, without the limb cap | 1.636 m at 65 | 92, toes |
+    | lessons 25-27, unnamed joints not following their limb | identical to 25-27 | |
+    | lessons 25-27, swing sizes read the old way round | 1.802 m at 69 | 99, a forearm |
+    | ... old way for the legs' joints only (hips, ankles, mid-feet, toes) | 1.719 m at 67 | 90, toes |
+    | ... old way for the arms' only (clavicles, shoulders, wrists) | 1.696 m at 67 | 89, toes |
+    | ... old way for spine and neck only | 1.625 m at 65 | 89, toes |
+    | the integrated build (Explosion's arms damped whole) | 1.616 m at 65 | 89, toes |
+    | endorphin | 1.81 m at 68 | about 96, feet first |
+
+    The swing reading swaps the two swing sizes of the joints whose cones aren't
+    round (hips, ankles, mid-feet, toes, clavicles, shoulders, wrists, spine, neck),
+    and the legs' and arms' changes add up (the flight depends on how the limbs fold
+    against the bonnet as the car throws the character). Read the old way, the flight is endorphin's height and the centre of
+    mass drifts back as endorphin's does (x -0.02 / -0.05 / -0.07 m at frames
+    68 / 78 / 88; endorphin 0.02 / -0.11 / -0.11), but a hand lands first at 99, where
+    endorphin's feet do at about 96. The reading lesson 27 chose is the one that puts
+    endorphin's own stored poses inside their cones, so it stays; why Car Hit's
+    flight comes out lower with it (a limit frame read with the wrong axes, say, which
+    the swapped sizes would partly hide) is still open.
 
 ## Status against endorphin's sample scenes
 
