@@ -223,7 +223,7 @@ impl Viewport {
         if response.hovered() {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll != 0.0 {
-                self.camera.zoom((-scroll * 0.0015).exp());
+                self.camera.zoom(libm::expf(-scroll * 0.0015));
             }
         }
         if response.double_clicked() {

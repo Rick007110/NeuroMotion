@@ -106,13 +106,14 @@ Some tests are `#[ignore]`d because they need something not in the repository:
 
 | Test | Needs | Run with |
 |---|---|---|
-| `imports_every_bundled_file`, `sample_scenes_simulate_stably` | a local endorphin 2.5.2 install (`ENDORPHIN_DIR` if not in the default location) | `cargo test --release -- --ignored` |
+| `imports_every_bundled_file`, `sample_scenes_simulate_stably` | a local endorphin 2.5.2 install (`ENDORPHIN_DIR` if not in the default location); `NM_SCENES=Car,Rope` sweeps only scenes whose names contain one of those | `cargo test --release -- --ignored` |
 | `behaviour_inventory` | a local endorphin 2.5.2 install (`ENDORPHIN_DIR`); prints which behaviours and event types the scenes use, with their settings ([docs/behaviour-inventory.md](docs/behaviour-inventory.md)) | `cargo test --release behaviour_inventory -- --ignored --nocapture` |
 | `export_samples` | Blender, to check the written files | see [docs/export.md](docs/export.md#checking-exports-in-blender) |
 | `trace_stand_in` | nothing; prints a frame-by-frame trace of a physics test scene or an `.ens` file | `NM_TRACE=<name or path> cargo test --release trace_stand_in -- --ignored --nocapture` |
 | `push_sweep` | nothing; prints which chest pushes (1-3 m/s, four ways) a behaviour survives | `NM_SWEEP=<behaviour> cargo test --release push_sweep -- --ignored --nocapture` |
 | `dump_scene_motion` | nothing (an `.ens` scene needs its files); simulates a stand-in or a scene and writes its motion as CSV for comparing with a reference such as endorphin's own run: per frame, every body's and every skeleton joint's world position and rotation with the simulation level (`bodies.csv`, `joints.csv`), plus each body's frame on its joint (`rig.csv`) and its collision shapes (`shapes.csv`) | `NM_DUMP=<name or .ens path> cargo test --release dump_scene_motion -- --ignored --nocapture` (`NM_SECONDS` to run longer or shorter than the scene's range, `NM_DUMP_OUT` for the folder, default `target/dump/<scene>`) |
-| `nudge_survey` | nothing; prints how far the numbers the stepping and Car carry tests assert on move when the scenes' speeds are nudged by about 1e-4, as another platform's rounding might | `cargo test --release nudge_survey -- --ignored --nocapture` (`NM_SURVEY=car\|balance\|stagger`, `NM_NUDGES`, `NM_NUDGE_STEP`) |
+| `reference_scores` | a local endorphin 2.5.2 install (`ENDORPHIN_DIR`), and for your own scenes that rows refer to (Back-Flip-To-Combo) a folder of them in `NM_REFERENCE_SCENES`; simulates the scenes endorphin was measured in and prints, per measurement, endorphin's value, NeuroMotion's, the error, whether it is within the measurement's uncertainty and a score per scene; fails only if a *guard* (a measurement NeuroMotion already matches) falls outside. The measurements are in `src/physics/reference.rs`; how to add one from a *Reference measurement* issue: [docs/reference-measurements.md](docs/reference-measurements.md) | `cargo test --release reference_scores -- --ignored --nocapture` (`NM_SCENES`, `NM_NUDGES=2` to check guards over nudged runs) |
+| `nudge_survey` | nothing; prints how far the numbers the stepping, Car carry, Car Hit and Explosion tests assert on move when the scenes' speeds (or drop height) are nudged by about 1e-4 | `cargo test --release nudge_survey -- --ignored --nocapture` (`NM_SURVEY=car\|car_hit\|explosion\|balance\|stagger`, `NM_NUDGES`, `NM_NUDGE_STEP`) |
 
 If you change the physics and have endorphin, please run the ignored tests and say in
 your pull request what changed.
@@ -152,10 +153,13 @@ the solver.
 - Keep the module boundaries in [ARCHITECTURE.md](ARCHITECTURE.md): `document` and
   `physics` never depend on `ui`.
 - Comment *why*, not *what*. Units go in names or comments (N, N·m, kg, radians, frames).
-- Simulation must stay deterministic: the same project gives the same result on every
-  run of the same build on the same machine. No randomness, no wall-clock time in the
-  physics, no iteration over hash maps where order matters. Other platforms can differ
-  in the last bits (their maths libraries round differently), and a chaotic moment
-  can make that a visibly different outcome, so a test mustn't depend on one exact
-  number near a limit (see `nudge_survey` below).
+- Simulation must stay deterministic: the same project gives the same result, bit for
+  bit, on every run and on Linux, Windows and macOS. No randomness, no wall-clock time
+  in the physics, no iteration over hash maps where order matters. Use the `libm`
+  crate for `sin`, `cos`, `atan2`, `exp`, `powf` and the like (`libm::sinf(x)`, not
+  `x.sin()`; clippy refuses the std ones): the platforms' own maths libraries round
+  differently in the last bit, and a chaotic moment makes that a visibly different
+  outcome. `simulations_are_bit_identical_everywhere` checks this on CI. A change to
+  the physics still moves chaotic numbers, so a test mustn't depend on one exact
+  number near a limit (see `nudge_survey` above).
 - Text the user sees is plain, short English, in NeuroMotion's own words.

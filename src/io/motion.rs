@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use glam::{EulerRot, Quat, Vec3};
 
 use crate::document::{Project, SkeletonRef, euler_near, local_transforms, world_transforms};
-use crate::physics::Simulation;
+use crate::physics::{Simulation, interp};
 
 /// One character's motion over the project range.
 pub struct Motion {
@@ -72,19 +72,37 @@ pub fn finish(simulation: &mut Simulation, project: &Project, revision: u64) {
 /// complete for the project as it is now (see [`simulate`]); pass `None` to export the
 /// animation.
 pub fn sample(project: &Project, character: usize, simulation: Option<&Simulation>) -> Motion {
+    sample_at_rate(project, character, simulation, 1)
+}
+
+/// Like [`sample`], but writing `rate` frames per project frame (2 turns a 30 fps scene
+/// into 60 fps). The extra frames are interpolated between the cached simulation frames
+/// (positions lerp, rotations slerp; see `physics::interp`) or, for keys, evaluated at
+/// the fractional frame, so exactly the motion the viewport plays. Every `rate`-th
+/// frame is the project's own frame, unchanged. `Motion::start` is in output frames.
+pub fn sample_at_rate(
+    project: &Project,
+    character: usize,
+    simulation: Option<&Simulation>,
+    rate: u32,
+) -> Motion {
+    let rate = rate.max(1);
     let range = project.settings.range;
     let skeleton = &project.characters[character].skeleton;
     let mut simulated = false;
-    let frames = (range.start..=range.end)
-        .map(|frame| {
+    let count = (range.end - range.start).max(0) * rate as i32 + 1;
+    let frames = (0..count)
+        .map(|i| {
+            // Exact for whole frames, so the project's own frames aren't touched.
+            let frame = range.start as f64 + i as f64 / rate as f64;
             let state = simulation
-                .and_then(|s| s.frame(frame))
-                .and_then(|f| f.get(character))
-                .and_then(Option::as_ref);
+                .and_then(|s| interp::frame_at(s, frame))
+                .and_then(|mut f| (character < f.len()).then(|| f.swap_remove(character)))
+                .flatten();
             match state {
                 Some(state) if state.joints.len() == skeleton.joints.len() => {
                     simulated = true;
-                    state.joints.clone()
+                    state.joints
                 }
                 _ => {
                     let pose = project.evaluate(frame as f32).swap_remove(character);
@@ -94,8 +112,8 @@ pub fn sample(project: &Project, character: usize, simulation: Option<&Simulatio
         })
         .collect();
     Motion {
-        fps: project.settings.fps,
-        start: range.start,
+        fps: project.settings.fps * rate as f32,
+        start: range.start * rate as i32,
         frames,
         simulated,
     }
@@ -133,6 +151,12 @@ pub fn joint_curves(skeleton: &SkeletonRef, motion: &Motion) -> Vec<JointCurves>
         .iter()
         .map(|world| local_transforms(skeleton, world))
         .collect();
+    // Where each joint lands per frame as exported. Leaving out one joint's stretch moves
+    // every joint below it, so a joint keeps its translation when leaving it out would
+    // put the joint itself more than the tolerance from where it is: a hip, knee and
+    // ankle each stretched by under 1 mm put the ankle 1.1 mm out when only each
+    // joint's own offset counted.
+    let mut placed: Vec<Vec<Vec3>> = Vec::with_capacity(skeleton.joints.len());
     skeleton
         .joints
         .iter()
@@ -150,14 +174,29 @@ pub fn joint_curves(skeleton: &SkeletonRef, motion: &Motion) -> Vec<JointCurves>
                 .collect();
             let positions: Vec<Vec3> = locals.iter().map(|l| l[i].1).collect();
             let offset = Vec3::from(joint.offset);
-            let is_root = joint.parent.filter(|&p| p < i).is_none();
-            let moves = positions
-                .iter()
-                .any(|p| p.distance(offset) > TRANSLATION_TOLERANCE);
+            let parent = joint.parent.filter(|&p| p < i);
+            let moves = parent.is_none_or(|p| {
+                motion.frames.iter().enumerate().any(|(f, world)| {
+                    let at = placed[p][f] + world[p].0 * offset;
+                    positions[f].distance(offset) > TRANSLATION_TOLERANCE
+                        || at.distance(world[i].1) > TRANSLATION_TOLERANCE
+                })
+            });
+            placed.push(
+                motion
+                    .frames
+                    .iter()
+                    .enumerate()
+                    .map(|(f, world)| match parent {
+                        Some(p) if !moves => placed[p][f] + world[p].0 * offset,
+                        _ => world[i].1,
+                    })
+                    .collect(),
+            );
             JointCurves {
                 order,
                 rotation,
-                translation: (is_root || moves).then_some(positions),
+                translation: moves.then_some(positions),
             }
         })
         .collect()
@@ -331,6 +370,38 @@ mod samples {
                 )
                 .unwrap();
                 println!("wrote {}", file("").display());
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod rate_tests {
+    use super::*;
+    use crate::document::sample::{physics_demo_project, placeholder_project};
+
+    #[test]
+    fn doubled_rate_keeps_the_project_frames_and_fills_between() {
+        for project in [physics_demo_project(), placeholder_project()] {
+            let sim = simulate(&project);
+            let one = sample(&project, 0, sim.as_ref());
+            let two = sample_at_rate(&project, 0, sim.as_ref(), 2);
+            assert_eq!(two.fps, one.fps * 2.0);
+            assert_eq!(two.start, one.start * 2);
+            assert_eq!(two.frames.len(), (one.frames.len() - 1) * 2 + 1);
+            assert_eq!(two.simulated, one.simulated);
+            for (i, frame) in one.frames.iter().enumerate() {
+                assert_eq!(
+                    &two.frames[i * 2],
+                    frame,
+                    "project frame {i} must not change"
+                );
+            }
+            // An in-between frame sits between its neighbours' positions.
+            let (a, b, m) = (&one.frames[5], &one.frames[6], &two.frames[11]);
+            for j in 0..m.len() {
+                let (lo, hi) = (a[j].1.min(b[j].1), a[j].1.max(b[j].1));
+                assert!(m[j].1.cmpge(lo - 1e-4).all() && m[j].1.cmple(hi + 1e-4).all());
             }
         }
     }

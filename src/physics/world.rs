@@ -13,7 +13,10 @@ use std::collections::HashMap;
 use glam::{Mat3, Quat, Vec3};
 
 use super::collide::{self, Placed};
-use crate::document::physics::{ContactModel, Gains, Geometry, Interaction, Limits};
+
+mod limb;
+use crate::document::physics::{ContactModel, Gains, Geometry, Interaction, Limits, SpringCap};
+use limb::Articulation;
 
 pub const SUBSTEPS: usize = 4;
 const ITERATIONS: usize = 4;
@@ -38,11 +41,28 @@ const RESTITUTION_THRESHOLD: f32 = 0.5;
 /// foot's ankle muscle moves the whole body above it, not the foot.
 const MAX_SPRING_HERTZ: f32 = 30.0;
 
-/// Scales stiffness and damping down together so the spring's natural frequency on an
-/// effective inverse mass `inv_mass` stays under `MAX_SPRING_HERTZ`.
-fn cap_spring(stiffness: f32, damping: f32, inv_mass: f32) -> (f32, f32) {
-    let omega = 2.0 * std::f32::consts::PI * MAX_SPRING_HERTZ;
-    let max_stiffness = omega * omega / inv_mass.max(1e-12);
+/// With `SpringCap::Limbs`, a muscle may also be as stiff as this natural frequency on the
+/// whole limb it moves against the rest of the body, if that allows more: a clavicle
+/// holding an arm out, a knee in a crouch holding the body above it. Such characters are
+/// solved whole (`limb::Articulation`, lesson 38), so the muscle does move the whole limb.
+/// Solved by sequential impulses, which see only a joint's two bodies, the cap had to stay
+/// at 5 Hz: at 30 Hz Car Hit's pedestrian, curled up on the bonnet, opened a knee by
+/// 6.2 cm, and Multi Martial's fingers came 6-28 cm out of their joints. Solved whole,
+/// 30 Hz keeps every sample scene's joints within a centimetre or so; with no cap at all
+/// light bodies the solve leaves to locks and contacts (a gymnast's hands on the rings, a
+/// sword in a hand) come apart, because those are still solved after it, one by one.
+const MAX_LIMB_HERTZ: f32 = 30.0;
+
+/// Stiffest spring (N·m/rad) with a natural frequency of `hertz` on an effective inverse
+/// mass `inv_mass`.
+fn spring_ceiling(hertz: f32, inv_mass: f32) -> f32 {
+    let omega = 2.0 * std::f32::consts::PI * hertz;
+    omega * omega / inv_mass.max(1e-12)
+}
+
+/// Scales stiffness and damping down together so the spring stays under
+/// `max_stiffness`.
+fn cap_spring(stiffness: f32, damping: f32, max_stiffness: f32) -> (f32, f32) {
     if stiffness <= max_stiffness {
         return (stiffness, damping);
     }
@@ -64,11 +84,17 @@ const WARM_START: f32 = 0.8;
 /// heavier is solved directly (see `World::crushed_groups`).
 const CRUSH_RATIO: f32 = 5.0;
 const CRUSH_SEPARATION: f32 = 0.01;
+/// A jointed group touched (closer than `CRUSH_SEPARATION`) by a keyed body moving faster
+/// than this, m/s, is solved directly and late, with its ground contacts (lesson 29).
+const RAM_SPEED: f32 = 2.0;
 /// A jointed group with a joint open wider than this, m, is solved directly that substep
 /// (lesson 17). Joints normally sit within a few millimetres. Not lower: at 1 cm it also
 /// caught Heli Leap's jumper landing at 12.5 m/s, whose ankles the ground's contacts open
 /// within a substep, and there solving the joints directly opened them a little more.
 const STRETCH_LIMIT: f32 = 0.015;
+/// A group solved directly stays so while a joint of it is still open wider than this,
+/// m (lesson 29).
+const STRETCH_RELEASE: f32 = 0.005;
 const STATIC: usize = usize::MAX;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -160,7 +186,12 @@ pub struct Joint {
     pub muscle: Option<Muscle>,
     pub enabled: bool,
     warm_point: Vec3,
+    /// Whether a group's direct solve held this joint's anchor last substep.
+    was_grouped: bool,
     warm_muscle: [f32; 3],
+    /// Limit rows (by `AngularRow::id`, a bit each) there were last substep, and those
+    /// of them that pushed at its end.
+    warm_limits: [u8; 2],
 }
 
 impl Joint {
@@ -195,7 +226,9 @@ impl Joint {
             muscle: None,
             enabled: true,
             warm_point: Vec3::ZERO,
+            was_grouped: false,
             warm_muscle: [0.0; 3],
+            warm_limits: [0; 2],
         }
     }
 
@@ -215,7 +248,8 @@ impl Joint {
         if radius > 1e-6 {
             let dir = s / radius;
             let (y, z) = (l.swing1.max(1e-4), l.swing2.max(1e-4));
-            let boundary = 1.0 / ((dir.x / y).powi(2) + (dir.y / z).powi(2)).sqrt();
+            let (u, v) = (dir.x / y, dir.y / z);
+            let boundary = 1.0 / (u * u + v * v).sqrt();
             if radius > boundary {
                 swing_vec = Vec3::new(0.0, dir.x * boundary, dir.y * boundary);
             }
@@ -251,15 +285,38 @@ pub struct Lock {
     pub angular: Vec3,
 }
 
+/// A force-limited Cartesian spring between two bodies of a character (endorphin's
+/// virtual muscles, chest to hand and pelvis to heel): pulls `point` on `body` towards
+/// `target_position` in `anchor`'s frame, and turns `body` towards `target_rotation`
+/// relative to `anchor`. Unlike a joint it removes no freedom: it is a spring on the
+/// two bodies, solved implicitly like a muscle (stable at any stiffness), and its force
+/// (N) and torque (N·m) are capped by its gains' force limits, on the full 3D vector.
+#[derive(Clone, Copy, Debug)]
+pub struct VirtualMuscle {
+    pub anchor: usize,
+    pub body: usize,
+    /// The pulled point, in `body`'s frame.
+    pub point: Vec3,
+    /// Where `point` is wanted, in `anchor`'s frame.
+    pub target_position: Vec3,
+    /// `body`'s wanted rotation relative to `anchor`'s.
+    pub target_rotation: Quat,
+    pub linear: Option<Gains>,
+    pub angular: Option<Gains>,
+}
+
 pub struct World {
     pub bodies: Vec<Body>,
     pub shapes: Vec<Shape>,
     pub joints: Vec<Joint>,
     pub locks: Vec<Lock>,
+    /// Set by the caller every tick; nothing is remembered between ticks.
+    pub virtual_muscles: Vec<VirtualMuscle>,
     pub gravity: Vec3,
     /// Ground plane height and material.
     pub ground: Option<(f32, usize)>,
     pub contact_model: ContactModel,
+    pub spring_cap: SpringCap,
     material_count: usize,
     /// `interactions[a * material_count + b]`.
     interactions: Vec<Interaction>,
@@ -306,6 +363,9 @@ fn soft(hertz: f32, damping_ratio: f32, h: f32) -> Softness {
 /// One angular row: a one-sided limit (rigid) or a spring (soft limit zone / muscle).
 #[derive(Clone, Copy)]
 struct AngularRow {
+    /// Which of a joint's limit rows this is (twist stops, twist springs, swing stop,
+    /// swing spring), to carry over from one substep to the next.
+    id: u8,
     axis: Vec3,
     /// Inverse of the row's effective inverse mass (plus softness for springs).
     mass: f32,
@@ -334,8 +394,15 @@ struct JointRows {
     angular_schur: Mat3,
     /// The same with grounded bodies held still, for capping muscle springs.
     cap_schur: Mat3,
+    /// With `SpringCap::Limbs`: the same for the whole limb against the rest of the body.
+    limb_schur: Option<Mat3>,
     limits: Vec<AngularRow>,
     muscle: Option<MuscleBlock>,
+    /// Limit rows there were last substep and those that pushed (`Joint::warm_limits`).
+    warm_limits: [u8; 2],
+    /// Solved with the rest of its jointed group as one system (`limb::Articulation`),
+    /// not by sequential impulses.
+    direct: bool,
 }
 
 /// A joint's muscle solved together with its anchor as one 6x6 system, so the muscle
@@ -378,6 +445,25 @@ struct LockBlock {
     key: (usize, usize, usize),
 }
 
+/// A virtual muscle's position or orientation spring this substep: three rows (world
+/// axes) solved as one block, the impulse capped in length.
+struct DriveBlock {
+    a: usize,
+    b: usize,
+    /// Levers of the pulled point from A's and B's centres (zero for orientation).
+    ra: Vec3,
+    rb: Vec3,
+    linear: bool,
+    /// Spring softness and velocity bias.
+    gamma: f32,
+    bias: Vec3,
+    /// (K + γ)⁻¹, K the block's effective inverse mass.
+    mass: Mat3,
+    /// Force limit × h.
+    bound: f32,
+    impulse: Vec3,
+}
+
 /// One equality row of a lock group: a joint's anchor along a world axis, or one held
 /// axis of a lock.
 struct GroupRow {
@@ -387,8 +473,11 @@ struct GroupRow {
     jacobian: [Vec3; 4],
     /// Velocity bias while correcting positions.
     bias: f32,
-    /// Impulse cap (locks); infinite for anchors.
+    /// Upper cap on the accumulated impulse (locks); infinite for anchors and contacts.
     bound: f32,
+    /// Lower cap: minus the strength for locks, minus the adhesion for contacts (they
+    /// can only push), infinite for anchors.
+    floor: f32,
     source: RowSource,
 }
 
@@ -398,6 +487,8 @@ enum RowSource {
     Anchor(usize, usize),
     /// Lock block index and lock axis.
     Lock(usize, usize),
+    /// A contact's normal.
+    Contact(usize),
 }
 
 /// Bodies held together by locks, with every joint between them, solved as one linear
@@ -410,21 +501,34 @@ enum RowSource {
 /// round against its own body), is solved the same way, joints only.
 struct LockGroup {
     rows: Vec<GroupRow>,
-    /// The rows' effective mass matrix J M⁻¹ Jᵀ (lower triangle, row-major).
-    k: Vec<f64>,
+    /// The rows' effective mass matrix J M⁻¹ Jᵀ: its diagonal, and per row its entries
+    /// left of the diagonal at `k_pattern`. Stored sparse: only rows sharing a body meet,
+    /// and a dense matrix to build and clear each substep cost more than the solve.
+    k_diagonal: Vec<f64>,
+    k: Vec<Vec<f64>>,
     /// Columns left of the diagonal where each row of `k` isn't zero (rows sharing a
     /// moving body), ascending.
     k_pattern: Vec<Vec<usize>>,
     /// Where each row of the Cholesky factor isn't zero left of the diagonal. Joints
     /// come leaf first, so a skeleton factors without fill-in and only locks add any.
     pattern: Vec<Vec<usize>>,
-    /// Cholesky factors (lower triangle, row-major) over the rows still solved, of `k`
-    /// regularised for the velocity solve and for position correction.
-    velocity_factor: Vec<f64>,
-    push_factor: Vec<f64>,
+    /// Cholesky factors over the rows still solved, of `k` regularised for the velocity
+    /// solve and for position correction.
+    velocity_factor: Factor,
+    push_factor: Factor,
     /// Lock axes left out of the direct solve because they reached their strength:
     /// they stay at it this substep, and the per-lock pass still sees them.
     out: Vec<bool>,
+    /// Solved after the contacts, not before them (lesson 25).
+    late: bool,
+}
+
+/// A sparse Cholesky factor of a lock group: per row, its values at the group's
+/// `pattern`, and its diagonal.
+#[derive(Default)]
+struct Factor {
+    values: Vec<Vec<f64>>,
+    diagonal: Vec<f64>,
 }
 
 struct ContactRow {
@@ -518,7 +622,7 @@ pub fn swing_twist(q: Quat) -> (f32, Vec3) {
         return (0.0, q.to_scaled_axis());
     }
     let twist = Quat::from_xyzw(q.x / twist_len, 0.0, 0.0, q.w / twist_len);
-    let angle = 2.0 * q.x.atan2(q.w);
+    let angle = 2.0 * libm::atan2f(q.x, q.w);
     let angle =
         (angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
     let swing = (q * twist.inverse()).normalize();
@@ -532,9 +636,11 @@ impl World {
             shapes: Vec::new(),
             joints: Vec::new(),
             locks: Vec::new(),
+            virtual_muscles: Vec::new(),
             gravity,
             ground: None,
             contact_model,
+            spring_cap: SpringCap::default(),
             material_count: 0,
             interactions: Vec::new(),
             contact_cache: HashMap::new(),
@@ -565,6 +671,21 @@ impl World {
             })
     }
 
+    /// Whether any of `bodies` pushed on something outside them (another body, scenery
+    /// or the ground) in the last substep. Only answers yes or no, so the cache's order
+    /// doesn't matter.
+    pub fn pressing(&self, bodies: std::ops::Range<usize>) -> bool {
+        let inside = |s: u32| {
+            self.shapes
+                .get(s as usize)
+                .and_then(|s| s.body)
+                .is_some_and(|b| bodies.contains(&b))
+        };
+        self.contact_cache
+            .iter()
+            .any(|(&(a, b, _), impulse)| impulse[0] > 0.0 && inside(a) != inside(b))
+    }
+
     /// Advances the world by `dt` seconds.
     pub fn step(&mut self, dt: f32) {
         let h = dt / SUBSTEPS as f32;
@@ -588,6 +709,13 @@ impl World {
         }
         for body in self.bodies.iter_mut().filter(|b| b.is_dynamic()) {
             body.linear_velocity += self.gravity * h;
+            // Capped before the solve, not after it: capping a body's spin after the
+            // solve leaves its joint anchors moving apart, at the cut speed times
+            // their lever, for the whole substep (lesson 29).
+            let speed = body.angular_velocity.length();
+            if speed > MAX_ANGULAR_SPEED {
+                body.angular_velocity *= MAX_ANGULAR_SPEED / speed;
+            }
         }
         self.apply_lock_drives(h);
         let mut sb: Vec<SolverBody> = self
@@ -625,6 +753,7 @@ impl World {
         }
         let mut joints = self.prepare_joints(&sb, h, &grounded);
         let mut locks = self.prepare_locks(&sb, h);
+        let mut drives = self.prepare_virtual_muscles(&sb, h);
 
         // Warm start.
         for c in &contacts {
@@ -649,12 +778,51 @@ impl World {
             mass_scale: 1.0,
             impulse_scale: 0.0,
         };
-        let mut groups = self.prepare_groups(&sb, &joints, &locks, &contacts, joint_soft.bias_rate);
-        for _ in 0..ITERATIONS {
+        let mut groups = self.prepare_groups(
+            &sb,
+            &joints,
+            &locks,
+            &contacts,
+            joint_soft.bias_rate,
+            contact_soft.bias_rate,
+            h,
+        );
+        // Contacts a group holds in its direct solve (lesson 25): only their
+        // friction is left to the contact pass. One that stops pushing goes back to it.
+        let mut held = vec![false; contacts.len()];
+        for group in &groups {
+            for row in &group.rows {
+                if let RowSource::Contact(c) = row.source {
+                    held[c] = true;
+                }
+            }
+        }
+        // With whole-limb muscles, every jointed group's joints, muscles and stops are
+        // solved as one system (lesson 38).
+        let mut articulations = if self.spring_cap == SpringCap::Limbs {
+            Articulation::build(&sb, &mut joints, joint_soft.bias_rate, h)
+        } else {
+            Vec::new()
+        };
+        // Direct solves of the groups, then the contacts, then the direct solves of the
+        // groups whose locks close a loop: those have the last word (lesson 25).
+        for it in 0..ITERATIONS {
+            solve_drives(&mut sb, &mut drives);
             self.solve_joints(&mut sb, &mut joints, joint_soft, h, true);
-            solve_locks(&mut sb, &mut locks, joint_soft.bias_rate);
-            solve_groups(&mut sb, &mut groups, &mut joints, &mut locks, true);
-            self.solve_contacts(&mut sb, &mut contacts, contact_soft, h, true);
+            self.iterate(
+                &mut sb,
+                &mut joints,
+                &mut locks,
+                &mut groups,
+                &mut articulations,
+                &mut contacts,
+                &mut held,
+                joint_soft.bias_rate,
+                contact_soft,
+                h,
+                true,
+                it == 0,
+            );
         }
         // A lock axis still at its strength after position correction can't keep up: it
         // pulls with all of it, and relaxing leaves it there (lesson 20).
@@ -666,12 +834,6 @@ impl World {
         // Integrate positions with the biased velocities.
         self.write_velocities(&sb);
         for body in self.bodies.iter_mut() {
-            if body.is_dynamic() {
-                let speed = body.angular_velocity.length();
-                if speed > MAX_ANGULAR_SPEED {
-                    body.angular_velocity *= MAX_ANGULAR_SPEED / speed;
-                }
-            }
             body.position += body.linear_velocity * h;
             let w = body.angular_velocity;
             let dq = Quat::from_xyzw(w.x, w.y, w.z, 0.0) * body.rotation;
@@ -686,10 +848,22 @@ impl World {
 
         // Relax: remove the velocity that position correction added.
         for _ in 0..RELAX_ITERATIONS {
+            solve_drives(&mut sb, &mut drives);
             self.solve_joints(&mut sb, &mut joints, joint_soft, h, false);
-            solve_locks(&mut sb, &mut locks, 0.0);
-            solve_groups(&mut sb, &mut groups, &mut joints, &mut locks, false);
-            self.solve_contacts(&mut sb, &mut contacts, contact_soft, h, false);
+            self.iterate(
+                &mut sb,
+                &mut joints,
+                &mut locks,
+                &mut groups,
+                &mut articulations,
+                &mut contacts,
+                &mut held,
+                0.0,
+                contact_soft,
+                h,
+                false,
+                false,
+            );
         }
         apply_restitution(&mut sb, &mut contacts);
         self.write_velocities(&sb);
@@ -699,10 +873,35 @@ impl World {
         for c in &contacts {
             self.contact_cache.insert(c.key, c.impulse);
         }
-        for j in &joints {
-            let joint = &mut self.joints[j.joint];
-            joint.warm_point = j.point_impulse;
-            joint.warm_muscle = j
+        // Joints of groups solved directly for an open joint, a crushing or a ramming
+        // body; not those a lock ties, which are solved directly every substep anyway.
+        let mut grouped = vec![false; joints.len()];
+        let locked = |g: &&LockGroup| {
+            g.rows
+                .iter()
+                .any(|r| matches!(r.source, RowSource::Lock(..)))
+        };
+        for row in groups.iter().filter(|g| !locked(g)).flat_map(|g| &g.rows) {
+            if let RowSource::Anchor(j, _) = row.source {
+                grouped[j] = true;
+            }
+        }
+        for (j, rows) in joints.iter().enumerate() {
+            let joint = &mut self.joints[rows.joint];
+            // Not what a direct solve carried: an anchor holding a finger against the
+            // ground in the solve took 1.9 N·s a substep, and warm-starting the next
+            // substep's sequential impulses with it threw the 0.06 kg finger off at
+            // 360 rad/s, 7 cm out of its joint (lesson 29).
+            joint.warm_point = if grouped[j] {
+                Vec3::ZERO
+            } else {
+                rows.point_impulse
+            };
+            joint.was_grouped = grouped[j];
+            joint.warm_limits = rows.limits.iter().fold([0, 0], |[seen, pushed], l| {
+                [seen | 1 << l.id, pushed | u8::from(l.impulse > 0.0) << l.id]
+            });
+            joint.warm_muscle = rows
                 .muscle
                 .as_ref()
                 .map_or([0.0; 3], |m| (m.frame.transpose() * m.impulse).to_array());
@@ -711,6 +910,47 @@ impl World {
         for l in &locks {
             self.lock_cache.insert(l.key, l.impulse);
         }
+    }
+
+    /// One iteration after the joints' sequential impulses: the locks, the direct solves
+    /// of the groups, the contacts, then the articulations, so a character's joints and
+    /// muscles have the last word over its contacts (lesson 38), then the groups solved
+    /// before the contacts again, so their locks hold too, and last the direct solves of
+    /// the groups whose locks close a loop (lesson 25). The first iteration also solves
+    /// the articulations before the locks, so the locks and contacts start from joints
+    /// that hold (without it Rotating Floor's dancer ended up under the floor; solving
+    /// them there every iteration changed nothing but the time).
+    #[allow(clippy::too_many_arguments)]
+    fn iterate(
+        &self,
+        sb: &mut [SolverBody],
+        joints: &mut [JointRows],
+        locks: &mut [LockBlock],
+        groups: &mut [LockGroup],
+        articulations: &mut [Articulation],
+        contacts: &mut [ContactRow],
+        held: &mut [bool],
+        lock_bias_rate: f32,
+        contact_soft: Softness,
+        h: f32,
+        use_bias: bool,
+        first: bool,
+    ) {
+        if first {
+            for a in articulations.iter_mut() {
+                a.solve(sb, joints, use_bias);
+            }
+        }
+        solve_locks(sb, locks, lock_bias_rate);
+        solve_groups(sb, groups, joints, locks, contacts, held, false, use_bias);
+        self.solve_contacts(sb, contacts, held, contact_soft, h, use_bias);
+        if !articulations.is_empty() {
+            for a in articulations.iter_mut() {
+                a.solve(sb, joints, use_bias);
+            }
+            solve_groups(sb, groups, joints, locks, contacts, held, false, use_bias);
+        }
+        solve_groups(sb, groups, joints, locks, contacts, held, true, use_bias);
     }
 
     /// A lock axis with a negative strength drives instead of holding: a steady force (N)
@@ -765,6 +1005,7 @@ impl World {
             {
                 joint.warm_point = Vec3::ZERO;
                 joint.warm_muscle = [0.0; 3];
+                joint.warm_limits = [0; 2];
             }
         }
         self.was_dynamic = dynamic;
@@ -803,6 +1044,8 @@ impl World {
                 sa.inv_i + sbb.inv_i - k_ap * point_mass * k_pa,
             )
         };
+        // Only for `SpringCap::Limbs`; the default caps by the joint's own two bodies.
+        let limbs = (self.spring_cap == SpringCap::Limbs).then(|| Limbs::new(self, grounded));
         let mut out = Vec::new();
         for (index, joint) in self.joints.iter().enumerate() {
             let (a, b) = (joint.parent, joint.child);
@@ -814,8 +1057,9 @@ impl World {
             let rb = bb.rotation * joint.anchor_child;
             let (sa, sbb) = (sb[a], sb[b]);
             let (point_mass, k_pa, k_ap, angular_schur) = blocks(sa, sbb, ra, rb);
-            // Only when one side is grounded: a foot and toe both on the ground are still
-            // just a foot and a toe.
+            // The two bodies the joint connects, a grounded one held still unless both
+            // are: a foot and toe both on the ground are still just a foot and a toe
+            // (lesson 9).
             let still = |s: SolverBody| SolverBody {
                 inv_mass: 0.0,
                 inv_i: Mat3::ZERO,
@@ -826,6 +1070,19 @@ impl World {
                 (false, true) => blocks(sa, still(sbb), ra, rb).3,
                 _ => angular_schur,
             };
+            // What the muscle moves as a whole: the limb hanging from the joint against
+            // the rest of the body, a side resting on the ground or scenery held still.
+            let limb_schur = limbs.as_ref().map(|limbs| {
+                let (limb, rest) = limbs.sides(b);
+                let anchor = ba.position + ra;
+                blocks(
+                    rest.as_body(),
+                    limb.as_body(),
+                    rest.lever(anchor),
+                    limb.lever(anchor),
+                )
+                .3
+            });
             let mut rows = JointRows {
                 joint: index,
                 a,
@@ -839,8 +1096,11 @@ impl World {
                 k_ap,
                 angular_schur,
                 cap_schur,
+                limb_schur,
                 limits: Vec::new(),
                 muscle: None,
+                warm_limits: joint.warm_limits,
+                direct: false,
             };
             self.prepare_limits(joint, h, &mut rows);
             rows.muscle = self.prepare_muscle(joint, h, &rows);
@@ -858,7 +1118,8 @@ impl World {
 
         let schur = rows.angular_schur;
         let coupled_inv_mass = |axis: Vec3| axis.dot(schur * axis);
-        let rigid = |axis: Vec3, value: f32| AngularRow {
+        let rigid = |id: u8, axis: Vec3, value: f32| AngularRow {
+            id,
             axis,
             mass: inverse(coupled_inv_mass(axis)),
             value,
@@ -868,16 +1129,17 @@ impl World {
             upper: f32::INFINITY,
             impulse: 0.0,
         };
-        let spring = |axis: Vec3, error: f32| -> Option<AngularRow> {
+        let spring = |id: u8, axis: Vec3, error: f32| -> Option<AngularRow> {
             let (k, c) = cap_spring(
                 joint.soft_stiffness,
                 joint.soft_damping,
-                coupled_inv_mass(axis),
+                spring_ceiling(MAX_SPRING_HERTZ, coupled_inv_mass(axis)),
             );
             (k + c > 0.0).then(|| {
                 let denom = c + h * k;
                 let gamma = 1.0 / (h * denom);
                 AngularRow {
+                    id,
                     axis,
                     mass: inverse(coupled_inv_mass(axis) + gamma),
                     value: (h * k / denom) / h * error,
@@ -893,18 +1155,20 @@ impl World {
         // Twist: stops at both ends, soft springs between the soft and hard ranges.
         let (hard, soft_l) = (joint.hard, joint.soft);
         if twist < hard.twist_min + ANGULAR_MARGIN {
-            rows.limits.push(rigid(twist_axis, twist - hard.twist_min));
+            rows.limits
+                .push(rigid(0, twist_axis, twist - hard.twist_min));
         }
         if twist > hard.twist_max - ANGULAR_MARGIN {
-            rows.limits.push(rigid(-twist_axis, hard.twist_max - twist));
+            rows.limits
+                .push(rigid(1, -twist_axis, hard.twist_max - twist));
         }
         if twist < soft_l.twist_min {
             rows.limits
-                .extend(spring(twist_axis, twist - soft_l.twist_min));
+                .extend(spring(2, twist_axis, twist - soft_l.twist_min));
         }
         if twist > soft_l.twist_max {
             rows.limits
-                .extend(spring(-twist_axis, soft_l.twist_max - twist));
+                .extend(spring(3, -twist_axis, soft_l.twist_max - twist));
         }
 
         // Swing: elliptical cone in the primary frame's YZ plane.
@@ -914,21 +1178,18 @@ impl World {
             let dir = s / radius;
             let boundary = |l: &Limits| {
                 let (y, z) = (l.swing1.max(1e-3), l.swing2.max(1e-3));
-                (
-                    1.0 / ((dir.x / y).powi(2) + (dir.y / z).powi(2)).sqrt(),
-                    y,
-                    z,
-                )
+                let (u, v) = (dir.x / y, dir.y / z);
+                (1.0 / (u * u + v * v).sqrt(), y, z)
             };
             let (hard_r, y, z) = boundary(&hard);
             let n = glam::Vec2::new(s.x / (y * y), s.y / (z * z)).normalize_or_zero();
             let outward = (primary * Vec3::new(0.0, n.x, n.y)).normalize_or_zero();
             if radius > hard_r - ANGULAR_MARGIN {
-                rows.limits.push(rigid(-outward, hard_r - radius));
+                rows.limits.push(rigid(4, -outward, hard_r - radius));
             }
             let (soft_r, ..) = boundary(&soft_l);
             if radius > soft_r {
-                rows.limits.extend(spring(-outward, soft_r - radius));
+                rows.limits.extend(spring(5, -outward, soft_r - radius));
             }
         }
     }
@@ -956,11 +1217,13 @@ impl World {
                 continue;
             }
             let axis = frame.col(k);
-            let (stiffness, damping) = cap_spring(
-                gains.stiffness,
-                gains.damping,
-                axis.dot(rows.cap_schur * axis),
-            );
+            let mut max_stiffness =
+                spring_ceiling(MAX_SPRING_HERTZ, axis.dot(rows.cap_schur * axis));
+            if let Some(limb) = rows.limb_schur {
+                max_stiffness =
+                    max_stiffness.max(spring_ceiling(MAX_LIMB_HERTZ, axis.dot(limb * axis)));
+            }
+            let (stiffness, damping) = cap_spring(gains.stiffness, gains.damping, max_stiffness);
             let denom = damping + h * stiffness;
             gamma[k] = 1.0 / (h * denom);
             bias[k] = -(stiffness / denom) * error_world.dot(axis);
@@ -990,7 +1253,7 @@ impl World {
         h: f32,
         use_bias: bool,
     ) {
-        for j in joints.iter_mut() {
+        for j in joints.iter_mut().filter(|j| !j.direct) {
             let (a, b) = (j.a, j.b);
             let point_bias = if use_bias {
                 (j.point_error * soft_params.bias_rate).clamp_length_max(MAX_PUSH_SPEED)
@@ -1028,6 +1291,73 @@ impl World {
             j.point_impulse += impulse;
             apply_impulse(sb, a, b, j.ra, j.rb, impulse);
         }
+    }
+
+    // -----------------------------------------------------------------------------
+    // Virtual muscles
+
+    fn prepare_virtual_muscles(&self, sb: &[SolverBody], h: f32) -> Vec<DriveBlock> {
+        let mut out = Vec::new();
+        for vm in &self.virtual_muscles {
+            let (a, b) = (vm.anchor, vm.body);
+            if !self.bodies[a].is_dynamic() && !self.bodies[b].is_dynamic() {
+                continue;
+            }
+            let (ba, bb) = (&self.bodies[a], &self.bodies[b]);
+            let (sa, sbb) = (sb[a], sb[b]);
+            let mut block = |linear: bool, gains: Gains, ra: Vec3, rb: Vec3, error: Vec3| {
+                let k = if linear {
+                    Mat3::from_diagonal(Vec3::splat(sa.inv_mass + sbb.inv_mass))
+                        - skew(ra) * sa.inv_i * skew(ra)
+                        - skew(rb) * sbb.inv_i * skew(rb)
+                } else {
+                    sa.inv_i + sbb.inv_i
+                };
+                // Like a muscle, no stiffer than the solver can follow on the lightest
+                // direction the two bodies move in (a hand alone weighs 0.4 kg).
+                let lightest = k.x_axis.x.max(k.y_axis.y).max(k.z_axis.z);
+                let (stiffness, damping) = cap_spring(
+                    gains.stiffness.max(0.0),
+                    gains.damping.max(0.0),
+                    spring_ceiling(MAX_SPRING_HERTZ, lightest),
+                );
+                let denom = damping + h * stiffness;
+                if denom <= 0.0 || gains.force_limit <= 0.0 {
+                    return;
+                }
+                let gamma = 1.0 / (h * denom);
+                let soft = k + Mat3::from_diagonal(Vec3::splat(gamma));
+                if soft.determinant().abs() < 1e-18 {
+                    return;
+                }
+                out.push(DriveBlock {
+                    a,
+                    b,
+                    ra,
+                    rb,
+                    linear,
+                    gamma,
+                    bias: error * (stiffness / denom),
+                    mass: soft.inverse(),
+                    bound: gains.force_limit * h,
+                    impulse: Vec3::ZERO,
+                });
+            };
+            if let Some(gains) = vm.linear {
+                let rb = bb.rotation * vm.point;
+                let ra = ba.rotation * vm.target_position;
+                let error = (bb.position + rb) - (ba.position + ra);
+                block(true, gains, ra, rb, error);
+            }
+            if let Some(gains) = vm.angular {
+                let mut turn = bb.rotation * (ba.rotation * vm.target_rotation).inverse();
+                if turn.w < 0.0 {
+                    turn = -turn;
+                }
+                block(false, gains, Vec3::ZERO, Vec3::ZERO, turn.to_scaled_axis());
+            }
+        }
+        out
     }
 
     // -----------------------------------------------------------------------------
@@ -1139,8 +1469,17 @@ impl World {
         locks: &[LockBlock],
         contacts: &[ContactRow],
         bias_rate: f32,
+        contact_bias_rate: f32,
+        h: f32,
     ) -> Vec<LockGroup> {
-        let stretched = |j: &&JointRows| j.point_error.length() > STRETCH_LIMIT;
+        // Once solved directly, a joint stays so until it has nearly closed: let go at
+        // 1.5 cm, a shoulder jammed against chest and ground went in and out of the direct
+        // solve every few substeps, and with each change its impulses started over
+        // (lesson 29).
+        let stretched = |j: &&JointRows| {
+            let open = j.point_error.length();
+            open > STRETCH_LIMIT || (self.joints[j.joint].was_grouped && open > STRETCH_RELEASE)
+        };
         if locks.is_empty() && contacts.is_empty() && !joints.iter().any(|j| stretched(&j)) {
             return Vec::new();
         }
@@ -1167,8 +1506,24 @@ impl World {
             moves(body).then(|| find(&mut root, body))
         };
         let mut locked: Vec<usize> = locks.iter().filter_map(|l| group_of(l.a, l.b)).collect();
+        // Groups a lock holds to the world or a keyed body can't be pushed anywhere the
+        // lock doesn't allow.
+        let pinned: Vec<usize> = locks
+            .iter()
+            .filter(|l| !moves(l.a) && l.bound.iter().any(|&b| b > 0.0))
+            .filter_map(|l| group_of(l.b, l.b))
+            .collect();
+        // Free groups a lock closes a loop in (a prop held in both hands) are solved
+        // after the contacts (lesson 25); the others, before them as always.
+        let mut late_groups = locked.clone();
+        late_groups.retain(|g| !pinned.contains(g));
         // Groups something presses on that won't give way (lesson 15).
         locked.extend(self.crushed_groups(contacts, locks, &mut |i| group_of(i, i)));
+        // Groups a keyed body runs into: solved after the contacts, with their ground
+        // contacts in the solve (lesson 29).
+        let rammed = self.rammed_groups(contacts, &mut |i| group_of(i, i));
+        locked.extend(&rammed);
+        late_groups.extend(&rammed);
         // Groups with a joint come apart (lesson 17). A light limb whipping round
         // against its own body closes a loop of joints and contacts that four
         // iterations don't settle: the contacts, solved last, win, and the joint keeps
@@ -1195,6 +1550,7 @@ impl World {
                     jacobian: [-e, -j.ra.cross(e), e, j.rb.cross(e)],
                     bias: bias[axis],
                     bound: f32::INFINITY,
+                    floor: f32::NEG_INFINITY,
                     source: RowSource::Anchor(ji, axis),
                 });
             }
@@ -1218,9 +1574,62 @@ impl World {
                     jacobian,
                     bias,
                     bound: l.bound[axis],
+                    floor: -l.bound[axis],
                     source: RowSource::Lock(li, axis),
                 });
             }
+        }
+        // Contacts that carry a load (lesson 25): a touching contact of a
+        // group against the ground or massless scenery joins its direct solve as a
+        // one-sided row. A load
+        // that reaches a light body through a lock (a gun's weight, through a hand, onto
+        // a finger) is then carried by the contact, not by the softness the contact pass
+        // gives a body that weighs 0.39 kg. Not against another body: two bodies of one
+        // group are held by joints and locks, and a contact between them settles with
+        // those in huge opposing impulses. Not against a keyed body either, which can
+        // move on. Only in the groups that are solved late: for pinned ones a contact row
+        // against the lock that holds them only adds stress, and groups solved directly
+        // for a crushing body or an open joint (lessons 15 and 17) stay as they were.
+        for (ci, c) in contacts.iter().enumerate() {
+            // Carrying a load: it pushed last substep, and touches now.
+            let carrying = c.impulse[0] > 0.0 && c.separation < CRUSH_SEPARATION;
+            if c.separation >= CRUSH_SEPARATION || (c.a == STATIC && c.b == STATIC) {
+                continue;
+            }
+            let (ga, gb) = (group_of(c.a, c.a), group_of(c.b, c.b));
+            let fixed = |i: usize| i == STATIC || self.bodies[i].motion == Motion::Dynamic;
+            let g = match (ga, gb) {
+                (Some(a), None) if fixed(c.b) => a,
+                (None, Some(b)) if fixed(c.a) => b,
+                _ => continue,
+            };
+            // A group a keyed body runs into takes its landings here too, not only the
+            // contacts that already carry a load: a light finger or toe hitting the
+            // ground at speed, left to the contact pass, takes the impulse that stops
+            // the whole limb on its own and spins off at hundreds of rad/s (lesson 29).
+            if !late_groups.contains(&g) || !(carrying || rammed.contains(&g)) {
+                continue;
+            }
+            let Some(g) = locked.binary_search(&g).ok() else {
+                continue;
+            };
+            let n = c.normal;
+            rows[g].push(GroupRow {
+                a: c.a,
+                b: c.b,
+                jacobian: [-n, -c.ra.cross(n), n, c.rb.cross(n)],
+                // Still apart (by under `CRUSH_SEPARATION`), it stops the bodies
+                // closing the gap, so they may hover that far above it while the group
+                // is solved this way.
+                bias: if c.separation < 0.0 {
+                    (contact_bias_rate * c.separation).max(-MAX_PUSH_SPEED)
+                } else {
+                    0.0
+                },
+                bound: f32::INFINITY,
+                floor: -c.interaction.adhesion * h,
+                source: RowSource::Contact(ci),
+            });
         }
         // Joints leaf first (deepest child body first), then locks.
         let depth = |mut body: usize| {
@@ -1235,10 +1644,16 @@ impl World {
             rows.sort_by_key(|r| match r.source {
                 RowSource::Anchor(..) => (0, std::cmp::Reverse(depth(r.b))),
                 RowSource::Lock(..) => (1, std::cmp::Reverse(0)),
+                RowSource::Contact(..) => (2, std::cmp::Reverse(0)),
             });
         }
         rows.into_iter()
-            .filter_map(|rows| LockGroup::new(sb, rows, locks))
+            .zip(&locked)
+            .filter_map(|(rows, g)| {
+                let mut group = LockGroup::new(sb, rows, locks)?;
+                group.late = late_groups.contains(g);
+                Some(group)
+            })
             .collect()
     }
 
@@ -1292,6 +1707,39 @@ impl World {
             .filter(|(g, h)| held.contains(h) || mass[h] >= CRUSH_RATIO * mass[g])
             .map(|(g, _)| g)
             .collect()
+    }
+
+    /// Groups of jointed bodies a keyed body moving faster than `RAM_SPEED` touches: a
+    /// car driven by its keys into a character, or over one. Nothing it does can slow the
+    /// keyed body, so a limb caught between it and the ground, or its own body, takes
+    /// whatever the contacts demand. Solved directly after the contacts, with the
+    /// group's ground contacts as rows of the solve, the joints and the ground have the
+    /// last word, and the keyed body's own contacts give way instead (lesson 29).
+    fn rammed_groups(
+        &self,
+        contacts: &[ContactRow],
+        group_of: &mut dyn FnMut(usize) -> Option<usize>,
+    ) -> Vec<usize> {
+        let mut rammed = Vec::new();
+        for c in contacts.iter().filter(|c| c.separation < CRUSH_SEPARATION) {
+            for (mine, other) in [(c.a, c.b), (c.b, c.a)] {
+                if mine == STATIC || other == STATIC {
+                    continue;
+                }
+                let keyed = matches!(self.bodies[other].motion, Motion::Kinematic { .. });
+                if keyed
+                    && self.bodies[other].linear_velocity.length() > RAM_SPEED
+                    && self
+                        .joints
+                        .iter()
+                        .any(|j| j.enabled && (j.parent == mine || j.child == mine))
+                    && let Some(g) = group_of(mine)
+                {
+                    rammed.push(g);
+                }
+            }
+        }
+        rammed
     }
 
     /// Body pairs held together by locks, which don't collide with each other: each
@@ -1373,39 +1821,124 @@ impl World {
                 }
             }
         }
-        for i in 0..self.shapes.len() {
-            let Some(pi) = &placed[i] else { continue };
-            for j in (i + 1)..self.shapes.len() {
-                let Some(pj) = &placed[j] else { continue };
-                let (si, sj) = (&self.shapes[i], &self.shapes[j]);
-                if !(dynamic(si) || dynamic(sj))
-                    || si.body == sj.body
-                    || held_together(si.body, sj.body)
-                {
-                    continue;
-                }
-                let reach = radius[i] + radius[j] + MARGIN;
-                if pi.position.distance_squared(pj.position) > reach * reach
-                    || !self.may_collide(i, j)
-                {
-                    continue;
-                }
-                found.clear();
-                collide::between(pi, pj, MARGIN, &mut found);
-                for c in &found {
-                    out.push(self.contact_row(
-                        sb,
-                        h,
-                        Some(i),
-                        Some(j),
-                        si.material,
-                        sj.material,
-                        c,
-                    ));
-                }
+        for (i, j) in self.broad_phase(&placed, &radius) {
+            let (Some(pi), Some(pj)) = (&placed[i], &placed[j]) else {
+                continue;
+            };
+            let (si, sj) = (&self.shapes[i], &self.shapes[j]);
+            if !(dynamic(si) || dynamic(sj))
+                || si.body == sj.body
+                || held_together(si.body, sj.body)
+            {
+                continue;
+            }
+            let reach = radius[i] + radius[j] + MARGIN;
+            if pi.position.distance_squared(pj.position) > reach * reach || !self.may_collide(i, j)
+            {
+                continue;
+            }
+            found.clear();
+            collide::between(pi, pj, MARGIN, &mut found);
+            for c in &found {
+                out.push(self.contact_row(sb, h, Some(i), Some(j), si.material, sj.material, c));
             }
         }
         out
+    }
+
+    /// The shape pairs (i < j, in increasing order) whose bounding spheres may be within
+    /// reach of each other and of which at least one is moved by the solver: a sweep
+    /// and prune of the spheres' boxes along the axis the moved shapes spread furthest
+    /// on, skipping shapes of one body. It only drops pairs the
+    /// bounding-sphere test in `find_contacts` would drop too, and hands the rest on in
+    /// the order the plain all-pairs loop met them, so contacts and their solve order
+    /// are bit for bit what that loop gave; only faster (the large scenes have 100-260
+    /// shapes, 5-34 thousand pairs a substep, most of them metres apart).
+    fn broad_phase(&self, placed: &[Option<Placed>], radius: &[f32]) -> Vec<(usize, usize)> {
+        let moved: Vec<bool> = self
+            .shapes
+            .iter()
+            .map(|s| s.body.is_some_and(|b| self.bodies[b].is_dynamic()))
+            .collect();
+        // Each shape's bounding sphere as a box, padded by a whole margin on every side
+        // (twice what the sphere test allows) so float rounding in the bounds can never
+        // drop a pair the exact test keeps. A shape whose box isn't finite pairs with
+        // everything, as in the all-pairs loop.
+        struct Bounds {
+            lo: Vec3,
+            hi: Vec3,
+            shape: usize,
+            body: Option<usize>,
+            moved: bool,
+        }
+        let mut boxes = Vec::new();
+        let mut wild = Vec::new();
+        for (i, p) in placed.iter().enumerate() {
+            let Some(p) = p else { continue };
+            let reach = Vec3::splat(radius[i] + MARGIN);
+            let (lo, hi) = (p.position - reach, p.position + reach);
+            if lo.is_finite() && hi.is_finite() {
+                boxes.push(Bounds {
+                    lo,
+                    hi,
+                    shape: i,
+                    body: self.shapes[i].body,
+                    moved: moved[i],
+                });
+            } else {
+                wild.push(i);
+            }
+        }
+        // The axis the moved shapes' centres spread furthest on (big scenery, a floor
+        // say, would otherwise pick its own longest side, along which the characters
+        // may all overlap).
+        let (low, high) = boxes.iter().filter(|b| b.moved).fold(
+            (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
+            |(low, high), b| {
+                let centre = (b.lo + b.hi) * 0.5;
+                (low.min(centre), high.max(centre))
+            },
+        );
+        let spread = high - low;
+        let axis = if spread.x >= spread.y && spread.x >= spread.z {
+            0
+        } else if spread.y >= spread.z {
+            1
+        } else {
+            2
+        };
+        boxes.sort_unstable_by(|a, b| {
+            a.lo[axis]
+                .total_cmp(&b.lo[axis])
+                .then(a.shape.cmp(&b.shape))
+        });
+        let mut pairs = Vec::new();
+        for (k, a) in boxes.iter().enumerate() {
+            for b in &boxes[k + 1..] {
+                if b.lo[axis] > a.hi[axis] {
+                    break;
+                }
+                // Shapes of one body never collide; `find_contacts` skips them too.
+                if b.lo.cmple(a.hi).all()
+                    && a.lo.cmple(b.hi).all()
+                    && (a.moved || b.moved)
+                    && (a.body.is_none() || a.body != b.body)
+                {
+                    pairs.push((a.shape.min(b.shape), a.shape.max(b.shape)));
+                }
+            }
+        }
+        for &i in &wild {
+            for j in (0..placed.len()).filter(|&j| j != i && placed[j].is_some()) {
+                if moved[i] || moved[j] {
+                    pairs.push((i.min(j), i.max(j)));
+                }
+            }
+        }
+        // The all-pairs loop's order (two shapes that both aren't finite met twice).
+        pairs.sort_unstable();
+        pairs.dedup();
+        pairs
     }
 
     /// Self-collision rules within one character, following each shape's flags.
@@ -1505,6 +2038,7 @@ impl World {
         &self,
         sb: &mut [SolverBody],
         contacts: &mut [ContactRow],
+        held: &[bool],
         soft_params: Softness,
         h: f32,
         use_bias: bool,
@@ -1516,7 +2050,7 @@ impl World {
         } else {
             handed_velocity
         };
-        for c in contacts.iter_mut() {
+        for (c, &held) in contacts.iter_mut().zip(held) {
             // Friction first, limited by the current normal impulse or a fixed force cap.
             // The cap only holds surfaces that touch: a contact found inside the
             // speculative margin, still apart and not pushing, has nothing to grip with.
@@ -1532,6 +2066,10 @@ impl World {
                 let new = (old - c.tangent_mass[k] * vt).clamp(-limit, limit);
                 c.impulse[k + 1] = new;
                 apply_impulse(sb, c.a, c.b, c.ra, c.rb, c.tangents[k] * (new - old));
+            }
+            // The normal is the group's, while it holds.
+            if held {
+                continue;
             }
 
             let vn = velocity(sb, c.a, c.b, c.ra, c.rb).dot(c.normal);
@@ -1593,6 +2131,27 @@ impl LockBlock {
 }
 
 /// Solves each lock's block; `bias_rate` is the share of the error corrected per second.
+/// Virtual muscles' springs: implicit, so `γ·impulse` stands in for the spring's give,
+/// with the accumulated impulse kept within the force limit.
+fn solve_drives(sb: &mut [SolverBody], drives: &mut [DriveBlock]) {
+    for d in drives.iter_mut() {
+        let velocity = if d.linear {
+            relative_velocity(sb, d.a, d.b, d.ra, d.rb)
+        } else {
+            get(sb, d.b).w - get(sb, d.a).w
+        };
+        let total = (d.impulse - d.mass * (velocity + d.bias + d.gamma * d.impulse))
+            .clamp_length_max(d.bound);
+        let delta = total - d.impulse;
+        d.impulse = total;
+        if d.linear {
+            apply_impulse(sb, d.a, d.b, d.ra, d.rb, delta);
+        } else {
+            apply_angular(sb, d.a, d.b, delta);
+        }
+    }
+}
+
 fn solve_locks(sb: &mut [SolverBody], locks: &mut [LockBlock], bias_rate: f32) {
     for l in locks.iter_mut() {
         let mut rhs = l.velocity(sb);
@@ -1659,7 +2218,8 @@ impl LockGroup {
                 on_body.entry(body).or_default().push(i);
             }
         }
-        let mut k = vec![0.0f64; n * n];
+        let mut k = vec![Vec::new(); n];
+        let mut k_diagonal = vec![0.0f64; n];
         let mut k_pattern = vec![Vec::new(); n];
         for (i, r) in rows.iter().enumerate() {
             let mut near: Vec<usize> = [r.a, r.b]
@@ -1670,10 +2230,11 @@ impl LockGroup {
                 .collect();
             near.sort_unstable();
             near.dedup();
-            for &j in &near {
-                k[i * n + j] = entry(r, &rows[j], &responses[j]);
-            }
-            k[i * n + i] = entry(r, r, &responses[i]);
+            k[i] = near
+                .iter()
+                .map(|&j| entry(r, &rows[j], &responses[j]))
+                .collect();
+            k_diagonal[i] = entry(r, r, &responses[i]);
             k_pattern[i] = near;
         }
         // Lock axes that ended the last substep at their strength most likely stay there.
@@ -1681,17 +2242,19 @@ impl LockGroup {
             .iter()
             .map(|r| match r.source {
                 RowSource::Lock(l, axis) => locks[l].impulse[axis].abs() >= r.bound,
-                RowSource::Anchor(..) => false,
+                RowSource::Anchor(..) | RowSource::Contact(..) => false,
             })
             .collect();
         let mut group = LockGroup {
             rows,
+            k_diagonal,
             k,
             k_pattern,
             pattern: Vec::new(),
-            velocity_factor: Vec::new(),
-            push_factor: Vec::new(),
+            velocity_factor: Factor::default(),
+            push_factor: Factor::default(),
             out,
+            late: false,
         };
         group.factorize();
         Some(group)
@@ -1735,36 +2298,47 @@ impl LockGroup {
         self.push_factor = self.cholesky(GROUP_PUSH_SOFTNESS);
     }
 
-    fn cholesky(&self, softness: f64) -> Vec<f64> {
+    fn cholesky(&self, softness: f64) -> Factor {
         let n = self.rows.len();
-        let k = &self.k;
-        let mut l = vec![0.0f64; n * n];
+        let mut values = vec![Vec::new(); n];
+        let mut diagonal = vec![0.0f64; n];
+        // Row i of the factor so far, by column; zero where it is.
+        let mut work = vec![0.0f64; n];
         for i in 0..n {
             if self.out[i] {
-                l[i * n + i] = 1.0;
+                diagonal[i] = 1.0;
                 continue;
             }
-            let mut pivot = k[i * n + i] * (1.0 + softness);
-            for &j in &self.pattern[i] {
-                let mut sum = k[i * n + j];
-                for &p in &self.pattern[j] {
-                    sum -= l[i * n + p] * l[j * n + p];
+            for (&j, &v) in self.k_pattern[i].iter().zip(&self.k[i]) {
+                if !self.out[j] {
+                    work[j] = v;
                 }
-                let v = sum / l[j * n + j];
-                l[i * n + j] = v;
+            }
+            let mut pivot = self.k_diagonal[i] * (1.0 + softness);
+            for &j in &self.pattern[i] {
+                let mut sum = work[j];
+                for (&p, &l) in self.pattern[j].iter().zip(&values[j]) {
+                    sum -= work[p] * l;
+                }
+                let v = sum / diagonal[j];
+                work[j] = v;
                 pivot -= v * v;
             }
             // At least `softness` × the diagonal in exact arithmetic.
-            l[i * n + i] = pivot.max(softness * k[i * n + i]).sqrt();
+            diagonal[i] = pivot.max(softness * self.k_diagonal[i]).sqrt();
+            values[i] = self.pattern[i].iter().map(|&j| work[j]).collect();
+            for &j in &self.pattern[i] {
+                work[j] = 0.0;
+            }
         }
-        l
+        Factor { values, diagonal }
     }
 
     /// Impulses that make `velocity_scale` × every solved row's relative velocity plus
     /// `bias_scale` × its bias zero, with factor `l`.
     fn solve(
         &self,
-        l: &[f64],
+        l: &Factor,
         sb: &[SolverBody],
         velocity_scale: f64,
         bias_scale: f64,
@@ -1787,13 +2361,17 @@ impl LockGroup {
             })
             .collect();
         for i in 0..n {
-            let sum: f64 = self.pattern[i].iter().map(|&p| l[i * n + p] * x[p]).sum();
-            x[i] = (x[i] - sum) / l[i * n + i];
+            let sum: f64 = l.values[i]
+                .iter()
+                .zip(&self.pattern[i])
+                .map(|(&l, &p)| l * x[p])
+                .sum();
+            x[i] = (x[i] - sum) / l.diagonal[i];
         }
         for i in (0..n).rev() {
-            x[i] /= l[i * n + i];
-            for &p in &self.pattern[i] {
-                x[p] -= l[i * n + p] * x[i];
+            x[i] /= l.diagonal[i];
+            for (&p, &l) in self.pattern[i].iter().zip(&l.values[i]) {
+                x[p] -= l * x[i];
             }
         }
         for (x, &out) in x.iter_mut().zip(&self.out) {
@@ -1861,9 +2439,12 @@ fn solve_groups(
     groups: &mut [LockGroup],
     joints: &mut [JointRows],
     locks: &mut [LockBlock],
+    contacts: &mut [ContactRow],
+    held: &mut [bool],
+    late: bool,
     use_bias: bool,
 ) {
-    for group in groups.iter_mut() {
+    for group in groups.iter_mut().filter(|g| g.late == late) {
         // Relaxing leaves axes that are pulling with their full strength alone.
         if !use_bias {
             let mut changed = false;
@@ -1882,24 +2463,30 @@ fn solve_groups(
         }
         loop {
             let x = group.impulses(sb, use_bias);
-            let over = group
-                .rows
-                .iter()
-                .zip(&x)
-                .position(|(r, &dx)| match r.source {
-                    RowSource::Lock(l, axis) => {
-                        (locks[l].impulse[axis] + dx as f32).abs() > r.bound
-                    }
-                    RowSource::Anchor(..) => false,
-                });
+            // The row's accumulated impulse so far.
+            let so_far = |r: &GroupRow| match r.source {
+                RowSource::Anchor(j, axis) => joints[j].point_impulse[axis],
+                RowSource::Lock(l, axis) => locks[l].impulse[axis],
+                RowSource::Contact(c) => contacts[c].impulse[0],
+            };
+            let over = group.rows.iter().zip(&x).position(|(r, &dx)| {
+                let total = so_far(r) + dx as f32;
+                !matches!(r.source, RowSource::Anchor(..)) && (total > r.bound || total < r.floor)
+            });
             if let Some(i) = over {
                 let r = &group.rows[i];
-                let RowSource::Lock(l, axis) = r.source else {
-                    unreachable!()
-                };
-                let held = (locks[l].impulse[axis] + x[i] as f32).clamp(-r.bound, r.bound);
-                LockGroup::apply(r, sb, held - locks[l].impulse[axis]);
-                locks[l].impulse[axis] = held;
+                let before = so_far(r);
+                let kept = (before + x[i] as f32).clamp(r.floor, r.bound);
+                LockGroup::apply(r, sb, kept - before);
+                match r.source {
+                    RowSource::Lock(l, axis) => locks[l].impulse[axis] = kept,
+                    RowSource::Contact(c) => {
+                        contacts[c].impulse[0] = kept;
+                        // Not pushing any more: the contact pass has it again.
+                        held[c] = false;
+                    }
+                    RowSource::Anchor(..) => unreachable!(),
+                }
                 group.out[i] = true;
                 group.factorize();
                 continue;
@@ -1909,6 +2496,7 @@ fn solve_groups(
                 match r.source {
                     RowSource::Anchor(j, axis) => joints[j].point_impulse[axis] += d,
                     RowSource::Lock(l, axis) => locks[l].impulse[axis] += d,
+                    RowSource::Contact(c) => contacts[c].impulse[0] += d,
                 }
                 LockGroup::apply(r, sb, d);
             }
@@ -2005,6 +2593,189 @@ fn solve_angular(
 
 fn inverse(k: f32) -> f32 {
     if k > 1e-12 { 1.0 / k } else { 0.0 }
+}
+
+/// Mass properties of a set of bodies, summed about the world origin in f64 (positions
+/// are metres from the origin, inertias can be grams times square centimetres).
+#[derive(Clone, Copy, Default)]
+struct Moments {
+    mass: f64,
+    first: glam::DVec3,
+    second: glam::DMat3,
+    /// Bodies the solver doesn't move (keyed or massless) in the set.
+    fixed: usize,
+    /// Bodies resting on the ground or scenery in the set.
+    grounded: usize,
+}
+
+impl Moments {
+    fn of(body: &Body, grounded: bool) -> Self {
+        let mut m = Self {
+            grounded: grounded as usize,
+            ..Self::default()
+        };
+        if !body.is_dynamic() {
+            m.fixed = 1;
+            return m;
+        }
+        let mass = 1.0 / body.inv_mass as f64;
+        let x = body.position.as_dvec3();
+        let r = glam::DMat3::from_quat(body.rotation.as_dquat());
+        let i = body.inv_inertia.as_dvec3().map(|v| 1.0 / v.max(1e-12));
+        let own = r * glam::DMat3::from_diagonal(i) * r.transpose();
+        m.mass = mass;
+        m.first = x * mass;
+        m.second =
+            own + (glam::DMat3::from_diagonal(glam::DVec3::splat(x.dot(x))) - outer(x, x)) * mass;
+        m
+    }
+
+    fn add(self, o: Self) -> Self {
+        Self {
+            mass: self.mass + o.mass,
+            first: self.first + o.first,
+            second: self.second + o.second,
+            fixed: self.fixed + o.fixed,
+            grounded: self.grounded + o.grounded,
+        }
+    }
+
+    fn sub(self, o: Self) -> Self {
+        Self {
+            mass: self.mass - o.mass,
+            first: self.first - o.first,
+            second: self.second - o.second,
+            fixed: self.fixed - o.fixed,
+            grounded: self.grounded - o.grounded,
+        }
+    }
+
+    fn centre(&self) -> glam::DVec3 {
+        if self.mass > 0.0 {
+            self.first / self.mass
+        } else {
+            glam::DVec3::ZERO
+        }
+    }
+
+    /// Offset from the set's centre of mass to `point`.
+    fn lever(&self, point: Vec3) -> Vec3 {
+        (point.as_dvec3() - self.centre()).as_vec3()
+    }
+}
+
+fn outer(a: glam::DVec3, b: glam::DVec3) -> glam::DMat3 {
+    glam::DMat3::from_cols(a * b.x, a * b.y, a * b.z)
+}
+
+/// A set of bodies as one rigid body, for the spring cap: immovable if it holds a fixed
+/// body or `still` says so.
+fn limb_body(set: Side) -> SolverBody {
+    let m = set.moments;
+    if set.still || m.fixed > 0 || m.mass <= 0.0 {
+        return SolverBody {
+            v: Vec3::ZERO,
+            w: Vec3::ZERO,
+            inv_mass: 0.0,
+            inv_i: Mat3::ZERO,
+            carry: 0.0,
+        };
+    }
+    let c = m.centre();
+    let about_centre = m.second
+        - (glam::DMat3::from_diagonal(glam::DVec3::splat(c.dot(c))) - outer(c, c)) * m.mass;
+    SolverBody {
+        v: Vec3::ZERO,
+        w: Vec3::ZERO,
+        inv_mass: (1.0 / m.mass) as f32,
+        inv_i: about_centre.inverse().as_mat3(),
+        carry: 1.0,
+    }
+}
+
+/// One side of a joint, for the spring cap.
+#[derive(Clone, Copy)]
+struct Side {
+    moments: Moments,
+    still: bool,
+}
+
+impl Side {
+    fn lever(&self, point: Vec3) -> Vec3 {
+        self.moments.lever(point)
+    }
+
+    fn as_body(&self) -> SolverBody {
+        limb_body(*self)
+    }
+}
+
+/// For every joint, the bodies hanging from it (its child and everything jointed below
+/// that) and the rest of the jointed group it belongs to.
+struct Limbs {
+    /// Per body: the moments of the body and everything below it.
+    below: Vec<Moments>,
+    /// Per body: the moments of its whole jointed group.
+    group: Vec<Moments>,
+}
+
+impl Limbs {
+    fn new(world: &World, grounded: &[bool]) -> Self {
+        let n = world.bodies.len();
+        let own: Vec<Moments> = world
+            .bodies
+            .iter()
+            .zip(grounded)
+            .map(|(b, &g)| Moments::of(b, g))
+            .collect();
+        // Parent body of each body through an enabled joint (a tree per character).
+        let mut up = vec![usize::MAX; n];
+        for j in world.joints.iter().filter(|j| j.enabled) {
+            if up[j.child] == usize::MAX && j.parent != j.child {
+                up[j.child] = j.parent;
+            }
+        }
+        // Depth, to sum leaves first; a cycle (not expected) stops at n steps.
+        let depth = |mut b: usize| {
+            let mut d = 0;
+            while up[b] != usize::MAX && d < n {
+                b = up[b];
+                d += 1;
+            }
+            (d, b)
+        };
+        let info: Vec<(usize, usize)> = (0..n).map(depth).collect();
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by_key(|&b| std::cmp::Reverse(info[b].0));
+        let mut below = own.clone();
+        for &b in &order {
+            if up[b] != usize::MAX && info[b].0 > 0 {
+                let m = below[b];
+                below[up[b]] = below[up[b]].add(m);
+            }
+        }
+        let group = (0..n).map(|b| below[info[b].1]).collect();
+        Self { below, group }
+    }
+
+    /// The limb hanging from a joint whose child body is `child`, and the rest of its group.
+    /// A side resting on the ground or scenery is held there (lesson 9), whichever it is:
+    /// a toe and the foot above it both on the ground are held by it, as is a lying
+    /// character's limb, so neither needs a soft muscle to stay put.
+    fn sides(&self, child: usize) -> (Side, Side) {
+        let limb = self.below[child];
+        let rest = self.group[child].sub(limb);
+        (
+            Side {
+                moments: limb,
+                still: limb.grounded > 0,
+            },
+            Side {
+                moments: rest,
+                still: rest.grounded > 0,
+            },
+        )
+    }
 }
 
 #[cfg(test)]
@@ -2255,6 +3026,42 @@ mod tests {
             lowest = lowest.min(w.bodies[b].position.y);
         }
         assert!(lowest < -0.3, "lowest {lowest}");
+    }
+
+    /// A virtual muscle pulls a free 1 kg ball 0.5 m to its target beside a fixed
+    /// anchor and holds it there against gravity, as a stiff spring; capped at 5 N it
+    /// can't hold up the 9.8 N ball, which falls.
+    #[test]
+    fn virtual_muscle_pulls_to_its_target_within_its_force_limit() {
+        let run = |force_limit: f32| {
+            let mut w = world();
+            w.ground = None;
+            let a = ball(&mut w, Vec3::ZERO, 0.05, 5.0);
+            let b = ball(&mut w, Vec3::new(0.5, 0.0, 0.0), 0.05, 1.0);
+            w.bodies[a].motion = Motion::Kinematic { momentum: 1.0 };
+            let target = Vec3::new(0.0, 0.0, 0.5);
+            for _ in 0..240 {
+                w.virtual_muscles = vec![VirtualMuscle {
+                    anchor: a,
+                    body: b,
+                    point: Vec3::ZERO,
+                    target_position: target,
+                    target_rotation: Quat::IDENTITY,
+                    linear: Some(Gains {
+                        stiffness: 2000.0,
+                        damping: 100.0,
+                        force_limit,
+                    }),
+                    angular: None,
+                }];
+                w.step(1.0 / 120.0);
+            }
+            w.bodies[b].position - target
+        };
+        let held = run(1000.0);
+        assert!(held.length() < 0.01, "{held}");
+        let weak = run(5.0);
+        assert!(weak.y < -1.0, "{weak}");
     }
 
     #[test]
@@ -2622,7 +3429,7 @@ mod tests {
         let top = ball(&mut w, pivot, 0.03, 2.7);
         let bar = ball(
             &mut w,
-            pivot + Vec3::new(0.0, -angle.cos(), angle.sin()) * length,
+            pivot + Vec3::new(0.0, -libm::cosf(angle), libm::sinf(angle)) * length,
             0.03,
             2.7,
         );
@@ -2647,7 +3454,7 @@ mod tests {
             w.step(1.0 / 120.0);
             fastest = fastest.max(w.bodies[bar].linear_velocity.length());
         }
-        let expected = (2.0 * 9.81 * length * (1.0 - angle.cos())).sqrt();
+        let expected = (2.0 * 9.81 * length * (1.0 - libm::cosf(angle))).sqrt();
         assert!(
             (fastest - expected).abs() < 0.05 * expected,
             "fastest {fastest}, a pendulum reaches {expected}"
@@ -2759,6 +3566,92 @@ mod tests {
             held.is_finite() && held.length() < 1.0,
             "gun came loose: {held}"
         );
+    }
+
+    /// A hand a lock holds to a 550 kg prop, with its forearm pulled hard against it.
+    /// The forearm's contact pushes the hand about as the half kilo it sees, and with
+    /// the contacts solved last the lock, which holds it easily, was left short by
+    /// whatever they did: in Walk With Gun the hand turned 20° away from the prop. The
+    /// lock's direct solve now has the last word (lesson 25).
+    #[test]
+    fn contacts_do_not_pull_a_hand_off_the_prop_it_is_held_to() {
+        for pull in [0.8f32, 1.0, 1.25] {
+            let mut w = world();
+            let free = Limits {
+                twist_min: -3.0,
+                twist_max: 3.0,
+                swing1: 3.0,
+                swing2: 3.0,
+            };
+            let gun = ball(&mut w, Vec3::new(0.0, 0.15, 0.0), 0.15, 550.0);
+            let hand = ball(&mut w, Vec3::new(0.3, 0.15, 0.0), 0.05, 0.5);
+            let fore = ball(&mut w, Vec3::new(0.36, 0.2, 0.0), 0.05, 0.7);
+            for (group, body) in [gun, hand, fore].into_iter().enumerate() {
+                w.bodies[body].group = group;
+            }
+            // The wrist: a ball joint between them, nearer than their shapes allow.
+            let wrist = Vec3::new(0.33, 0.175, 0.0);
+            w.joints.push(Joint::new(
+                hand,
+                fore,
+                wrist - w.bodies[hand].position,
+                wrist - w.bodies[fore].position,
+                Quat::IDENTITY,
+                Quat::IDENTITY,
+                Quat::IDENTITY,
+                Quat::IDENTITY,
+                free,
+                free,
+                0.0,
+                0.0,
+            ));
+            w.bodies[fore].parent = Some(hand);
+            for shape in w.shapes.iter_mut().filter(|s| s.body != Some(gun)) {
+                shape.flags.parent = true;
+            }
+            // JoinBodies: the hand held to the prop, position and angle.
+            w.locks.push(Lock {
+                anchor: Some(gun),
+                body: hand,
+                target: (Quat::IDENTITY, Vec3::new(0.3, 0.0, 0.0)),
+                linear: Vec3::splat(1e5),
+                angular: Vec3::splat(1e4),
+            });
+            // The rest of the arm pulls the forearm in: 2.5 kN along the line between
+            // them (a negative strength drives).
+            w.locks.push(Lock {
+                anchor: None,
+                body: fore,
+                target: (Quat::IDENTITY, Vec3::ZERO),
+                linear: Vec3::new(-1500.0, -2000.0, 0.0) * pull,
+                angular: Vec3::ZERO,
+            });
+            let (mut off, mut turn) = (0.0f32, 0.0f32);
+            for _ in 0..240 {
+                w.step(1.0 / 120.0);
+                // As the prop sees it: it may roll about.
+                let (g, h) = (&w.bodies[gun], &w.bodies[hand]);
+                turn = turn.max(
+                    (g.rotation.inverse() * h.rotation)
+                        .to_scaled_axis()
+                        .length(),
+                );
+                off = off.max(
+                    (g.rotation.inverse() * (h.position - g.position) - Vec3::new(0.3, 0.0, 0.0))
+                        .length(),
+                );
+            }
+            println!(
+                "pull x{pull}: hand {:.2} cm off the prop, turned {:.1}°",
+                off * 100.0,
+                turn.to_degrees()
+            );
+            assert!(
+                off < 0.005,
+                "the hand came {off} m off the prop (pull x{pull})"
+            );
+            assert!(turn < 0.05, "the hand turned {turn} rad (pull x{pull})");
+        }
     }
 
     /// Collision-only scenery moving into a body pushes it along without launching it,

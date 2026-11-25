@@ -8,6 +8,7 @@ use eframe::egui::{self, Color32, DragValue, Response, RichText, Slider, Ui};
 
 use super::actions::Action;
 use super::event_inspector;
+use super::physics_panel;
 use super::selection::Selection;
 use super::theme::{self, grid, section};
 use crate::document::{CharacterId, ClipId, ClipKind, Document, Edit, Interp, SimLevel, TrackId};
@@ -57,6 +58,9 @@ pub fn show(
         .show(ui, |ui| match *selection {
             Selection::None => project_page(ui, doc, selection),
             Selection::Character(id) => character_page(ui, doc, selection, id),
+            Selection::Body { character, body } => {
+                physics_panel::body_page(ui, doc, selection, character, body)
+            }
             Selection::Track(id) => track_page(ui, doc, selection, id),
             Selection::Clip(id) => clip_page(ui, doc, selection, id, playhead, actions),
             Selection::Channel { clip, channel } => {
@@ -70,7 +74,7 @@ pub fn show(
         });
 }
 
-fn heading(ui: &mut Ui, kind: &str, title: &str) {
+pub(super) fn heading(ui: &mut Ui, kind: &str, title: &str) {
     ui.add_space(6.0);
     ui.label(RichText::new(kind).small().strong().color(theme::ACCENT));
     ui.label(RichText::new(title).size(17.0).color(theme::TEXT));
@@ -117,6 +121,8 @@ fn project_page(ui: &mut Ui, doc: &mut Document, selection: &mut Selection) {
     });
     let edit = (s != before).then_some(Edit::Settings { before, after: s });
     g.commit(doc, "Edit project settings", edit);
+
+    physics_panel::settings_group(ui, doc);
 
     let project = &doc.project;
     section(ui, "Characters", |ui| {

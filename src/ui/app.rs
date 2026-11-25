@@ -10,14 +10,14 @@ use super::actions::Action;
 use super::export::{ExportDialog, Format};
 use super::selection::Selection;
 use super::timeline_panel::{self, TimelineState};
-use super::{inspector, shortcuts, theme};
+use super::{inspector, scene_tree, shortcuts, theme};
 use crate::document::events::{self, NewClip};
 use crate::document::{
     CharacterId, ClipKind, ClipProps, Document, Edit, Project, SimLevel, TrackId, sample,
     world_transforms,
 };
 use crate::io::{self, motion};
-use crate::physics::Simulation;
+use crate::physics::{Simulation, interp};
 use crate::timeline::Playback;
 use crate::viewport::{CharacterView, OrbitCamera, Viewport};
 
@@ -33,6 +33,7 @@ pub struct NeuroMotionApp {
     pub(super) viewport: Viewport,
     pub(super) show_inspector: bool,
     pub(super) show_timeline: bool,
+    pub(super) show_scene: bool,
     playback: Playback,
     timeline: TimelineState,
     pub(super) simulation: Simulation,
@@ -65,6 +66,7 @@ impl NeuroMotionApp {
             viewport: Viewport::default(),
             show_inspector: true,
             show_timeline: true,
+            show_scene: true,
             timeline: TimelineState::default(),
             simulation: Simulation::default(),
             physics_needed: None,
@@ -125,7 +127,7 @@ impl NeuroMotionApp {
     pub(super) fn selected_character(&self) -> Option<CharacterId> {
         let project = &self.doc.project;
         match self.selection {
-            Selection::Character(id) => Some(id),
+            Selection::Character(id) | Selection::Body { character: id, .. } => Some(id),
             Selection::Track(id) => project.track(id).map(|t| t.character),
             other => other
                 .clip()
@@ -144,10 +146,13 @@ impl NeuroMotionApp {
     fn character_views(&self) -> Vec<CharacterView> {
         let project = &self.doc.project;
         let poses = project.evaluate(self.playback.playhead() as f32);
+        // Between whole frames the cached simulation is blended (physics::interp), so
+        // playback on a fast display doesn't step at the scene's frame rate.
         let simulated = self
             .physics_on()
-            .then(|| self.simulation.frame(self.playback.frame()))
+            .then(|| interp::frame_at(&self.simulation, self.playback.playhead()))
             .flatten();
+        let simulated = simulated.as_ref();
         project
             .characters
             .iter()
@@ -334,6 +339,10 @@ impl NeuroMotionApp {
             "Imported pose \u{201c}{}\u{201d} at frame {start}.",
             pose.name
         );
+        for note in &pose.notes {
+            self.status.push(' ');
+            self.status.push_str(note);
+        }
     }
 
     /// Files dropped on the window: poses go onto the timeline, anything else opens.
@@ -793,6 +802,15 @@ impl eframe::App for NeuroMotionApp {
                         &mut self.selection,
                         &mut actions,
                     )
+                });
+        }
+        if self.show_scene {
+            egui::SidePanel::left("scene_tree")
+                .resizable(true)
+                .default_width(210.0)
+                .min_width(150.0)
+                .show(ctx, |ui| {
+                    scene_tree::show(ui, &self.doc.project, &mut self.selection)
                 });
         }
         if self.show_inspector {

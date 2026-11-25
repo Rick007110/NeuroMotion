@@ -24,11 +24,11 @@ use roxmltree::Node;
 use super::IoError;
 use crate::document::physics::{
     BodyDef, ContactModel, Frame, Gains, Geometry, Ground, Interaction, JointDef, Limits,
-    MuscleGains, MuscleSet, PhysicsRig, ShapeDef,
+    MuscleGains, MuscleSet, PhysicsRig, ShapeDef, SpringCap, VirtualMuscleDef,
 };
 use crate::document::{
-    Channel, CharacterId, CharacterKind, ClipKind, ClipProps, FrameRange, Interp, Joint, Keyframe,
-    Project, ProjectSettings, Property, SimLevel, SkeletonRef,
+    Channel, Character, CharacterId, CharacterKind, ClipKind, ClipProps, FrameRange, Interp, Joint,
+    Keyframe, Pose, Project, ProjectSettings, Property, SimLevel, SkeletonRef, world_transforms,
 };
 
 /// An imported project plus human-readable notes on what was converted or left out.
@@ -42,6 +42,8 @@ pub struct PoseImport {
     pub character: CharacterId,
     pub name: String,
     pub channels: Vec<Channel>,
+    /// What was left out, in words for the user (empty when everything fitted).
+    pub notes: Vec<String>,
 }
 
 pub fn import_scene(path: &Path) -> Result<Import, IoError> {
@@ -359,13 +361,9 @@ pub fn import_scene(path: &Path) -> Result<Import, IoError> {
         ));
     }
     if counts.contains_key("Behaviour") {
-        notes.push("Behaviours are kept; Balance and CatchFall run NeuroMotion's own controllers, the others (stagger, writhe, ...) aren't simulated yet.".into());
+        notes.push("Behaviours are kept with their settings; Balance, Stagger, CatchFall, BodyFoetal, BodyWrithe, Look and Reach and Writhe in mid-air (Explosion) run NeuroMotion's own controllers, the others aren't simulated yet.".into());
     }
-    if skipped_joints > 0 {
-        notes.push(format!(
-            "Skipped {skipped_joints} virtual-muscle helper joint(s)."
-        ));
-    }
+    virtual_muscle_notes(&project, skipped_joints, &mut notes);
     if skipped_channels > 0 {
         notes.push(format!(
             "Skipped {skipped_channels} animation channel(s) for joints the rig doesn't have."
@@ -424,24 +422,52 @@ pub fn import_character(path: &Path) -> Result<Import, IoError> {
         kind.label().to_lowercase()
     };
     let mut notes = vec![format!("Imported {what} with {joints} joints.")];
-    if skipped > 0 {
-        notes.push(format!("Skipped {skipped} virtual-muscle helper joint(s)."));
-    }
+    virtual_muscle_notes(&project, skipped, &mut notes);
     Ok(Import { project, notes })
+}
+
+/// Says what became of the virtual-muscle helper joints (`helpers` of them): springs in
+/// the rigs, or left out where a character has no rig or no effector for them.
+fn virtual_muscle_notes(project: &Project, helpers: usize, notes: &mut Vec<String>) {
+    let kept: usize = project
+        .characters
+        .iter()
+        .filter_map(|c| c.physics.as_ref())
+        .map(|rig| rig.virtual_muscles.len())
+        .sum();
+    if kept > 0 {
+        notes.push(format!(
+            "{kept} virtual muscle(s) (chest to hand, pelvis to heel) kept as springs in the physics rig, not as bones."
+        ));
+    }
+    if helpers > kept {
+        notes.push(format!(
+            "Skipped {} virtual-muscle helper joint(s).",
+            helpers - kept
+        ));
+    }
 }
 
 /// Reads a pose and converts it to channels for the best-matching character.
 pub fn import_pose(path: &Path, project: &Project) -> Result<PoseImport, IoError> {
-    let text = read_document(path)?;
-    let xml = parse(&text)?;
+    pose_from_text(&read_document(path)?, file_stem(path), project)
+}
+
+/// [`import_pose`] on a pose's XML, named `name`.
+pub fn pose_from_text(text: &str, name: String, project: &Project) -> Result<PoseImport, IoError> {
+    let xml = parse(text)?;
     let root = xml.root_element();
     if !root.has_tag_name("Pose") {
         return Err(IoError::Format("not an endorphin pose (.nma)".into()));
     }
-    if child(root, "DesiredPose").is_some() {
-        return Err(IoError::Format(
-            "this pose stores muscle (effector) targets instead of joint transforms, which NeuroMotion can't import yet".into(),
-        ));
+    if let Some(targets) = child(root, "DesiredPose") {
+        let (character, channels, notes) = muscle_target_channels(root, targets, project)?;
+        return Ok(PoseImport {
+            character,
+            name,
+            channels,
+            notes,
+        });
     }
     if root
         .attribute("refFrame")
@@ -484,8 +510,9 @@ pub fn import_pose(path: &Path, project: &Project) -> Result<PoseImport, IoError
     let channels = pose_channels(root, &character.skeleton, None);
     Ok(PoseImport {
         character: character.id,
-        name: file_stem(path),
+        name,
         channels,
+        notes: Vec::new(),
     })
 }
 
@@ -556,6 +583,340 @@ fn pose_channels(
         }
     }
     channels
+}
+
+// ---------------------------------------------------------------------------------
+// Legacy poses: muscle targets
+
+/// One single-axis hinge of a muscle-target pose's own skeleton, at rest, in the
+/// pose's world frame.
+struct LegacyHinge<'a> {
+    name: &'a str,
+    position: Vec3,
+    /// The hinge's axis: the first column (`Vi`) of its frame.
+    axis: Vec3,
+    /// The muscle target driving it: effector name and angle (radians).
+    target: Option<(&'a str, f32)>,
+}
+
+/// Rest directions that differ by more than this (radians) mean the character rests
+/// differently from the pose's skeleton there (arms in a T-pose against arms down).
+/// Smaller differences are proportions, left alone.
+const REST_MISMATCH: f32 = 0.5;
+
+/// Joints of endorphin's legacy skeleton that later characters merged into others,
+/// with their names there, best first: the outer shoulder and the upper arm's twist
+/// are the shoulder's, the forearm's twist its own joint or else the elbow's, the
+/// shin's twist the knee's and the thigh's the hip's.
+const LEGACY_JOINTS: [(&str, &[&str]); 5] = [
+    ("OutShoulder", &["Shoulder"]),
+    ("UpArm", &["Shoulder"]),
+    ("LoArm", &["LoArmTwist", "Elbow"]),
+    ("LoLeg", &["Knee"]),
+    ("UpLeg", &["Hip"]),
+];
+
+/// Converts a legacy pose that stores muscle targets (`<DesiredPose>`: one angle per
+/// single-axis effector, like `LKneeZ`) into held rotation channels on the project's
+/// character they fit best. Returns that character, the channels and notes on what
+/// was left out. See docs/endorphin-formats.md, "Muscle-target poses".
+///
+/// The pose carries its own skeleton, a chain of single-axis hinges per joint (`LHipX`,
+/// `LHipZ`, then the thigh's twist), each with its rest frame in the world. An effector
+/// drives the hinge into the body named after it (`LKneeZ` → `…_LKneeZMB`), about the
+/// hinge frame's first axis, right-handed, by its angle; zero is the rest frame.
+/// A character takes a hinge's target on the joint of the same name, else on the joint
+/// whose muscle is the effector (`LKneeZ`), else the one whose muscle is the effector's
+/// joint (`LKnee`, or its later name from [`LEGACY_JOINTS`]), where one joint collects
+/// the rotations of all its axes. Where the character rests differently from the
+/// pose's skeleton (a T-pose's arms against the pose's hanging ones), the limb is
+/// first turned to the pose's rest, so it ends up where the pose puts it.
+fn muscle_target_channels(
+    root: Node,
+    targets: Node,
+    project: &Project,
+) -> Result<(CharacterId, Vec<Channel>, Vec<String>), IoError> {
+    let mut hinges = Vec::new();
+    read_legacy_hinges(child(root, "Skeleton"), None, Quat::IDENTITY, &mut hinges);
+    if hinges.is_empty() {
+        return Err(IoError::Format(
+            "this pose stores muscle targets but not the skeleton they belong to".into(),
+        ));
+    }
+    let effectors: Vec<(&str, f32)> = elements(Some(targets))
+        .filter_map(|e| {
+            let angle = child(e, "DesiredAngle")?.text()?.trim().parse().ok()?;
+            Some((e.attribute("name")?, angle))
+        })
+        .collect();
+    // Each effector drives the hinge into the body named after it. A few have no such
+    // body: the hip's third axis turns the thigh (`LHipZMB_LUpLegYMB` for `LHipY`), so an
+    // effector left over takes the unclaimed hinge that leaves its joint's bodies into one
+    // named for the same axis.
+    let mut unplaced = Vec::new();
+    for &(name, angle) in &effectors {
+        let body = format!("{name}MB");
+        match hinges
+            .iter()
+            .position(|h| h.name.split_once('_').is_some_and(|(_, c)| c == body))
+        {
+            Some(h) => hinges[h].target = Some((name, angle)),
+            None => unplaced.push((name, angle)),
+        }
+    }
+    let mut missing = Vec::new();
+    for (name, angle) in unplaced {
+        let alias = effector_axis(name).and_then(|(joint, axis)| {
+            hinges.iter().position(|h| {
+                h.target.is_none()
+                    && h.name.split_once('_').is_some_and(|(p, c)| {
+                        p.starts_with(joint) && c.ends_with(&format!("{axis}MB"))
+                    })
+            })
+        });
+        match alias {
+            Some(h) => hinges[h].target = Some((name, angle)),
+            None => missing.push(name),
+        }
+    }
+
+    // The character: the one the pose names if any of it fits, else the best fit.
+    let fit = |c: &Character| -> Vec<Option<usize>> {
+        hinges
+            .iter()
+            .map(|h| {
+                let (effector, _) = h.target?;
+                c.skeleton.joint_index(h.name).or_else(|| {
+                    let rig = c.physics.as_ref()?;
+                    let by = |muscle: &str| rig.joints.iter().find(|j| j.muscle == muscle);
+                    let (joint, _) = effector_axis(effector)?;
+                    by(effector)
+                        .or_else(|| by(joint))
+                        .or_else(|| {
+                            let (old, new) =
+                                LEGACY_JOINTS.iter().find(|(old, _)| joint.ends_with(old))?;
+                            let side = &joint[..joint.len() - old.len()];
+                            new.iter().find_map(|n| by(&format!("{side}{n}")))
+                        })
+                        .map(|j| j.joint)
+                })
+            })
+            .collect()
+    };
+    let count = |c: &&Character| fit(c).iter().flatten().count();
+    let named = root
+        .attribute("character")
+        .and_then(|n| project.character_by_name(n))
+        .filter(|c| count(c) > 0);
+    let character = named
+        .or_else(|| {
+            // The first best fit, so ties go to the earlier character.
+            project.characters.iter().fold(None, |best, c| match best {
+                Some(b) if count(&b) >= count(&c) => Some(b),
+                _ => Some(c),
+            })
+        })
+        .filter(|c| count(c) > 0)
+        .ok_or_else(|| {
+            IoError::Format(
+                "none of the project's characters have this pose's joints or muscles".into(),
+            )
+        })?;
+    let joint_of = fit(character);
+    let skeleton = &character.skeleton;
+    let rest = world_transforms(skeleton, &Pose::rest(skeleton.joints.len()));
+
+    // Where each target joint is: in the pose, its first hinge; on the character, the joint.
+    let mut first = vec![None; skeleton.joints.len()];
+    for (h, j) in joint_of.iter().enumerate() {
+        if let Some(j) = *j {
+            first[j].get_or_insert(h);
+        }
+    }
+    let pose_at = |j: usize| first[j].map(|h| hinges[h].position);
+
+    // Both are upright (Y up), but may face different ways: turn the pose about Y so a
+    // left-right pair of its joints lines up with the character's (endorphin's legacy
+    // poses face +X with their right side towards +Z).
+    let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
+    let facing = hinges.iter().enumerate().find_map(|(h, hinge)| {
+        let (effector, _) = hinge.target?;
+        let right = format!("R{}", effector.strip_prefix('L')?);
+        let other = hinges
+            .iter()
+            .position(|o| o.target.is_some_and(|(e, _)| e == right))?;
+        let (l, r) = (joint_of[h]?, joint_of[other]?);
+        let a = flat(pose_at(r)? - pose_at(l)?);
+        let b = flat(rest[r].1 - rest[l].1);
+        (a.length() > 1e-3 && b.length() > 1e-3)
+            .then(|| Quat::from_rotation_y(libm::atan2f(a.cross(b).y, a.dot(b))))
+    });
+    let mut notes = Vec::new();
+    let turn = facing.unwrap_or_else(|| {
+        notes.push("No left and right joint pair to tell which way the character faces; the pose's own axes were used.".into());
+        Quat::IDENTITY
+    });
+
+    // Each joint's rotation in the world at rest: its hinges' turns, parent first.
+    let mut turns: Vec<Option<Quat>> = vec![None; skeleton.joints.len()];
+    for (h, hinge) in hinges.iter().enumerate() {
+        if let (Some(j), Some((_, angle))) = (joint_of[h], hinge.target) {
+            let q = turns[j].get_or_insert(Quat::IDENTITY);
+            *q *= Quat::from_axis_angle((turn * hinge.axis).normalize(), angle);
+        }
+    }
+
+    // Every joint's turn in the world, accumulated down the skeleton (parents come
+    // first): the pose's (`posed`), and the one that first brings the character's rest
+    // to the pose's (`rest_fix`). A mapped joint is fixed when the bone to its mapped
+    // children (towards their middle, for several) points elsewhere than the pose's,
+    // by the shortest turn, which its children inherit.
+    let n = skeleton.joints.len();
+    let mut children: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for j in (0..n).filter(|&j| first[j].is_some()) {
+        let mut up = skeleton.joints[j].parent;
+        while let Some(a) = up {
+            if first[a].is_some() {
+                children[a].push(j);
+                break;
+            }
+            up = skeleton.joints[a].parent;
+        }
+    }
+    let mut posed = vec![Quat::IDENTITY; n];
+    let mut rest_fix = vec![Quat::IDENTITY; n];
+    let mut fixed = Vec::new();
+    let mut channels = Vec::new();
+    for j in 0..n {
+        let (parent_posed, parent_fix) = skeleton.joints[j]
+            .parent
+            .map_or((Quat::IDENTITY, Quat::IDENTITY), |p| {
+                (posed[p], rest_fix[p])
+            });
+        posed[j] = parent_posed * turns[j].unwrap_or(Quat::IDENTITY);
+        let mut fix = parent_fix;
+        if let (Some(here), false) = (pose_at(j), children[j].is_empty()) {
+            let middle = |at: &dyn Fn(usize) -> Vec3| {
+                children[j].iter().map(|&c| at(c)).sum::<Vec3>() / children[j].len() as f32
+            };
+            let ours = parent_fix * (middle(&|c| rest[c].1) - rest[j].1);
+            let theirs = turn * (middle(&|c| pose_at(c).unwrap_or(here)) - here);
+            if ours.length() > 0.02
+                && theirs.length() > 0.02
+                && ours.angle_between(theirs) > REST_MISMATCH
+            {
+                fix = Quat::from_rotation_arc(ours.normalize(), theirs.normalize()) * parent_fix;
+                fixed.push(skeleton.joints[j].name.as_str());
+            }
+        }
+        rest_fix[j] = fix;
+        // The joint's own turn in the world at rest: from its parent's to its own.
+        let q = (parent_posed * parent_fix).inverse() * posed[j] * fix;
+        if q.angle_between(Quat::IDENTITY) < 1e-4 {
+            continue;
+        }
+        let name = skeleton.joints[j].name.as_str();
+        // From the world at rest into the joint's own frame, as channels are.
+        let world = rest[j].0;
+        let local = (world.inverse() * q * world).normalize();
+        let (x, y, z) = local.to_euler(EulerRot::XYZ);
+        for (property, value) in
+            rotation_props()
+                .into_iter()
+                .zip([x.to_degrees(), y.to_degrees(), z.to_degrees()])
+        {
+            if value.abs() >= 0.01 {
+                channels.push(Channel {
+                    joint: name.to_owned(),
+                    property,
+                    keys: vec![Keyframe {
+                        frame: 0,
+                        value,
+                        interp: Interp::Linear,
+                    }],
+                });
+            }
+        }
+    }
+    let unfitted: Vec<&str> = hinges
+        .iter()
+        .zip(&joint_of)
+        .filter(|(_, j)| j.is_none())
+        .filter_map(|(h, _)| Some(h.target?.0))
+        .chain(missing)
+        .collect();
+    if !unfitted.is_empty() {
+        notes.push(format!(
+            "{} muscle target(s) have no joint on {}: {}.",
+            unfitted.len(),
+            character.name,
+            unfitted.join(", ")
+        ));
+    }
+    if !fixed.is_empty() {
+        notes.push(format!(
+            "{} rest differently on {} than in the pose (a T-pose's arms, say), so they were first turned to the pose's rest: {}.",
+            if fixed.len() == 1 { "One joint" } else { "Some joints" },
+            character.name,
+            fixed.join(", ")
+        ));
+    }
+    Ok((character.id, channels, notes))
+}
+
+/// Splits a single-axis effector name into its joint and axis: `LKneeZ` → (`LKnee`, 'Z').
+fn effector_axis(name: &str) -> Option<(&str, char)> {
+    let axis = name
+        .chars()
+        .last()
+        .filter(|c| matches!(c, 'X' | 'Y' | 'Z'))?;
+    Some((&name[..name.len() - 1], axis))
+}
+
+/// A muscle-target pose's skeleton: its hinges, parents first. Their frames are stored
+/// in the world (`refFrame="World"`); a frame relative to its parent is placed under it.
+fn read_legacy_hinges<'a>(
+    node: Option<Node<'a, '_>>,
+    parent: Option<usize>,
+    parent_rotation: Quat,
+    hinges: &mut Vec<LegacyHinge<'a>>,
+) {
+    for h in elements(node.and_then(|n| child(n, "ChildJoints"))) {
+        let Some(m) = child(h, "TransformMatrix") else {
+            continue;
+        };
+        let column = |tag: &str| {
+            let v = child(m, tag)?;
+            let c = |a: &str| {
+                attr_f32(v, &format!("b{a}")).or_else(|| v.attribute(a)?.trim().parse().ok())
+            };
+            Some(Vec3::new(c("x")?, c("y")?, c("z")?))
+        };
+        let (Some(i), Some(j), Some(k), Some(p)) =
+            (column("Vi"), column("Vj"), column("Vk"), column("Vp"))
+        else {
+            continue;
+        };
+        let world = m
+            .attribute("refFrame")
+            .is_some_and(|f| f.eq_ignore_ascii_case("world"));
+        let rotation = Quat::from_mat3(&Mat3::from_cols(i, j, k)).normalize();
+        let (rotation, position) = match parent {
+            Some(p_index) if !world => (
+                parent_rotation * rotation,
+                hinges[p_index].position + parent_rotation * p,
+            ),
+            _ => (rotation, p),
+        };
+        hinges.push(LegacyHinge {
+            name: h.attribute("name").unwrap_or(""),
+            position,
+            axis: rotation * Vec3::X,
+            target: None,
+        });
+        let index = hinges.len() - 1;
+        read_legacy_hinges(Some(h), Some(index), rotation, hinges);
+    }
 }
 
 // ---------------------------------------------------------------------------------
@@ -977,7 +1338,41 @@ fn event_settings(event: Node) -> BTreeMap<String, String> {
     if !targets.is_empty() {
         out.insert("targets".to_owned(), targets.join(", "));
     }
+    behaviour_parameters(event, &mut out);
     out
+}
+
+/// A behaviour event's own settings (`Parameters`): one `Variable` per setting, named
+/// by `fk`, its value in `ja`. A setting without `ja` takes the behaviour's default,
+/// which the scene doesn't say, so it is left out. A selection of bodies or collision
+/// surfaces (`ja="MetaBodyAndCollisionSelection"`, a reach or look-at target) lists them
+/// as `ValuePtr`s, kept comma separated (and left out when empty). Helper graphics (the
+/// locators endorphin draws) aren't settings. The event's own attributes win if a name
+/// is taken.
+fn behaviour_parameters(event: Node, out: &mut BTreeMap<String, String>) {
+    for var in elements(child(event, "Parameters")).filter(|v| v.has_tag_name("Variable")) {
+        let (Some(key), Some(value)) = (var.attribute("fk"), var.attribute("ja")) else {
+            continue;
+        };
+        match value {
+            "HelperGraphic" => {}
+            "MetaBodyAndCollisionSelection" => {
+                let picked: Vec<&str> = var
+                    .children()
+                    .filter(|c| c.has_tag_name("ValuePtr"))
+                    .filter_map(|c| c.attribute("ja"))
+                    .collect();
+                if !picked.is_empty() {
+                    out.entry(key.to_owned())
+                        .or_insert_with(|| picked.join(", "));
+                }
+            }
+            _ => {
+                out.entry(key.to_owned())
+                    .or_insert_with(|| value.to_owned());
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------
@@ -994,6 +1389,8 @@ fn read_physics_settings(project: &mut Project, scene: Node, engine: Node) {
     }
     // endorphin's friction values are Coulomb coefficients × 100 (lesson 21).
     settings.contact = ContactModel::Coulomb;
+    // endorphin's muscles move whole limbs (lesson 27).
+    settings.spring_cap = SpringCap::Limbs;
     settings.ground = (scene.attribute("useDefaultGround") != Some("false")).then(|| Ground {
         height: 0.0,
         material: "tarmac".into(),
@@ -1159,12 +1556,17 @@ fn read_rig(
         let (hard, soft, stiffness, damping) = if tag == "Hinge" {
             hinge_limits(*jn)
         } else {
+            // endorphin's swing1 bounds the turn about the limit frame's Z axis (the
+            // child's axis swinging towards Y) and swing2 the turn about Y: read the other
+            // way round, the active poses endorphin's own scenes store sit up to five
+            // times outside their joints' cones (toes, hands, clavicles, feet, hips),
+            // and this way within them (physics-design.md, lesson 27).
             let limits = |tag: &str| {
                 child(*jn, tag).map(|l| {
                     Limits::from_sizes(
                         number(l, "twistSize").unwrap_or(0.0),
-                        number(l, "swing1Size").unwrap_or(0.0),
                         number(l, "swing2Size").unwrap_or(0.0),
+                        number(l, "swing1Size").unwrap_or(0.0),
                     )
                 })
             };
@@ -1202,8 +1604,29 @@ fn read_rig(
         });
     }
 
+    let virtual_muscles = virtual_muscles(node, skeleton, &bodies);
     let muscle_sets = elements(child(node, "Calibrations"))
         .filter_map(|cal| {
+            // Position gains, kept for the muscles that drive a position.
+            let linear: BTreeMap<String, Gains> = elements(Some(cal))
+                .filter(|p| p.has_tag_name("SkeletalEffectorParameters"))
+                .filter_map(|p| {
+                    let name = p.attribute("name")?;
+                    virtual_muscles
+                        .iter()
+                        .any(|vm| vm.position && vm.muscle == name)
+                        .then(|| {
+                            let gain =
+                                |what: &str| number(p, &format!("linear{what}")).unwrap_or(0.0);
+                            let gains = Gains {
+                                stiffness: gain("Stiffness"),
+                                damping: gain("Damping"),
+                                force_limit: gain("ForceLimit"),
+                            };
+                            (name.to_owned(), gains)
+                        })
+                })
+                .collect();
             let skeletal = elements(Some(cal))
                 .filter(|p| p.has_tag_name("SkeletalEffectorParameters"))
                 .filter_map(|p| {
@@ -1243,6 +1666,7 @@ fn read_rig(
                 name: cal.attribute("name")?.to_owned(),
                 muscles,
                 fallback,
+                linear,
             })
         })
         .collect();
@@ -1252,7 +1676,96 @@ fn read_rig(
         joints,
         muscle_sets,
         isotropic_inertia: isotropic,
+        virtual_muscles,
     })
+}
+
+/// A character's virtual muscles: helper joints (`isVirtualMuscle="true"`) under the
+/// chest and the pelvis, each riding on a hand or heel body (its `metaBody`), with an
+/// effector of the same name. They are springs, not bones, so the skeleton leaves them
+/// out (`add_joint`) and only the rig keeps them.
+///
+/// The helper's frame at rest gives the point on the hand or heel it pulls: at the
+/// wrist and the heel's centre on the standard character. Its `SecondaryFrameOffset`
+/// (a few centimetres, differing between copies of the same character) isn't used: what
+/// it offsets isn't clear from the files. Its limits (2.6 m) and the joint's
+/// `linearEnabled`, `twistEnabled` and `swingEnabled` (all false) leave the bodies free:
+/// the helper constrains nothing. Its effector's drive modes say whether it drives
+/// position and orientation (`DriveNone` is off); an inactive effector leaves it out.
+/// Its gains, as a joint's, are its entries in the presets: every shipped character
+/// lists its virtual muscles at 1 in every field (1 N/m, 1 N·s/m, 1 N; 1 N·m/rad, ...),
+/// in every preset. The effector's own `<Calibration>` (10 N/m, 10 N·s/m, 50 N and
+/// 1, 10, 1 for orientation) is the same block the shoulders and spine carry, so it
+/// isn't read as the virtual muscles' gains, as it isn't for the joints.
+fn virtual_muscles(
+    node: Node,
+    skeleton: &SkeletonRef,
+    bodies: &[BodyDef],
+) -> Vec<VirtualMuscleDef> {
+    let Some(root) = child(node, "Skeleton") else {
+        return Vec::new();
+    };
+    let rest = world_transforms(skeleton, &Pose::rest(skeleton.joints.len()));
+    let body_index = |name: &str| bodies.iter().position(|b| b.name == name);
+    let effector = |joint: &str| {
+        node.descendants()
+            .filter(|n| n.has_tag_name("Effector"))
+            .find(|e| e.attribute("jointName") == Some(joint))
+    };
+    let mut out = Vec::new();
+    for vm in root.descendants().filter(|n| {
+        n.is_element()
+            && n.attribute("isVirtualMuscle") == Some("true")
+            && n.attribute("name")
+                .is_some_and(|name| name.contains("VirtualMuscle"))
+    }) {
+        let name = vm.attribute("name").unwrap_or_default();
+        // The joint it hangs from (the chest's, the pelvis's): its nearest ancestor the
+        // skeleton kept, and the body that joint carries.
+        let Some((parent_joint, parent)) = vm
+            .ancestors()
+            .skip(1)
+            .find_map(|a| Some((skeleton.joint_index(a.attribute("name")?)?, a)))
+        else {
+            continue;
+        };
+        let (Some(parent_body), Some(body)) = (
+            parent.attribute("metaBody").and_then(body_index),
+            vm.attribute("metaBody").and_then(body_index),
+        ) else {
+            continue;
+        };
+        let Some(effector) = effector(name).filter(|e| e.attribute("active") != Some("false"))
+        else {
+            continue;
+        };
+        let drives = |mode: &str| effector.attribute(mode).is_some_and(|m| m != "DriveNone");
+        let (position, orientation) = (drives("linearDriveMode"), drives("angularDriveMode"));
+        if !position && !orientation {
+            continue;
+        }
+        // Where the helper sits at rest, on the body it rides.
+        let (_, local_pos) = transform(vm).unwrap_or((Quat::IDENTITY, Vec3::ZERO));
+        let (pr, pp) = rest[parent_joint];
+        let at = pp + pr * local_pos;
+        let def = &bodies[body];
+        let (jr, jp) = rest
+            .get(def.joint)
+            .copied()
+            .unwrap_or((Quat::IDENTITY, Vec3::ZERO));
+        let br = (jr * Quat::from_array(def.frame.rotation).normalize()).normalize();
+        let bp = jp + jr * Vec3::from(def.frame.position);
+        out.push(VirtualMuscleDef {
+            name: name.to_owned(),
+            muscle: effector.attribute("name").unwrap_or(name).to_owned(),
+            parent_body,
+            body,
+            point: (br.inverse() * (at - bp)).to_array(),
+            position,
+            orientation,
+        });
+    }
+    out
 }
 
 /// A hinge's (lower, upper) range, as twist limits with swing locked.
@@ -1414,6 +1927,168 @@ fn file_stem(path: &Path) -> String {
 fn path_is_prop(path: &Path) -> bool {
     path.components()
         .any(|c| c.as_os_str().eq_ignore_ascii_case("Props"))
+}
+
+/// A hand-written muscle-target pose in the shape of endorphin's legacy ones (not one
+/// of its files), for the importer's tests and the physics stand-in.
+#[cfg(test)]
+pub mod legacy_fixture {
+    use glam::Vec3;
+
+    use crate::document::physics::PhysicsRig;
+
+    /// Hip flexion, knee bend, lower-spine bend, shoulder raise and elbow bend (radians).
+    pub const HIP: f32 = 0.5;
+    pub const KNEE: f32 = -1.0;
+    pub const SPINE: f32 = 0.3;
+    pub const SHOULDER: f32 = 0.6;
+    pub const ELBOW: f32 = 0.8;
+
+    /// The skeleton's hinges as the legacy poses store them: (name, axis, world
+    /// position), nested by indent level. Like them it faces +X, Y up, its right side
+    /// towards +Z, and each joint is a chain of single-axis hinges (the hip's third axis
+    /// turns the thigh, `LHipZMB_LUpLegYMB`, which `LHipY` drives).
+    const HINGES: [(usize, &str, [f32; 3], [f32; 3]); 13] = [
+        (0, "PelvisMB_LoSpineZMB", [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]),
+        (
+            1,
+            "LoSpineZMB_LShoulderZMB",
+            [0.0, 0.0, 1.0],
+            [0.0, 1.4, -0.19],
+        ),
+        (
+            2,
+            "LShoulderZMB_LElbowZMB",
+            [0.0, 0.0, 1.0],
+            [0.0, 1.12, -0.19],
+        ),
+        (
+            1,
+            "LoSpineZMB_RShoulderZMB",
+            [0.0, 0.0, 1.0],
+            [0.0, 1.4, 0.19],
+        ),
+        (
+            2,
+            "RShoulderZMB_RElbowZMB",
+            [0.0, 0.0, 1.0],
+            [0.0, 1.12, 0.19],
+        ),
+        (0, "PelvisMB_LHipZMB", [0.0, 0.0, 1.0], [0.0, 0.9, -0.1]),
+        (1, "LHipZMB_LUpLegYMB", [0.0, 1.0, 0.0], [0.0, 0.9, -0.1]),
+        (2, "LUpLegYMB_LKneeZMB", [0.0, 0.0, 1.0], [0.0, 0.48, -0.1]),
+        (0, "PelvisMB_RHipZMB", [0.0, 0.0, 1.0], [0.0, 0.9, 0.1]),
+        (1, "RHipZMB_RUpLegYMB", [0.0, 1.0, 0.0], [0.0, 0.9, 0.1]),
+        (2, "RUpLegYMB_RKneeZMB", [0.0, 0.0, 1.0], [0.0, 0.48, 0.1]),
+        // Not a joint the other characters have: a hinge with no target.
+        (0, "PelvisMB_TailXMB", [1.0, 0.0, 0.0], [0.0, 0.95, 0.0]),
+        (1, "TailXMB_TailTipXMB", [1.0, 0.0, 0.0], [-0.2, 0.95, 0.0]),
+    ];
+
+    /// The hinges with their world positions and parents, for building a character
+    /// with the pose's own skeleton.
+    pub fn hinges() -> Vec<(&'static str, Option<usize>, Vec3)> {
+        let mut out = Vec::new();
+        let mut stack: Vec<usize> = Vec::new();
+        for (i, &(level, name, _, position)) in HINGES.iter().enumerate() {
+            stack.truncate(level);
+            out.push((name, stack.last().copied(), Vec3::from(position)));
+            stack.push(i);
+        }
+        out
+    }
+
+    /// The pose, turning each thigh by `twist` (radians) about its own length.
+    /// `BaseNeckZ` names a hinge the skeleton doesn't have, as endorphin's own does.
+    pub fn xml(twist: f32) -> String {
+        let targets = [
+            ("LoSpineZ", SPINE),
+            ("LShoulderZ", SHOULDER),
+            ("LElbowZ", ELBOW),
+            ("RShoulderZ", SHOULDER),
+            ("RElbowZ", ELBOW),
+            ("LHipZ", HIP),
+            ("LHipY", twist),
+            ("LKneeZ", KNEE),
+            ("RHipZ", HIP),
+            ("RHipY", -twist),
+            ("RKneeZ", KNEE),
+            ("BaseNeckZ", 0.0),
+        ];
+        let mut xml = String::from(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Pose name=\"\" character=\"legacy\">\n  <DesiredPose name=\"DefaultPose\">\n",
+        );
+        for (name, angle) in targets {
+            xml += &format!(
+                "    <EffectorParameters name=\"{name}\">\n      <DesiredAngle>{angle}</DesiredAngle>\n    </EffectorParameters>\n"
+            );
+        }
+        // Reach targets, which the importer doesn't use.
+        xml += "  </DesiredPose>\n  <Relationships>\n    <RPROMagnet name=\"LHandRPRO\">\n      <TransformMatrix refFrame=\"World\">\n        <Vi x=\"1.0\" y=\"0.0\" z=\"0.0\"/>\n        <Vj x=\"0.0\" y=\"1.0\" z=\"0.0\"/>\n        <Vk x=\"0.0\" y=\"0.0\" z=\"1.0\"/>\n        <Vp x=\"0.3\" y=\"1.0\" z=\"-0.2\"/>\n      </TransformMatrix>\n    </RPROMagnet>\n  </Relationships>\n  <Skeleton name=\"\">\n    <TransformMatrix refFrame=\"World\">\n      <Vi x=\"1.0\" y=\"0.0\" z=\"0.0\"/>\n      <Vj x=\"0.0\" y=\"1.0\" z=\"0.0\"/>\n      <Vk x=\"0.0\" y=\"0.0\" z=\"1.0\"/>\n      <Vp x=\"0.0\" y=\"0.95\" z=\"0.0\"/>\n    </TransformMatrix>\n    <ChildJoints>\n";
+        let vector =
+            |tag: &str, v: Vec3| format!("<{tag} x=\"{}\" y=\"{}\" z=\"{}\"/>", v.x, v.y, v.z);
+        let mut open = 0;
+        for &(level, name, axis, position) in &HINGES {
+            while open > level {
+                open -= 1;
+                xml += "</ChildJoints></Hinge>\n";
+            }
+            // The hinge's frame: its axis first, the other two any right-handed pair.
+            let i = Vec3::from(axis);
+            let helper = if i.y.abs() < 0.9 { Vec3::Y } else { Vec3::Z };
+            let j = (helper - i * i.dot(helper)).normalize();
+            let k = i.cross(j);
+            xml += &format!(
+                "<Hinge name=\"{name}\"><TransformMatrix refFrame=\"World\">{}{}{}{}</TransformMatrix><ChildJoints>\n",
+                vector("Vi", i),
+                vector("Vj", j),
+                vector("Vk", k),
+                vector("Vp", Vec3::from(position)),
+            );
+            open += 1;
+        }
+        while open > 0 {
+            open -= 1;
+            xml += "</ChildJoints></Hinge>\n";
+        }
+        xml + "    </ChildJoints>\n  </Skeleton>\n</Pose>\n"
+    }
+
+    /// Gives the placeholder rig's muscles endorphin's effector names (`l_knee` becomes
+    /// `LKnee`), as an imported character has them, keeping their gains.
+    pub fn effector_names(rig: &mut PhysicsRig) {
+        let rename = |muscle: &str| -> Option<String> {
+            let (side, joint) = match muscle.split_once('_') {
+                Some(("l", j)) => ("L", j),
+                Some(("r", j)) => ("R", j),
+                _ => ("", muscle),
+            };
+            let joint = match joint {
+                "spine" => "LoSpine",
+                "chest" => "UpSpine",
+                "neck" => "Neck",
+                "shoulder" => "Shoulder",
+                "elbow" => "Elbow",
+                "wrist" => "Hand",
+                "hip" => "Hip",
+                "knee" => "Knee",
+                "ankle" => "Ankle",
+                _ => return None,
+            };
+            Some(format!("{side}{joint}"))
+        };
+        for joint in &mut rig.joints {
+            if let Some(name) = rename(&joint.muscle) {
+                joint.muscle = name;
+            }
+        }
+        for set in &mut rig.muscle_sets {
+            set.muscles = std::mem::take(&mut set.muscles)
+                .into_iter()
+                .map(|(m, g)| (rename(&m).unwrap_or(m), g))
+                .collect();
+        }
+    }
 }
 
 /// Joint-level checks against a hand-written scene (no endorphin install needed).
@@ -1610,6 +2285,84 @@ mod tests {
         assert_eq!(track.name, "Forces");
     }
 
+    /// A behaviour's parameters become its settings, by name; a target selection lists
+    /// what it picked. Defaults (no `ja`), empty selections and helper graphics are left
+    /// out.
+    #[test]
+    fn behaviour_parameters_become_settings() {
+        let reach = r#"  <SecondaryBehaviours>
+    <SecondaryBehaviour behaviourName="Bob2: Look and Reach 2.5" index="18" name="Behaviour01" startFrameNumber="0" endFrameNumber="30" priority="0" character="hero">
+      <Parameters>
+        <Variable fk="LeftHandTarget" kg="5" ja="MetaBodyAndCollisionSelection" numRequiredObjects="0">
+          <ValuePtr kg="3" ja="background.MetaBodies.Prop0"/>
+        </Variable>
+        <Variable fk="RightHandTarget" kg="5" ja="MetaBodyAndCollisionSelection" numRequiredObjects="0"/>
+        <Variable fk="LeftHand_Speed" kg="0" ja="0.700" de="HandReach_Speed"/>
+        <Variable fk="LeftHand_Delay" kg="0" de="HandReach_Delay"/>
+        <Variable fk="LeftHand_UsePrediction" kg="2" ja="false" de="HandReach_UsePrediction"/>
+        <Variable fk="LookAtTargetLocator" kg="5" ja="HelperGraphic" de="UserHelperGraphic"/>
+      </Parameters>
+      <TargetSelection numRequiredObjects="0"/>
+      <Objects/>
+    </SecondaryBehaviour>
+  </SecondaryBehaviours>
+</Scene>"#;
+        let Import { project, .. } = import(&scene_xml().replace("</Scene>", reach));
+        let reach = project
+            .clips
+            .iter()
+            .find(|c| matches!(&c.kind, ClipKind::Event { event } if event == "Behaviour"))
+            .unwrap();
+        let get = |key: &str| reach.source.get(key).map(String::as_str);
+        assert_eq!(get("behaviourName"), Some("Bob2: Look and Reach 2.5"));
+        assert_eq!(get("LeftHandTarget"), Some("background.MetaBodies.Prop0"));
+        assert_eq!(get("LeftHand_Speed"), Some("0.700"));
+        assert_eq!(get("LeftHand_UsePrediction"), Some("false"));
+        assert_eq!(get("RightHandTarget"), None);
+        assert_eq!(get("LeftHand_Delay"), None);
+        assert_eq!(get("LookAtTargetLocator"), None);
+    }
+
+    #[test]
+    fn behaviour_events_keep_their_parameters() {
+        // As endorphin writes them: one Variable per parameter, its value in `ja`, none
+        // when the behaviour's default is used.
+        let xml = scene_xml().replace(
+            "</ForceEvents>",
+            r#"</ForceEvents>
+  <SecondaryBehaviours>
+    <SecondaryBehaviour behaviourName="Bob2: Explosion 2.0" index="27" name="5" displayName="Writhe in mid-air 2.0" startFrameNumber="48" endFrameNumber="60" priority="2" character="hero">
+      <Parameters>
+        <Variable fk="ShoulderAmplitude" kg="0" ja="0.7" de="ShoulderAmplitude"/>
+        <Variable fk="Speed" kg="0" ja="0.6" de="Frequency"/>
+        <Variable fk="NoiseLevel" kg="0"/>
+        <Variable fk="priority" kg="0" ja="9"/>
+      </Parameters>
+      <TargetSelection numRequiredObjects="0"/>
+      <Objects/>
+    </SecondaryBehaviour>
+  </SecondaryBehaviours>"#,
+        );
+        let Import { project, .. } = import(&xml);
+        let behaviour = project
+            .clips
+            .iter()
+            .find(|c| {
+                c.kind
+                    == ClipKind::Event {
+                        event: "Behaviour".into(),
+                    }
+            })
+            .unwrap();
+        let get = |key: &str| behaviour.source.get(key).map(String::as_str);
+        assert_eq!(get("behaviourName"), Some("Bob2: Explosion 2.0"));
+        assert_eq!(get("ShoulderAmplitude"), Some("0.7"));
+        assert_eq!(get("Speed"), Some("0.6"));
+        assert_eq!(get("NoiseLevel"), None);
+        // The event's own attributes win over a parameter of the same name.
+        assert_eq!(get("priority"), Some("2"));
+    }
+
     /// A crate placed at (3, 2, 0) and turned 90° about Y, with a start pose, a mass
     /// object whose collision surface has no geometry of its own, and keys in the scene's
     /// own animation (plus a camera's, which no character owns).
@@ -1728,6 +2481,170 @@ mod tests {
     /// Back-Flip-To-Combo's helper body: a character MetaBody whose inertial body is a
     /// zero-sized Sphyl of density 0. Fixed in place it would hold the character up, so it
     /// gets a token mass; the environment's massless piece stays fixed scenery.
+    /// endorphin's swing1 is the turn about the limit frame's Z axis and swing2 the turn
+    /// about Y: read the other way, the poses its scenes store sit far outside their
+    /// joints' cones. Imported scenes also count whole limbs for the muscle cap.
+    #[test]
+    fn swing_sizes_and_spring_cap() {
+        let rest = matrix(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            [0.0, 0.0, 0.0],
+        );
+        let below = matrix(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            [0.0, -0.4, 0.0],
+        );
+        let limits = |tag: &str, swing1: f32, swing2: f32| {
+            format!(
+                r#"<{tag} btwistSize="{}" bswing1Size="{}" bswing2Size="{}"/>"#,
+                hex(1.0),
+                hex(swing1),
+                hex(swing2)
+            )
+        };
+        let xml = format!(
+            r#"<?xml version="1.0"?>
+<Scene>
+  <Engine bpositionBufferFrameRate="{fps}"><PlaybackRange start="0" end="30"/></Engine>
+  <Characters>
+    <Character name="hero" typeName="skeletalCharacter2.5">
+      <MetaBodies>
+        <MetaBody name="PelvisMass">{rest}
+          <InertialBody><Geometry type="Sphere" bparam0="{r}"/><Inertia density="{one}"/></InertialBody>
+        </MetaBody>
+        <MetaBody name="ThighMass">{below}
+          <InertialBody><Geometry type="Sphere" bparam0="{r}"/><Inertia density="{one}"/></InertialBody>
+        </MetaBody>
+      </MetaBodies>
+      <Skeleton name="Pelvis" metaBody="PelvisMass">{rest}<ChildJoints>
+        <SkeletalJoint name="Thigh" metaBody="ThighMass">{below}{soft}{hard}</SkeletalJoint>
+      </ChildJoints></Skeleton>
+    </Character>
+  </Characters>
+</Scene>"#,
+            fps = hex(30.0),
+            r = hex(0.1),
+            one = hex(1000.0),
+            soft = limits("SoftLimits", 1.5, 0.9),
+            hard = limits("HardLimits", 1.7, 1.1),
+        );
+        let Import { project, .. } = import(&xml);
+        let rig = project.characters[0].physics.as_ref().unwrap();
+        let joint = &rig.joints[0];
+        // Half of each size; swing1 bounds the turn about Z.
+        assert!((joint.soft.swing2 - 0.75).abs() < 1e-5, "{:?}", joint.soft);
+        assert!((joint.soft.swing1 - 0.45).abs() < 1e-5, "{:?}", joint.soft);
+        assert!((joint.hard.swing2 - 0.85).abs() < 1e-5, "{:?}", joint.hard);
+        assert!((joint.hard.swing1 - 0.55).abs() < 1e-5, "{:?}", joint.hard);
+        assert_eq!(project.physics.spring_cap, SpringCap::Limbs);
+    }
+
+    /// A virtual muscle (pelvis to heel here) becomes a spring in the rig: the body it
+    /// rides, the point on it where the helper sits at rest, its effector's drive modes
+    /// and its gains in the presets. It is no bone, and an inactive effector leaves it
+    /// out.
+    #[test]
+    fn virtual_muscles_become_rig_springs_not_bones() {
+        let rest = matrix(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            [0.0, 0.0, 0.0],
+        );
+        let below = matrix(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            [0.0, -0.4, 0.0],
+        );
+        let heel = matrix(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            [0.0, -0.9, 0.05],
+        );
+        let xml = |active: &str, angular: &str| {
+            format!(
+                r#"<?xml version="1.0"?>
+<Scene>
+  <Engine bpositionBufferFrameRate="{fps}"><PlaybackRange start="0" end="30"/></Engine>
+  <Characters>
+    <Character name="hero" typeName="skeletalCharacter2.5">
+      <MetaBodies>
+        <MetaBody name="PelvisMass">{rest}
+          <InertialBody><Geometry type="Sphere" bparam0="{r}"/><Inertia density="{one}"/></InertialBody>
+        </MetaBody>
+        <MetaBody name="HeelMass">{rest}
+          <InertialBody><Geometry type="Sphere" bparam0="{r}"/><Inertia density="{one}"/></InertialBody>
+        </MetaBody>
+      </MetaBodies>
+      <Skeleton name="root" metaBody="PelvisMass">{rest}<ChildJoints>
+        <SkeletalJoint name="LeftLegVirtualMuscle" metaBody="HeelMass" isVirtualMuscle="true" linearEnabled="false">{heel}</SkeletalJoint>
+        <SkeletalJoint name="Knee" metaBody="HeelMass">{below}</SkeletalJoint>
+      </ChildJoints></Skeleton>
+      <Effectors>
+        <Effector name="LeftLegVirtualMuscle" jointName="LeftLegVirtualMuscle" type="Skeletal" active="{active}" linearDriveMode="DrivePosAndVel" angularDriveMode="{angular}">
+          <Calibration blinearStiffness="{ten}" blinearDamping="{ten}" bswingStiffness="{one_}" btwistStiffness="{one_}" bswingDamping="{ten}" btwistDamping="{ten}" blinearForceLimit="{fifty}" bswingForceLimit="{one_}" btwistForceLimit="{one_}"/>
+        </Effector>
+      </Effectors>
+      <Calibrations>
+        <Calibration name="Default">
+          <SkeletalEffectorParameters blinearStiffness="{ten}" blinearDamping="{one_}" bswingStiffness="{fifty}" btwistStiffness="{fifty}" bswingDamping="{one_}" btwistDamping="{one_}" blinearForceLimit="{fifty}" bswingForceLimit="{ten}" btwistForceLimit="{ten}" name="LeftLegVirtualMuscle"/>
+          <SkeletalEffectorParameters blinearStiffness="{ten}" blinearDamping="{one_}" bswingStiffness="{fifty}" btwistStiffness="{fifty}" bswingDamping="{one_}" btwistDamping="{one_}" blinearForceLimit="{fifty}" bswingForceLimit="{ten}" btwistForceLimit="{ten}" name="Knee"/>
+        </Calibration>
+      </Calibrations>
+    </Character>
+  </Characters>
+</Scene>"#,
+                fps = hex(30.0),
+                r = hex(0.1),
+                one = hex(1000.0),
+                one_ = hex(1.0),
+                ten = hex(10.0),
+                fifty = hex(50.0),
+            )
+        };
+        let Import { project, notes } = import(&xml("true", "DrivePosAndVel"));
+        let hero = &project.characters[0];
+        let names: Vec<_> = hero
+            .skeleton
+            .joints
+            .iter()
+            .map(|j| j.name.as_str())
+            .collect();
+        assert_eq!(names, ["root", "Knee"], "no bone for the virtual muscle");
+        let rig = hero.physics.as_ref().unwrap();
+        assert_eq!(rig.joints.len(), 1, "and no joint");
+        let vm = &rig.virtual_muscles[..];
+        assert_eq!(vm.len(), 1, "{vm:?}");
+        assert_eq!(vm[0].name, "LeftLegVirtualMuscle");
+        assert_eq!((vm[0].parent_body, vm[0].body), (0, 1));
+        // The heel body sits at the knee joint, 0.4 m down: the helper 0.5 m below it.
+        let point = Vec3::from(vm[0].point);
+        assert!(
+            (point - Vec3::new(0.0, -0.5, 0.05)).length() < 1e-5,
+            "{point}"
+        );
+        assert!(vm[0].position && vm[0].orientation);
+        // Its gains are its preset entries; only it keeps position gains.
+        let set = &rig.muscle_sets[0];
+        let linear = set.linear["LeftLegVirtualMuscle"];
+        assert_eq!(
+            (linear.stiffness, linear.damping, linear.force_limit),
+            (10.0, 1.0, 50.0)
+        );
+        assert_eq!(set.linear.len(), 1);
+        assert_eq!(set.muscles["LeftLegVirtualMuscle"].swing.stiffness, 50.0);
+        assert!(
+            notes.iter().any(|n| n.contains("1 virtual muscle")),
+            "{notes:?}"
+        );
+
+        let rig = |xml: &str| import(xml).project.characters[0].physics.clone().unwrap();
+        let no_turn = rig(&xml("true", "DriveNone"));
+        assert!(!no_turn.virtual_muscles[0].orientation);
+        assert!(no_turn.virtual_muscles[0].position);
+        assert!(
+            rig(&xml("false", "DrivePosAndVel"))
+                .virtual_muscles
+                .is_empty()
+        );
+    }
+
     #[test]
     fn massless_character_body_gets_a_token_mass_but_scenery_stays_fixed() {
         let rest = matrix(
@@ -1785,6 +2702,229 @@ mod tests {
         assert_eq!(scenery.shapes.len(), 1);
     }
 
+    /// A project with the placeholder biped (faces +Z, left side towards +X), its
+    /// muscles named as endorphin's effectors, as `name`.
+    fn placeholder_project(names: &[&str], t_pose_left_arm: bool) -> Project {
+        let mut project = Project::new(ProjectSettings {
+            name: "Poses".into(),
+            fps: 60.0,
+            range: FrameRange { start: 0, end: 60 },
+        });
+        for name in names {
+            let mut skeleton = crate::document::sample::humanoid_skeleton();
+            if t_pose_left_arm {
+                for (joint, length) in [("l_elbow", 0.28), ("l_wrist", 0.25)] {
+                    let j = skeleton.joint_index(joint).unwrap();
+                    skeleton.joints[j].offset = [length, 0.0, 0.0];
+                }
+            }
+            let mut rig = crate::document::sample::humanoid_rig(&skeleton);
+            legacy_fixture::effector_names(&mut rig);
+            let id = project.add_character(name, CharacterKind::Character, skeleton);
+            project
+                .characters
+                .iter_mut()
+                .find(|c| c.id == id)
+                .unwrap()
+                .physics = Some(rig);
+        }
+        project
+    }
+
+    /// The first character's joints in the world, held in the imported pose.
+    fn posed_joints(project: &Project, pose: &PoseImport) -> Vec<(Quat, Vec3)> {
+        let skeleton = &project.characters[0].skeleton;
+        let mut held = Pose::rest(skeleton.joints.len());
+        for c in &pose.channels {
+            held.joints[skeleton.joint_index(&c.joint).unwrap()][c.property.index()] =
+                c.keys[0].value;
+        }
+        world_transforms(skeleton, &held)
+    }
+
+    fn held_values(pose: &PoseImport) -> BTreeMap<(String, &'static str), f32> {
+        pose.channels
+            .iter()
+            .map(|c| ((c.joint.clone(), c.property.label()), c.keys[0].value))
+            .collect()
+    }
+
+    fn assert_near(
+        values: &BTreeMap<(String, &'static str), f32>,
+        joint: &str,
+        axis: &str,
+        degrees: f32,
+    ) {
+        let key = (joint.to_owned(), axis);
+        let value = values.get(&key).copied().unwrap_or(0.0);
+        assert!(
+            (value - degrees).abs() < 0.05,
+            "{joint} {axis}: {value}° instead of {degrees}° in {values:?}"
+        );
+    }
+
+    /// On a character with the pose's own skeleton, each target is a turn about its
+    /// hinge's axis: here the hinges rest unturned, so the axes are the world's.
+    #[test]
+    fn muscle_targets_turn_the_pose_s_own_hinges() {
+        let mut project = placeholder_project(&[], false);
+        let hinges = legacy_fixture::hinges();
+        let pelvis = Vec3::new(0.0, 0.95, 0.0);
+        let mut joints = vec![Joint::new("PelvisMB", None, pelvis.to_array())];
+        for &(name, parent, at) in &hinges {
+            let (p, from) = parent.map_or((0, pelvis), |p| (p + 1, hinges[p].2));
+            joints.push(Joint::new(name, Some(p), (at - from).to_array()));
+        }
+        let skeleton = SkeletonRef {
+            name: "Legacy".into(),
+            source: None,
+            joints,
+        };
+        project.add_character("legacy", CharacterKind::Character, skeleton);
+        let pose = pose_from_text(&legacy_fixture::xml(0.2), "dp".into(), &project).unwrap();
+        let values = held_values(&pose);
+        let deg = f32::to_degrees;
+        assert_near(
+            &values,
+            "PelvisMB_LoSpineZMB",
+            "rotate Z",
+            -deg(legacy_fixture::SPINE),
+        );
+        assert_near(
+            &values,
+            "PelvisMB_LHipZMB",
+            "rotate Z",
+            deg(legacy_fixture::HIP),
+        );
+        assert_near(&values, "LHipZMB_LUpLegYMB", "rotate Y", deg(0.2));
+        assert_near(&values, "RHipZMB_RUpLegYMB", "rotate Y", -deg(0.2));
+        assert_near(
+            &values,
+            "LUpLegYMB_LKneeZMB",
+            "rotate Z",
+            deg(legacy_fixture::KNEE),
+        );
+        assert_near(
+            &values,
+            "RShoulderZMB_RElbowZMB",
+            "rotate Z",
+            deg(legacy_fixture::ELBOW),
+        );
+        assert_eq!(values.len(), 11, "one turn per target: {values:?}");
+        assert_eq!(
+            pose.notes,
+            ["1 muscle target(s) have no joint on legacy: BaseNeckZ."]
+        );
+    }
+
+    /// On another character the targets go to the joints whose muscles carry the
+    /// effectors' names, turned to the way it faces: the placeholder faces +Z, the pose
+    /// +X. Hips and shoulders swing forwards, knees bend back, elbows forwards, the
+    /// spine bends forwards; all about the placeholder's side axis (X).
+    #[test]
+    fn muscle_targets_drive_the_joints_named_by_their_muscles() {
+        let project = placeholder_project(&["walker"], false);
+        let pose = pose_from_text(&legacy_fixture::xml(0.0), "dp".into(), &project).unwrap();
+        let values = held_values(&pose);
+        let deg = f32::to_degrees;
+        for side in ["l", "r"] {
+            assert_near(
+                &values,
+                &format!("{side}_hip"),
+                "rotate X",
+                -deg(legacy_fixture::HIP),
+            );
+            assert_near(
+                &values,
+                &format!("{side}_knee"),
+                "rotate X",
+                -deg(legacy_fixture::KNEE),
+            );
+            let shoulder = -deg(legacy_fixture::SHOULDER);
+            assert_near(&values, &format!("{side}_shoulder"), "rotate X", shoulder);
+            assert_near(
+                &values,
+                &format!("{side}_elbow"),
+                "rotate X",
+                -deg(legacy_fixture::ELBOW),
+            );
+        }
+        assert_near(&values, "spine", "rotate X", deg(legacy_fixture::SPINE));
+        assert_eq!(values.len(), 9, "only side-axis turns: {values:?}");
+
+        // Where that puts the legs: knees forwards of the hips, feet back under the knees.
+        let skeleton = &project.characters[0].skeleton;
+        let at = posed_joints(&project, &pose);
+        let z = |joint: &str| at[skeleton.joint_index(joint).unwrap()].1.z;
+        assert!(
+            z("l_knee") > 0.15 && z("l_ankle") < z("l_knee") - 0.15,
+            "{at:?}"
+        );
+        assert!(z("head") > 0.1, "the spine bends forwards: {at:?}");
+    }
+
+    /// The thighs' twist (`LHipY`, the hinge with no body of its own) reaches the hips;
+    /// mirrored targets give mirrored legs.
+    #[test]
+    fn muscle_target_twist_reaches_the_hips() {
+        let project = placeholder_project(&["walker"], false);
+        let pose = pose_from_text(&legacy_fixture::xml(0.4), "dp".into(), &project).unwrap();
+        let skeleton = &project.characters[0].skeleton;
+        let at = posed_joints(&project, &pose);
+        let p = |joint: &str| at[skeleton.joint_index(joint).unwrap()].1;
+        let (left, right) = (p("l_ankle"), p("r_ankle"));
+        assert!((left.x + right.x).abs() < 1e-3 && (left.z - right.z).abs() < 1e-3);
+        // The twist turns the bent shin sideways (it was straight back at 0.1 m out).
+        assert!((left.x - 0.1).abs() > 0.05, "{left}");
+    }
+
+    /// A character resting differently where the pose turns it (a T-pose arm against
+    /// the pose's hanging one) is first turned to the pose's rest there, so the arm
+    /// ends up where it does on a character that rests like the pose.
+    #[test]
+    fn muscle_targets_bring_a_t_pose_arm_where_the_pose_puts_it() {
+        let place = |t_pose: bool| {
+            let project = placeholder_project(&["walker"], t_pose);
+            let pose = pose_from_text(&legacy_fixture::xml(0.0), "dp".into(), &project).unwrap();
+            let at = posed_joints(&project, &pose);
+            let skeleton = &project.characters[0].skeleton;
+            let p = |joint: &str| at[skeleton.joint_index(joint).unwrap()].1;
+            (p("l_elbow"), p("l_wrist"), p("r_wrist"), pose.notes)
+        };
+        let (elbow, wrist, right, notes) = place(false);
+        let (t_elbow, t_wrist, t_right, t_notes) = place(true);
+        assert!(
+            !notes.iter().any(|n| n.contains("first turned")),
+            "{notes:?}"
+        );
+        assert!(t_elbow.distance(elbow) < 0.01, "{t_elbow} against {elbow}");
+        assert!(t_wrist.distance(wrist) < 0.01, "{t_wrist} against {wrist}");
+        assert!(t_right.distance(right) < 1e-4, "the other arm is untouched");
+        assert!(
+            t_notes
+                .iter()
+                .any(|n| n.contains("first turned") && n.contains("l_shoulder")),
+            "{t_notes:?}"
+        );
+    }
+
+    /// The character the pose names wins if it fits; one with no matching joints or
+    /// muscles doesn't take the pose at all.
+    #[test]
+    fn muscle_target_pose_picks_its_character() {
+        let project = placeholder_project(&["first", "legacy"], false);
+        let pose = pose_from_text(&legacy_fixture::xml(0.0), "dp".into(), &project).unwrap();
+        assert_eq!(
+            Some(pose.character),
+            project.character_by_name("legacy").map(|c| c.id)
+        );
+
+        let mut bare = placeholder_project(&["bare"], false);
+        bare.characters[0].physics = None;
+        let error = pose_from_text(&legacy_fixture::xml(0.0), "dp".into(), &bare);
+        assert!(matches!(error, Err(IoError::Format(e)) if e.contains("joints or muscles")));
+    }
+
     #[test]
     fn rejects_unreadable_bytes() {
         assert!(matches!(
@@ -1839,14 +2979,8 @@ mod tests {
         for f in &failed {
             println!("  {f}");
         }
-        // Expected failures: password-protected (encrypted) tutorial scenes, and poses
-        // stored as muscle targets, which arrive with physics.
-        assert!(
-            failed
-                .iter()
-                .all(|f| f.contains("password") || f.contains("effector")),
-            "{failed:#?}"
-        );
+        // Expected failures: password-protected (encrypted) tutorial scenes.
+        assert!(failed.iter().all(|f| f.contains("password")), "{failed:#?}");
         assert!(ok > 150);
     }
 
@@ -1960,30 +3094,9 @@ mod tests {
                     }
                 }
             }
-
-            // The importer doesn't carry a behaviour's parameters yet, so read them from
-            // the scene's own XML: one `Variable` per parameter, its value in `ja`.
-            let text = read_document(path).unwrap();
-            let xml = parse(&text).unwrap();
-            for node in xml
-                .descendants()
-                .filter(|n| n.has_tag_name("SecondaryBehaviour"))
-            {
-                let Some(behaviour) = node.attribute("behaviourName") else {
-                    continue;
-                };
-                let usage = behaviours.entry(behaviour.to_owned()).or_default();
-                for var in node.descendants().filter(|n| n.has_tag_name("Variable")) {
-                    let (Some(key), value) = (var.attribute("fk"), var.attribute("ja")) else {
-                        continue;
-                    };
-                    usage
-                        .settings
-                        .entry(format!("param {key}"))
-                        .or_default()
-                        .insert(value.unwrap_or("(default)").to_owned());
-                }
-            }
+            // A behaviour's parameters arrive with the clip's settings (the importer's
+            // `behaviour_parameters`); those a scene leaves at endorphin's default
+            // aren't listed.
         }
 
         let have = |name: &str| {

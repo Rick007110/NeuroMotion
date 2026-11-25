@@ -9,6 +9,12 @@ pub enum Selection {
     None,
     Character(CharacterId),
     Track(TrackId),
+    /// One physics body of a character, picked in the scene tree. Read-only in the
+    /// inspector. `body` indexes the character's `PhysicsRig::bodies`.
+    Body {
+        character: CharacterId,
+        body: usize,
+    },
     Clip(ClipId),
     Channel {
         clip: ClipId,
@@ -57,6 +63,10 @@ impl Selection {
                 Selection::None => true,
                 Selection::Character(id) => project.character(id).is_some(),
                 Selection::Track(id) => project.track(id).is_some(),
+                Selection::Body { character, body } => project
+                    .character(character)
+                    .and_then(|c| c.physics.as_ref())
+                    .is_some_and(|rig| body < rig.bodies.len()),
                 Selection::Clip(id) => project.clip(id).is_some(),
                 Selection::Channel { clip, channel } => project
                     .clip(clip)
@@ -76,6 +86,7 @@ impl Selection {
             *self = match *self {
                 Selection::Key { clip, channel, .. } => Selection::Channel { clip, channel },
                 Selection::Channel { clip, .. } => Selection::Clip(clip),
+                Selection::Body { character, .. } => Selection::Character(character),
                 _ => Selection::None,
             };
         }

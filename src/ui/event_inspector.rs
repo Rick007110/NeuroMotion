@@ -396,7 +396,12 @@ fn behaviour(ui: &mut Ui, s: &mut Settings, g: &mut Gesture) {
             }
             ui.end_row();
         });
-        ui.weak("endorphin's behaviours are protected and aren't simulated yet; the event is kept for when NeuroMotion has its own.");
+        let name = s.get(keys::BEHAVIOUR_NAME).map_or("", String::as_str);
+        if crate::physics::behaviour::Behaviour::from_name(name).is_some() {
+            ui.weak("NeuroMotion runs its own controller of this name, using the settings below where it knows them.");
+        } else {
+            ui.weak("endorphin's behaviours are protected and NeuroMotion has none of this name yet; the event is kept for when it has its own.");
+        }
     });
 }
 

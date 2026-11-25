@@ -9,11 +9,14 @@ toward a modern physics engine that behaves like endorphin's and then goes furth
 
 > **Status: early development.** The editor, timeline, undo/redo and endorphin import
 > work. The physics engine runs imported endorphin characters with their own bodies,
-> joint limits and muscles; all 16 bundled sample scenes checked simulate
-> cleanly over their whole length. Of endorphin's *behaviours*, balance (which steps
-> when pushed too hard to stand still), stagger, catch fall, body foetal and writhe
-> have original controllers; scenes that rely on the others behave like a limp
-> character instead.
+> joint limits and muscles; all 17 bundled sample scenes simulate
+> cleanly over their whole length, faster than real time (the largest, Bridge Escape,
+> runs its 10.5 s in about 3 s on one core), and a test scores NeuroMotion against measurements
+> of endorphin's own runs ([docs/reference-measurements.md](docs/reference-measurements.md)).
+> Of endorphin's *behaviours*, balance (which steps
+> when pushed too hard to stand still), stagger, catch fall, body foetal, writhe and
+> look and reach and explosion (writhe in mid-air) have original controllers; scenes
+> that rely on the others behave like a limp character instead.
 
 > **Want to help build it?** NeuroMotion is open to everyone: animators, programmers,
 > testers and writers. See [Contributing](#contributing) below, or go straight to
@@ -40,7 +43,11 @@ compatibility.
 ## What works
 
 - **Editor**: viewport with an orbit camera, a timeline with tracks, clips, keys,
-  scrubbing and transport, an inspector for whatever is selected, and a menu bar.
+  scrubbing and transport, an inspector for whatever is selected, a scene tree of
+  characters, props and their physics bodies (View → Scene Tree), and a menu bar.
+- **Physics settings**: simulation rate, gravity, contact model, muscle cap and the
+  material interaction and pair tables are editable on the inspector's project page,
+  each change undoable and re-simulated at once.
 - **Animation**: keyframed clips layered per track with weights and blend-in/out
   ramps; step, linear and smooth curves.
 - **Physics events**: add simulation switches, pushes, transitions back to animation,
@@ -60,8 +67,9 @@ compatibility.
   | `.nmc` characters, props and rigs | Open as a project |
   | `.nma` poses | Import onto a character at the playhead |
 
-  160 of the files bundled with endorphin 2.5.2 import. The exceptions are
-  password-protected scenes and one legacy pose format. Details:
+  159 of the 161 `.ens`, `.nmc` and `.nma` files bundled with endorphin 2.5.2 import,
+  the legacy pose that stores muscle targets included. The other two are
+  password-protected tutorial scenes. Details:
   [docs/endorphin-formats.md](docs/endorphin-formats.md).
 
 ## Physics
@@ -69,20 +77,27 @@ compatibility.
 NeuroMotion has its own physics engine, modelled on endorphin's so imported scenes
 behave the same way, then improved:
 
-- One rigid body per bone, with endorphin's masses and collision shapes; twist/swing
+- One rigid body per bone, with endorphin's masses and collision shapes (cylinders
+  exact, with flat caps and a sharp rim); twist/swing
   joint limits with soft zones; force-limited muscles with endorphin's presets
   (Default, Normal, DesiredPoseCalibration, Strong, Weak); material pairs for friction
   and bounce.
 - Per-character simulation levels (animated, collision only, collision with momentum,
   simulated), momentum carried from animation into physics, push events, active poses,
   active animations, lock/join constraints, and transitions back to animation.
+- endorphin's virtual muscles, springs pulling the hands towards the chest and the heels
+  towards the pelvis, driven by the active poses that name them (not yet by active
+  animations).
 - Behaviours: balance (capture-point ankle strategy, stepping when the ankles can't
   hold), stagger (balance that keeps stepping), catch fall (arms reach for the
-  ground), body foetal (curl up) and writhe (weak, wandering struggle), run by
-  endorphin's behaviour events of the same name
+  ground), body foetal (curl up), writhe (weak, wandering struggle), look and reach
+  (hands reach for a target, the head looks at one) and explosion (flailing in
+  mid-air, matched to endorphin's), run by endorphin's behaviour events of the same
+  name, with their targets and settings
   ([docs/behaviours.md](docs/behaviours.md)).
 - **Improvements over endorphin:** no simulate/clear step (the timeline re-simulates
-  automatically, in the background, whenever you edit); deterministic results;
+  automatically, in the background, whenever you edit); deterministic results,
+  bit for bit the same on Windows, macOS and Linux;
   stiff muscles that can't explode; muscle targets kept inside joint limits; bodies
   that constraints hold together (a heavy prop in both hands, a trapeze on a long rope)
   solved exactly as one system.
@@ -182,7 +197,8 @@ kind is welcome, and you don't need to write Rust to help.
      [a new issue](https://github.com/Rick007110/NeuroMotion/issues/new/choose).
    - **Measure endorphin.** If you have it, record how a scene behaves (frames, angles,
      timings) with the *Reference measurement* issue template. These numbers become
-     tests that keep NeuroMotion's physics close to endorphin's.
+     tests that keep NeuroMotion's physics close to endorphin's
+     ([docs/reference-measurements.md](docs/reference-measurements.md)).
    - **Take an issue.** Those labelled
      [good first issue](https://github.com/Rick007110/NeuroMotion/labels/good%20first%20issue)
      are small and self-contained;

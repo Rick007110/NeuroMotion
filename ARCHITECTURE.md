@@ -64,17 +64,24 @@ Keep these boundaries: `document`, `timeline` and `physics` must never depend on
 
 ### `physics`
 
-- `world.rs`: bodies, joints, muscles, locks and contacts, and the solver (substepped
-  sequential impulses with soft constraints; locked groups, and characters something
-  heavy presses on, solved directly).
+- `world.rs`: bodies, joints, muscles, virtual muscles, locks and contacts, and the
+  solver (substepped sequential impulses with soft constraints; locked groups, and
+  characters something heavy presses on, solved directly).
+- `world/limb.rs`: imported characters solved whole, each iteration: anchors, muscles
+  and limits as one tree-structured linear system, factored in linear time, so stiff
+  muscles move the whole limb (lesson 38).
 - `collide.rs`: contact generation between shapes (spheres, capsules, boxes,
-  cylinders).
+  and exact cylinders with flat caps and a sharp rim).
 - `behaviour.rs`: controllers that drive muscles while a character is simulated
-  (Balance, CatchFall, Stagger). New behaviours go here; see [docs/behaviours.md](docs/behaviours.md).
+  (Balance, Stagger, CatchFall, BodyFoetal, Writhe, Look and Reach, Explosion). New behaviours go here; see [docs/behaviours.md](docs/behaviours.md).
+- `interp.rs`: blends two cached frames for output at a fractional frame (viewport
+  playback, export at a higher rate). Reads the cache, never changes it.
 - `sim.rs`: runs a project through the world frame by frame, following its physics
   events, and caches the results for the timeline.
 - `scenes.rs` (tests only): small test scenes ("stand-ins") that pin down physical
   behaviour, plus sweeps over endorphin's sample scenes when it is installed.
+- `reference.rs` (tests only): measurements of endorphin's own runs and the test
+  that scores NeuroMotion against them ([docs/reference-measurements.md](docs/reference-measurements.md)).
 
 The design, the numbers behind it, the lessons learned from endorphin's scenes and
 what is still missing are in [docs/physics-design.md](docs/physics-design.md).
@@ -110,10 +117,11 @@ Research on how endorphin behaves is in [docs/endorphin-physics.md](docs/endorph
 
 ## Principles
 
-- **Deterministic simulation.** The same project gives the same motion every time
-  with the same build on the same machine (other platforms can differ in the last
-  bits: docs/physics-design.md).
-  Behaviours are stateless; nothing in the physics reads the clock or randomness.
+- **Deterministic simulation.** The same project gives the same motion, bit for bit,
+  every time and on every platform: transcendental maths comes from the pure-Rust
+  `libm` crate, and glam is built with `libm` and `scalar-math` (docs/physics-design.md,
+  lesson 30). Behaviours are stateless; nothing in the physics reads the clock or
+  randomness.
 - **Undo covers everything.** If the user can change it, it's an `Edit`.
 - **Tests pin down behaviour.** Physics changes come with a stand-in scene in
   `physics/scenes.rs` that checks the numbers (angles, heights, frames).

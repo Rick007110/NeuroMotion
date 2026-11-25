@@ -14,13 +14,12 @@ NeuroMotion never writes endorphin files.
 | `.nmb` | Behaviour | Not readable: endorphin stores these in a protected format |
 | `.nmw` | World settings | Not readable: protected format |
 
-Tested against every file bundled with endorphin 2.5.2. 160 scenes, characters, rigs
-and poses import. Three files don't:
-
-- 2 password-protected tutorial scenes. Their contents are encrypted; re-export them
-  from endorphin without a password.
-- 1 legacy pose (`BehaviourPoses/dp.nma`), which stores muscle targets instead of joint
-  transforms. It will be handled once physics exists.
+Tested against every file bundled with endorphin 2.5.2 (`imports_every_bundled_file`):
+of its 161 `.ens`, `.nmc` and `.nma` files (67 scenes, 42 characters, props and rigs,
+52 poses), 159 import, the legacy muscle-target pose `BehaviourPoses/dp.nma` included (see
+[Muscle-target poses](#muscle-target-poses)). Two files don't: password-protected
+tutorial scenes. Their contents are encrypted; re-export them from endorphin without a
+password.
 
 The sweep runs with `cargo test -- --ignored`. Set `ENDORPHIN_DIR` if endorphin isn't
 installed in the default location.
@@ -68,8 +67,9 @@ Seen on endorphin 2.5.2's sample scenes (Bendy Stick, Car Crash and Heli Leap ru
 **Characters.** Each character, prop and the environment becomes a NeuroMotion
 character, with its endorphin name kept (`character01`, `prop01`, `background`) because
 events refer to characters by name. Joints keep their real names, offsets and rest
-orientations. Virtual-muscle helper joints are left out: they are solver links between
-distant body parts, not bones, and the import report says how many were skipped.
+orientations. Virtual-muscle helper joints (`isVirtualMuscle="true"`) are left out of
+the skeleton: they are springs between distant body parts, not bones. The physics rig
+keeps them instead (see *Virtual muscles* below), and the import report says how many.
 Each character's own `TransformMatrix` is where it sits in the world (Catch Rope's
 runner starts on a roof 15.8 m up, the gymnast hangs 1.7 m up); see *Starting poses*.
 
@@ -108,18 +108,118 @@ inertial body (the background) have no mass and stay fixed; its props with one a
 real objects that fall, swing and get pushed, which is why scenes lock or join props
 to hold them, or switch the environment to NoPhysics (Hands Reach and Look At, whose
 reach target is a prop).
+A joint's `SoftLimits` and `HardLimits` give full widths: `twistSize` about the limit
+frame's X axis, `swing1Size` for the turn about its Z axis and `swing2Size` about its Y
+axis (the active poses endorphin's scenes store sit inside the cones read this way, and
+far outside them read the other way: physics-design.md, lesson 27).
+Imported scenes also get Coulomb friction (lesson 21) and the whole-limb muscle cap.
+
+**Virtual muscles.** Every character in the install (the standard one, the custom
+ones, every copy in the sample scenes) has four helper joints with
+`isVirtualMuscle="true"`: `LeftArmVirtualMuscle` and `RightArmVirtualMuscle` under
+`UpperSpineJoint`, riding `LeftHandMass` and `RightHandMass` (their `metaBody`), and
+`LeftLegVirtualMuscle` and `RightLegVirtualMuscle` under the root, riding
+`LeftHeelMass` and `RightHeelMass`. Their `TransformMatrix` puts them where the wrist
+and the heel's centre are at rest on the standard character (0.2, 0.04, ±0.775 m from
+the upper spine; ±0.095, -0.9255, 0 m from the root); some rescaled characters keep
+those values (Car Hit's pedestrian: 6.5 cm beyond its wrist), others have their own. `fixedCoords="CoordsNone"`,
+`linearEnabled`, `twistEnabled` and `swingEnabled` false and limits of 2.6 m (soft)
+and 2.65 m (hard, `radius` included) mean they constrain nothing. Their
+`SecondaryFrameOffset` carries a few centimetres of translation that differs between
+copies of the same character; NeuroMotion doesn't use it, as what it offsets isn't
+clear. Each has a `Skeletal` effector of the same name, active, with
+`linearDriveMode` and `angularDriveMode` `DrivePosAndVel`, grouped as
+`VirtualMuscles`; every preset (`Default`, `DesiredPoseCalibration` and the others)
+lists them at 1 in all nine fields, linear included. The effector's own
+`<Calibration>` block (linear 10, 10, 50; angular 1, 10, 1) is the same one the
+shoulders and spine carry. Whole-body active poses list them in their `Objects`, and
+some store a `Relationship` for them (the hand or heel relative to the chest or
+pelvis); every animation lists and keys them (`.quat`, `.tx`, `.ty`, `.tz`).
+NeuroMotion imports each as a `VirtualMuscleDef` in the rig (the two bodies, the
+point on the hand or heel where the helper sits at rest, and which drives its
+effector's modes switch on; an inactive effector leaves it out) and their linear
+gains into the presets' `linear` table; the skeleton, animation channels and exported
+motion leave them out. How they are simulated: physics-design.md, lesson 35.
 
 **Every other event** becomes an *event clip* on a track named after its kind:
 Forces, Behaviours, Constraints, Simulations, Active poses, Transitions, Motion
 transfers, Severs. Their settings are kept on the clip and listed in the inspector under
 *Imported settings*. That covers strength, physics level, momentum scale, behaviour
-name, impulse matrix, target bodies and constraint strengths. The physics engine
-acts on simulation levels, forces, transitions, active poses (whose target pose is
-stored as channels on the clip) and constraints. Behaviours named Balance and
-CatchFall run NeuroMotion's own controllers (see `behaviours.md`); others are kept
-but not simulated.
+name and settings (see [behaviour settings](#behaviour-parameters)), impulse matrix,
+target bodies and constraint strengths. The physics engine acts on simulation levels,
+forces, transitions, active poses (whose target pose is stored as channels on the
+clip) and constraints. Behaviours named Balance, Stagger, CatchFall, BodyFoetal,
+BodyWrithe, Look and Reach and Explosion (Writhe in mid-air) run NeuroMotion's own
+controllers (see `behaviours.md`); others are kept but not simulated.
 
 Overlapping events of the same kind go onto extra tracks ("Animation 2").
+
+## Muscle-target poses
+
+<a id="muscle-target-poses"></a>One bundled pose, `BehaviourPoses/dp.nma` (made for
+endorphin's older `character01`), stores muscle targets instead of joint transforms:
+a `<DesiredPose>` with one `<EffectorParameters name="LKneeZ">` per single-axis
+effector, each holding a `<DesiredAngle>` in radians. No scene refers to it, and no
+other bundled file stores targets this way (`DesiredPose` elsewhere is only the
+`DesiredPoseEvent` of active poses). It imports like any pose: a held clip on the
+character, which an active pose event then drives the muscles towards.
+
+**What's in the file.** Besides the targets, the pose carries its own skeleton
+(`<Skeleton>`): the pelvis, then a chain of single-axis `<Hinge>`s per joint, named
+`<parent body>_<child body>` (`LUpLegYMB_LKneeZMB`), each with its frame in the world
+(`refFrame="World"`), at rest; `<MetaBodies>`, the bodies' world frames, also at rest;
+and `<Relationships>`, reach targets (`RPROMagnet`) the importer doesn't use. The
+posed result isn't stored anywhere, so the convention below comes from the skeleton
+and the targets themselves:
+
+- **Which hinge.** An effector drives the hinge into the body named after it
+  (`LKneeZ` → `…_LKneeZMB`). The hip's third axis has no body of its own: `LHipY`
+  turns the thigh, the hinge `LHipZMB_LUpLegYMB`.
+- **About which axis.** A hinge turns about the first column (`Vi`) of its frame.
+  That column is always the axis the effector's letter names, in the character's
+  own terms: for every `…X` effector the body's forward axis (roll), for every `…Y`
+  one the bone's length (twist: `LUpLegY`'s `Vi` runs down the thigh, `LLoArmY`'s
+  along the forearm), for every `…Z` one the side axis (bend).
+- **Which way.** Right-handed about `Vi`, from the rest frame at zero. With that sign
+  every non-zero target of dp.nma bends its joint the way the joint bends: knees
+  -0.99 rad bend backwards, hips (0.64) and elbows (0.87) forwards, the spine
+  (0.80 + 0.60) forwards, ankles (-0.33) point the toes down, and the hips' `X` and
+  `Y` targets, mirrored left and right, spread the legs symmetrically. With the
+  opposite sign the knees would bend 57° forwards and the elbows 50° backwards.
+  The pose is a deep crouch, hunched forwards, arms raised in front.
+
+**Onto a character.** None of the bundled characters has dp.nma's skeleton (endorphin
+2.x characters have one three-axis joint where it has two or three hinges), so the
+importer maps it, in `io/endorphin.rs`:
+
+1. A hinge's target goes to the character's joint of the same name if it has one,
+   else to the joint whose muscle is the effector (`LKneeZ`) or its joint (`LKnee`).
+   Joints later characters merged are renamed: the outer shoulder (`LOutShoulder`)
+   and the upper arm's twist (`LUpArm`) are the shoulder's (`LShoulder`), the
+   forearm's twist (`LLoArm`) is `LLoArmTwist` (else the elbow), the shin's twist
+   the knee's and the thigh's the hip's. All of a joint's hinge turns combine,
+   parent first, into one rotation.
+2. The pose faces +X, right side towards +Z; it's turned about the vertical so a
+   left-right pair of its joints lines up with the character's.
+3. Each turn is about the hinge's axis in the world at rest, converted into the
+   character's joint frame, so it doesn't matter how the character's own joint
+   axes are set up.
+4. Where the character rests differently from the pose's skeleton by more than
+   0.5 rad (a T-pose's arms against dp.nma's hanging ones), the joint is first turned
+   to the pose's rest by the shortest turn, which its children inherit, so the limb
+   ends up where the pose puts it. Smaller differences are left alone: the Standard
+   Simulation Character's straight forearm comes out about 12° from dp.nma's, which
+   rests its forearm bent 12° forwards.
+
+On the Standard Simulation Character every target but `BaseNeckZ` (zero, and on no
+hinge) lands on a joint; the shoulders are turned down from its T-pose first. The
+import's notes say what was left out or turned. Held as an active pose with the hips
+locked, the character's knees reach the pose to within 2 cm and its feet to within
+5 cm. Its spine bends far less than the pose's: dp.nma bends the lower spine 46° and
+the upper 34° on two joints, past the Standard character's spine limits (19-24°),
+which muscle targets are kept inside, and its middle spine joint gets no target. The
+head ends up 0.8 m from where the pose puts it, and the arms, which hang from the
+spine, follow it. Spreading a bend over the character's extra joints is still to do.
 
 ## Format notes (from the files themselves)
 
@@ -146,6 +246,27 @@ These are what the importer relies on:
 - Event elements live in `Events`, `ForceEvents`, `SecondaryBehaviours`,
   `TertiaryBehaviours` and `SeverBehaviourEvents`. Each has `startFrameNumber`,
   `endFrameNumber`, `priority`, `enabled` and `character`.
+- <a id="behaviour-parameters"></a>**Behaviour settings** (`SecondaryBehaviour`): a
+  behaviour event names its behaviour in `behaviourName` (`Bob2: Explosion 2.0`) and
+  shows `displayName` (`Writhe in mid-air 2.0`). Its settings are in its `Parameters`:
+  one `Variable` per setting, its name in `fk` and its value in `ja`
+  (`LeftHand_Speed` = `0.700`; `de`, when present, is the name endorphin shows).
+  `kg` gives the kind: 0 a number, 1 a whole number, 2 a flag (`true`/`false`), 5 a
+  selection or a helper graphic. A variable without `ja` keeps endorphin's default,
+  which the scene doesn't record. A target is a selection,
+  `ja="MetaBodyAndCollisionSelection"`, listing what was picked as `ValuePtr`s: a body
+  (`character02.MetaBodies.HeadMass`) or a collision surface by its path through the
+  skeleton (`character02.root.LowerSpineJoint....HeadMass.Sphere1`: the body, then the
+  surface's name). `ja="HelperGraphic"` variables are the locators endorphin draws
+  (target crosses, look-at lines), not settings. The importer keeps every setting with
+  a value under its `fk` name, and a selection as its picks, comma separated; it
+  leaves out defaults, empty selections and helper graphics, and a name the event's
+  own attributes already use keeps the attribute. Behaviours read their settings from
+  there through one reader (`behaviour::setting`): Look and Reach
+  ([behaviours.md](behaviours.md#look-and-reach)), where a surface target resolves to
+  its body, and to the surface's centre only when the body has a single shape, since
+  NeuroMotion doesn't keep shape names; and Explosion
+  ([behaviours.md](behaviours.md#explosion-writhe-in-mid-air)).
 - <a id="sever-events"></a>**Sever events** (`SeverEvent`, in `SeverBehaviourEvents`) are
   **a best guess**: we have no scene containing one. The importer keeps every
   attribute and its `Objects` (as `targets`), and the simulation reads `severType`

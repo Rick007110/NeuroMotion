@@ -463,7 +463,7 @@ fn handle_wheel(ui: &Ui, state: &mut TimelineState, rect: Rect, lanes_left: f32)
         let anchor = pointer.map_or(state.view.first_frame, |p| {
             state.view.x_to_frame(p.x, lanes_left)
         });
-        state.view.zoom_at((scroll.y * 0.003).exp(), anchor);
+        state.view.zoom_at(libm::expf(scroll.y * 0.003), anchor);
         state.auto_fit = false;
     } else if modifiers.shift || scroll.x != 0.0 {
         state

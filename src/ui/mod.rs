@@ -5,6 +5,8 @@
 //! * [`export`] – the File → Export window
 //! * [`timeline_panel`] – transport, ruler, tracks, clips, keys
 //! * [`inspector`] – property editing for the current selection
+//! * [`scene_tree`] – the left panel: characters, props and their physics bodies
+//! * [`physics_panel`] – the project's physics settings and a body's read-only page
 //! * [`event_inspector`] – typed settings for physics events
 //! * [`shortcuts`] – the keyboard binding table
 //! * [`actions`], [`selection`], [`theme`], [`icons`] – shared pieces
@@ -16,6 +18,8 @@ mod export;
 mod icons;
 mod inspector;
 mod menu;
+mod physics_panel;
+mod scene_tree;
 mod selection;
 mod shortcuts;
 mod theme;

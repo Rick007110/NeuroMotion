@@ -85,7 +85,7 @@ pub fn placeholder_project() -> Project {
 
     let idle_len = 240;
     let wave = |period: f32, amp: f32, phase: f32, bias: f32| {
-        move |t: f32| bias + amp * (TAU * t / period + phase).sin()
+        move |t: f32| bias + amp * libm::sinf(TAU * t / period + phase)
     };
     project.add_clip(
         ClipProps {
@@ -407,6 +407,7 @@ pub fn humanoid_rig(skeleton: &SkeletonRef) -> PhysicsRig {
         joints,
         muscle_sets: endorphin_style_presets(),
         isotropic_inertia: true,
+        virtual_muscles: Vec::new(),
     }
 }
 
@@ -429,6 +430,7 @@ fn endorphin_style_presets() -> Vec<MuscleSet> {
             name: name.to_owned(),
             muscles,
             fallback,
+            linear: BTreeMap::new(),
         }
     };
     let strong_hinge = MuscleGains {

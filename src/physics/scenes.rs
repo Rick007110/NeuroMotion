@@ -25,7 +25,7 @@ use glam::{Quat, Vec3};
 use super::sim::{Simulation, cut_joints, lock_spans, rig_bodies};
 use crate::document::physics::{
     BodyDef, ContactModel, Frame, Gains, Geometry, JointDef, Limits, MuscleGains, MuscleSet,
-    PhysicsRig, ShapeDef,
+    PhysicsRig, ShapeDef, SpringCap, VirtualMuscleDef,
 };
 use crate::document::sample::{humanoid_rig, humanoid_skeleton};
 use crate::document::{
@@ -804,6 +804,107 @@ fn person_rig_with_clavicles() -> (SkeletonRef, PhysicsRig) {
     (skeleton, rig)
 }
 
+/// `person_rig_with_clavicles` with each forearm split in two like endorphin's
+/// characters: the forearm to half way, then a forearm-twist body that only turns
+/// about the bone, then the hand. With `t_pose`, it rests with its arms out to the
+/// sides, as endorphin's characters do.
+pub(crate) fn person_rig_like_endorphins(t_pose: bool) -> (SkeletonRef, PhysicsRig) {
+    let (mut skeleton, mut rig) = person_rig_with_clavicles();
+    for (side, x) in [("l", 1.0f32), ("r", -1.0)] {
+        let wrist = skeleton.joint_index(&format!("{side}_wrist")).unwrap();
+        let elbow = skeleton.joints[wrist].parent.unwrap();
+        // Insert the twist joint just before the wrist, so parents still come first.
+        let at = wrist;
+        let bump = |i: usize| if i >= at { i + 1 } else { i };
+        for j in &mut skeleton.joints {
+            j.parent = j.parent.map(bump);
+        }
+        for b in &mut rig.bodies {
+            b.joint = bump(b.joint);
+        }
+        for j in &mut rig.joints {
+            j.joint = bump(j.joint);
+        }
+        let wrist = wrist + 1;
+        let half = Vec3::from(skeleton.joints[wrist - 1].offset) * 0.5;
+        skeleton.joints.insert(
+            at,
+            Joint::new(
+                &format!("{side}_forearm_twist"),
+                Some(elbow),
+                half.to_array(),
+            ),
+        );
+        skeleton.joints[wrist].parent = Some(at);
+        skeleton.joints[wrist].offset = half.to_array();
+
+        // The forearm keeps its first half; the twist body takes the rest of its mass.
+        let forearm = rig.body_index(&format!("{side}_elbow")).unwrap();
+        let first = Piece::along(half, 0.038, 0.8);
+        let body = &mut rig.bodies[forearm];
+        body.frame = Frame {
+            rotation: first.frame.0.to_array(),
+            position: first.frame.1.to_array(),
+        };
+        body.mass = first.mass;
+        body.inertia = first.geometry.inertia(first.mass);
+        body.shapes[0].geometry = first.geometry;
+        let piece = Piece::along(half, 0.035, 0.6);
+        rig.bodies.push(BodyDef {
+            name: format!("{side}_forearm_twist"),
+            joint: at,
+            frame: Frame {
+                rotation: piece.frame.0.to_array(),
+                position: piece.frame.1.to_array(),
+            },
+            mass: piece.mass,
+            inertia: piece.geometry.inertia(piece.mass),
+            shapes: vec![ShapeDef {
+                geometry: piece.geometry,
+                frame: Frame::IDENTITY,
+                material: "skin".into(),
+                collides_with_parent: false,
+                collides_with_siblings: true,
+                collides_with_ancestors: false,
+            }],
+        });
+        let twist_body = rig.bodies.len() - 1;
+        let hand = rig.body_index(&format!("{side}_wrist")).unwrap();
+        rig.joints
+            .iter_mut()
+            .find(|j| j.body == hand)
+            .unwrap()
+            .parent_body = twist_body;
+        // Twist about the bone only, like endorphin's forearm twist joints.
+        let along = Quat::from_rotation_arc(Vec3::X, half.normalize()).to_array();
+        let limits = |twist: f32, swing: f32| Limits {
+            twist_min: -twist,
+            twist_max: twist,
+            swing1: swing,
+            swing2: swing,
+        };
+        rig.joints.push(JointDef {
+            name: format!("{side}_forearm_twist"),
+            joint: at,
+            body: twist_body,
+            parent_body: forearm,
+            primary: along,
+            secondary: along,
+            hard: limits(1.6, 0.01),
+            soft: limits(1.55, 0.005),
+            soft_stiffness: 10.0,
+            soft_damping: 1.0,
+            muscle: format!("{side}_elbow"),
+        });
+        if t_pose {
+            let shoulder = skeleton.joint_index(&format!("{side}_shoulder")).unwrap();
+            skeleton.joints[shoulder].rest_rotation =
+                Quat::from_rotation_z(x * std::f32::consts::FRAC_PI_2).to_array();
+        }
+    }
+    (skeleton, rig)
+}
+
 /// Adds the stand-in character with its feet at `at`, facing `yaw` degrees from +Z,
 /// held in a start pose (joint, property, value) for the whole scene.
 fn person(
@@ -947,6 +1048,7 @@ fn prop_rig(
         name: "Default".into(),
         muscles: Default::default(),
         fallback: both,
+        linear: Default::default(),
     };
     (
         skeleton,
@@ -955,6 +1057,7 @@ fn prop_rig(
             joints: rig_joints,
             muscle_sets: vec![set],
             isotropic_inertia: true,
+            virtual_muscles: Vec::new(),
         },
     )
 }
@@ -1042,6 +1145,7 @@ fn scenery(pieces: &[(Geometry, Quat, Vec3)]) -> (SkeletonRef, PhysicsRig) {
             joints: Vec::new(),
             muscle_sets: Vec::new(),
             isotropic_inertia: true,
+            virtual_muscles: Vec::new(),
         },
     )
 }
@@ -1053,6 +1157,208 @@ fn body_pose(project: &Project, character: CharacterId, body: &str, frame: f32) 
     let rig = c.physics.as_ref().unwrap();
     let pose: Pose = project.evaluate(frame).swap_remove(ci);
     rig_bodies(rig, &world_transforms(&c.skeleton, &pose))[rig.body_index(body).unwrap()]
+}
+
+// ---------------------------------------------------------------------------------
+// Cylinder scenes (docs/physics-design.md, lesson 8)
+
+/// Adds a free prop of one body and one shape, its centre at `at`, turned by
+/// `rotation` (a cylinder's axis is its local Z).
+fn solid(
+    project: &mut Project,
+    name: &str,
+    geometry: Geometry,
+    mass: f32,
+    rotation: Quat,
+    at: Vec3,
+) -> CharacterId {
+    let free = Limits {
+        twist_min: 0.0,
+        twist_max: 0.0,
+        swing1: 0.0,
+        swing2: 0.0,
+    };
+    let no_muscle = Gains {
+        stiffness: 0.0,
+        damping: 0.0,
+        force_limit: 0.0,
+    };
+    let piece = Piece::at(geometry, mass, rotation, Vec3::ZERO);
+    let (skeleton, mut rig) = prop_rig(vec![("body", None, at, piece)], free, no_muscle);
+    // Its own inertia, not a sphere's, so a log rolls like one.
+    rig.isotropic_inertia = false;
+    add_prop(
+        project,
+        name,
+        CharacterKind::Prop,
+        (skeleton, rig),
+        SimLevel::Simulated,
+    )
+}
+
+/// Turns a cylinder's axis (local Z) upright.
+fn upright() -> Quat {
+    Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)
+}
+
+/// Turns a cylinder's axis (local Z) along X, lying on its side.
+fn along_x() -> Quat {
+    Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)
+}
+
+/// Single cylinders on the ground, on boxes and under a falling ball, 2 m apart along
+/// X: one dropped 3 cm onto its cap leaning 3°, a log on its side rolled along +Z, a
+/// disc dropped from 0.3 m tilted 10°, one dropped onto a box leaning 3°, one lying on
+/// a box and one on the ground, and two balls dropped on a pillar's cap, one just
+/// inside its rim and one just outside.
+pub fn cylinders() -> Project {
+    let mut p = new_scene("Cylinders", 3.0);
+    p.physics.contact = ContactModel::Coulomb;
+    let cylinder = |radius, length| Geometry::Cylinder { radius, length };
+    let block = Geometry::Box {
+        size: [1.0, 0.5, 1.0],
+    };
+    let pillar = cylinder(0.2, 1.0);
+    add_prop(
+        &mut p,
+        "scenery",
+        CharacterKind::Environment,
+        scenery(&[
+            (block, Quat::IDENTITY, Vec3::new(6.0, 0.25, 0.0)),
+            (block, Quat::IDENTITY, Vec3::new(8.0, 0.25, 0.0)),
+            (pillar, upright(), Vec3::new(10.0, 0.5, 0.0)),
+        ]),
+        SimLevel::CollisionOnly,
+    );
+    // Short enough that the old capsule stand-in for it (round ends) would not stand.
+    solid(
+        &mut p,
+        "standing",
+        cylinder(0.15, 0.5),
+        20.0,
+        Quat::from_rotation_z(0.05) * upright(),
+        Vec3::new(0.0, 0.28, 0.0),
+    );
+    let log = solid(
+        &mut p,
+        "log",
+        cylinder(0.1, 0.8),
+        15.0,
+        along_x(),
+        Vec3::new(2.0, 0.1, 0.0),
+    );
+    push(&mut p, log, 0, "log.MetaBodies.body", Vec3::Z);
+    solid(
+        &mut p,
+        "disc",
+        cylinder(0.3, 0.04),
+        5.0,
+        Quat::from_rotation_z(0.17) * upright(),
+        Vec3::new(4.0, 0.3, 0.0),
+    );
+    solid(
+        &mut p,
+        "on box",
+        cylinder(0.15, 0.4),
+        15.0,
+        Quat::from_rotation_x(0.05) * upright(),
+        Vec3::new(6.0, 0.72, 0.0),
+    );
+    solid(
+        &mut p,
+        "across box",
+        cylinder(0.1, 0.6),
+        10.0,
+        along_x(),
+        Vec3::new(8.0, 0.62, 0.0),
+    );
+    solid(
+        &mut p,
+        "lying",
+        cylinder(0.1, 0.8),
+        15.0,
+        along_x(),
+        Vec3::new(12.0, 0.11, 0.0),
+    );
+    let ball = Geometry::Sphere { radius: 0.05 };
+    solid(
+        &mut p,
+        "ball inside",
+        ball,
+        1.0,
+        Quat::IDENTITY,
+        Vec3::new(10.17, 1.2, 0.0),
+    );
+    solid(
+        &mut p,
+        "ball outside",
+        ball,
+        1.0,
+        Quat::IDENTITY,
+        Vec3::new(10.0, 1.2, 0.22),
+    );
+    p
+}
+
+/// Cylinders resting on cylinders: three discs stacked, a post standing on a disc, a
+/// log lying on a plate, and a pyramid of three logs. All start 5 mm to 1 cm
+/// apart and fall into place. Also the cylinder-heavy scene timed per step.
+pub fn cylinder_pile() -> Project {
+    let mut p = new_scene("Cylinder pile", 3.0);
+    p.physics.contact = ContactModel::Coulomb;
+    let cylinder = |radius, length| Geometry::Cylinder { radius, length };
+    let disc = cylinder(0.3, 0.06);
+    for (name, y) in [("disc0", 0.035), ("disc1", 0.105), ("disc2", 0.175)] {
+        solid(&mut p, name, disc, 4.0, upright(), Vec3::new(0.0, y, 0.0));
+    }
+    solid(
+        &mut p,
+        "base",
+        cylinder(0.4, 0.06),
+        6.0,
+        upright(),
+        Vec3::new(2.0, 0.035, 0.0),
+    );
+    solid(
+        &mut p,
+        "post",
+        cylinder(0.12, 0.6),
+        10.0,
+        upright(),
+        Vec3::new(2.0, 0.37, 0.0),
+    );
+    // A log lying on a plate, and a pyramid of three logs, the top one wedged in the
+    // groove between the two under it.
+    solid(
+        &mut p,
+        "plate",
+        cylinder(0.5, 0.06),
+        8.0,
+        upright(),
+        Vec3::new(4.0, 0.035, 0.0),
+    );
+    let log = cylinder(0.1, 0.8);
+    solid(
+        &mut p,
+        "pin",
+        log,
+        12.0,
+        along_x(),
+        Vec3::new(4.0, 0.165, 0.0),
+    );
+    for (name, z) in [("under0", -0.1), ("under1", 0.1)] {
+        solid(&mut p, name, log, 12.0, along_x(), Vec3::new(6.0, 0.105, z));
+    }
+    let groove = 0.1 + 0.03f32.sqrt();
+    solid(
+        &mut p,
+        "top",
+        log,
+        12.0,
+        along_x(),
+        Vec3::new(6.0, groove + 0.005, 0.0),
+    );
+    p
 }
 
 // ---------------------------------------------------------------------------------
@@ -1106,6 +1412,63 @@ pub fn catch_fall_shove(shove: Vec3, behaviour: bool) -> Project {
         behave(&mut p, id, 30, 150, "CatchFall");
     }
     push(&mut p, id, 30, "faller.MetaBodies.chest", shove);
+    p
+}
+
+/// Look and Reach, as endorphin's "Hands reach and look at" sets it up: the stand-in
+/// (with fingers) stands with its chest locked in place, both hands reaching for a
+/// small animated ball and the head looking at it, from the start, at the 2.5 scene's
+/// settings (speed 0.7, strength 0.7, at most 0.9 of the arm's length, look-at speed
+/// 1). The ball starts at `ball` and moves by `moves` over the 3 s; with `t_pose`, the
+/// arms start straight out to the sides, as endorphin's characters rest.
+pub fn reach_for(ball: Vec3, moves: Vec3, t_pose: bool) -> Project {
+    let mut p = new_scene("Look and Reach", 3.0);
+    let arms = [
+        ("l_shoulder", Property::RotZ, 90.0),
+        ("r_shoulder", Property::RotZ, -90.0),
+    ];
+    let pose: &[(&str, Property, f32)] = if t_pose { &arms } else { &[] };
+    let id = person(&mut p, "reacher", Vec3::ZERO, 0.0, pose);
+    let sphere = Geometry::Sphere { radius: 0.05 };
+    let target = add_prop(
+        &mut p,
+        "ball",
+        CharacterKind::Prop,
+        scenery(&[(sphere, Quat::IDENTITY, ball)]),
+        SimLevel::Animated,
+    );
+    let end = p.settings.range.end;
+    let path = vec![
+        channel("root", Property::PosX, &[(0, 0.0), (end, moves.x)]),
+        channel("root", Property::PosY, &[(0, 0.0), (end, moves.y)]),
+        channel("root", Property::PosZ, &[(0, 0.0), (end, moves.z)]),
+    ];
+    motion(&mut p, target, "Path", 0, end, false, path);
+    constrain(
+        &mut p,
+        id,
+        0,
+        end,
+        "Lock",
+        &["reacher.MetaBodies.chest"],
+        (STRONG, STRONG),
+    );
+    let ball = "ball.MetaBodies.piece0";
+    let settings = [
+        ("behaviourName", "Bob2: Look and Reach 2.5"),
+        ("LeftHandTarget", ball),
+        ("RightHandTarget", ball),
+        ("LookAtTarget", ball),
+        ("LeftHand_Speed", "0.700"),
+        ("RightHand_Speed", "0.700"),
+        ("LeftHand_Strength", "0.700"),
+        ("RightHand_Strength", "0.700"),
+        ("LeftHand_MaxExtension", "0.900"),
+        ("RightHand_MaxExtension", "0.900"),
+        ("LookAtSpeed", "1.000"),
+        ("LegTorsoStiffness", "0.8"),
+    ];
+    event(&mut p, id, "Behaviour", 0, end, &settings);
     p
 }
 
@@ -1391,7 +1754,12 @@ pub fn bendy_stick() -> Project {
     let holder = person(&mut p, "holder", Vec3::ZERO, 0.0, &pose);
     let swing: Vec<(i32, f32)> = (0..=120)
         .step_by(5)
-        .map(|f| (f, 40.0 * (f as f32 / 60.0 * std::f32::consts::TAU).sin()))
+        .map(|f| {
+            (
+                f,
+                40.0 * libm::sinf(f as f32 / 60.0 * std::f32::consts::TAU),
+            )
+        })
         .collect();
     motion(
         &mut p,
@@ -1456,6 +1824,89 @@ pub fn bendy_stick() -> Project {
         "JoinBodies",
         &["stick.MetaBodies.seg0", "holder.MetaBodies.r_wrist"],
         (STRONG, STRONG),
+    );
+    p
+}
+
+/// Gun drop: Walk With Gun's pattern. A character holds a 550 kg prop in both hands,
+/// joined to them (1e5 N, 1e4 N·m) the way the scene's `JoinBodies` does, and drops
+/// with it onto the ground. The fingers hang a few centimetres below the prop's
+/// underside, so once it lands they are between the hand it holds and the ground:
+/// either the hand turns out of the way or the prop rests on them. Coulomb friction,
+/// as an imported scene has it (lesson 21).
+pub fn gun_drop() -> Project {
+    gun_drop_nudged(0.0)
+}
+
+/// Gun drop with the prop's mass changed by the relative amount `nudge`, to see how
+/// much a test's numbers move when the scene does (`nudges`).
+pub fn gun_drop_nudged(nudge: f32) -> Project {
+    let mut p = new_scene("Gun drop", 3.0);
+    p.physics.contact = ContactModel::Coulomb;
+    let pose = [
+        ("l_shoulder", Property::RotX, -75.0),
+        ("r_shoulder", Property::RotX, -75.0),
+        ("l_elbow", Property::RotX, -30.0),
+        ("r_elbow", Property::RotX, -30.0),
+    ];
+    // endorphin's fingers weigh 0.39 kg each; the stand-in's default is lighter.
+    let (skeleton, mut rig) = person_rig();
+    for side in ["l", "r"] {
+        let i = rig.body_index(&format!("{side}_fingers")).unwrap();
+        let body = &mut rig.bodies[i];
+        body.mass = 0.39;
+        body.inertia = body.shapes[0].geometry.inertia(body.mass);
+    }
+    let holder = add_person(&mut p, "holder", (skeleton, rig), Vec3::ZERO, 0.0, &pose);
+    // The prop sits between the hands, its underside 3 cm above the fingers' centres:
+    // the fingers reach below it, as in the scene.
+    let (_, left) = body_pose(&p, holder, "l_wrist", 0.0);
+    let (_, right) = body_pose(&p, holder, "r_wrist", 0.0);
+    let fingers = [
+        body_pose(&p, holder, "l_fingers", 0.0).1.y,
+        body_pose(&p, holder, "r_fingers", 0.0).1.y,
+    ];
+    let size = Vec3::new((left - right).length() + 0.1, 0.12, 0.12);
+    let mut centre = (left + right) / 2.0;
+    centre.y = fingers[0].max(fingers[1]) + 0.03 + size.y / 2.0;
+    let rigid = Limits {
+        twist_min: 0.0,
+        twist_max: 0.0,
+        swing1: 0.0,
+        swing2: 0.0,
+    };
+    let none = Gains {
+        stiffness: 0.0,
+        damping: 0.0,
+        force_limit: 0.0,
+    };
+    let gun = Piece::at(
+        Geometry::Box {
+            size: size.to_array(),
+        },
+        550.0 * (1.0 + nudge),
+        Quat::IDENTITY,
+        Vec3::ZERO,
+    );
+    add_prop(
+        &mut p,
+        "gun",
+        CharacterKind::Prop,
+        prop_rig(vec![("body", None, centre, gun)], rigid, none),
+        SimLevel::Simulated,
+    );
+    constrain(
+        &mut p,
+        holder,
+        0,
+        180,
+        "JoinBodies",
+        &[
+            "gun.MetaBodies.body",
+            "holder.MetaBodies.r_wrist",
+            "holder.MetaBodies.l_wrist",
+        ],
+        (STRONG, Vec3::splat(1e4)),
     );
     p
 }
@@ -1550,7 +2001,12 @@ pub fn rotating_floor() -> Project {
     );
     let rock: Vec<(i32, f32)> = (0..=120)
         .step_by(3)
-        .map(|f| (f, 10.0 * (f as f32 / 60.0 * std::f32::consts::TAU).sin()))
+        .map(|f| {
+            (
+                f,
+                10.0 * libm::sinf(f as f32 / 60.0 * std::f32::consts::TAU),
+            )
+        })
         .collect();
     motion(
         &mut p,
@@ -1741,6 +2197,11 @@ pub fn cut_rope() -> Project {
 /// Car Hit: a car (collision with momentum) drives through a standing character at
 /// 15 m/s, bumper first.
 pub fn car_hit() -> Project {
+    car_hit_nudged(0.0)
+}
+
+/// Car Hit with the car's speed changed by the relative amount `nudge` (`nudges`).
+pub fn car_hit_nudged(nudge: f32) -> Project {
     let mut p = new_scene("Car Hit", 2.0);
     let body = Piece::at(
         Geometry::Box {
@@ -1790,7 +2251,11 @@ pub fn car_hit() -> Project {
         0,
         120,
         true,
-        vec![channel("body", Property::PosZ, &[(0, -6.0), (120, 24.0)])],
+        vec![channel(
+            "body",
+            Property::PosZ,
+            &[(0, -6.0), (120, -6.0 + 30.0 * (1.0 + nudge))],
+        )],
     );
     level(&mut p, car, 0, "CollisionOnlyWithInertia");
     person(&mut p, "pedestrian", Vec3::ZERO, 90.0, &[]);
@@ -1858,6 +2323,7 @@ pub fn car_carry_at(speed: f32) -> Project {
         joints: Vec::new(),
         muscle_sets: Vec::new(),
         isotropic_inertia: true,
+        virtual_muscles: Vec::new(),
     };
     let car = add_prop(
         &mut p,
@@ -2169,6 +2635,7 @@ pub fn backflip(balance: bool) -> Project {
     let mut p = new_scene("Back flip", 5.0);
     // Friction as endorphin's scenes have it once imported (lesson 21).
     p.physics.contact = ContactModel::Coulomb;
+    p.physics.spring_cap = SpringCap::Limbs;
     p.settings.fps = 120.0;
     p.settings.range.end = 600;
     let block = Geometry::Box {
@@ -2245,6 +2712,52 @@ pub fn curl_hand_back() -> Project {
     p
 }
 
+/// Writhe in mid-air, like endorphin's behaviour scene of that name: a character
+/// (the placeholder, or with `like_endorphins` a rig resting in a T-pose with
+/// clavicles and forearm twists) drops from 4 m. With `behaviour`, Explosion runs
+/// throughout with the scene's settings (WritheInMidAir 2.5's).
+pub fn mid_air(like_endorphins: bool, behaviour: bool) -> Project {
+    mid_air_nudged(like_endorphins, behaviour, 0.0)
+}
+
+/// [`mid_air`] with the starting height changed by the relative amount `nudge`
+/// (`nudges`).
+pub fn mid_air_nudged(like_endorphins: bool, behaviour: bool, nudge: f32) -> Project {
+    let mut p = new_scene("Writhe in mid-air", 3.5);
+    let at = Vec3::new(0.0, 4.0 * (1.0 + nudge), 0.0);
+    let id = if like_endorphins {
+        add_person(
+            &mut p,
+            "writher",
+            person_rig_like_endorphins(true),
+            at,
+            0.0,
+            &[],
+        )
+    } else {
+        placeholder(&mut p, "writher", at, 0.0)
+    };
+    if behaviour {
+        event(
+            &mut p,
+            id,
+            "Behaviour",
+            0,
+            210,
+            &[
+                ("behaviourName", "Bob2: WritheInMidAir 2.5"),
+                ("Amplitude", "0.6"),
+                ("Speed", "0.6"),
+                ("PhaseOffset", "0.000"),
+                ("Strength", "0.5"),
+                ("HeadTurn", "0.6"),
+                ("BackArch", "1"),
+            ],
+        );
+    }
+    p
+}
+
 /// An active pose event on a character, driving `targets` (`character.Joints.name`,
 /// none = every joint) towards its held channels.
 fn active_pose(
@@ -2303,6 +2816,179 @@ pub fn split_poses() -> Project {
     let elbows = ["poser.Joints.l_elbow", "poser.Joints.r_elbow"];
     active_pose(&mut p, id, 10, 180, &knees, pose(60.0, 0.0));
     active_pose(&mut p, id, 20, 180, &elbows, pose(0.0, -60.0));
+    p
+}
+
+/// Back-Flip-To-Combo's first pose: a character with clavicles, hung by the hips, holds
+/// its arms straight out in front from frame 0, eased in over 0.5 s, with the muscle cap
+/// `cap`. A 0.4 kg clavicle holds the whole arm up.
+pub fn arms_out(cap: SpringCap) -> Project {
+    let mut p = new_scene("Arms out", 2.0);
+    p.physics.spring_cap = cap;
+    // Tuned on force-capped friction, the default when it was written. With Coulomb
+    // friction (now the default, lesson 26) the limb cap gives the same -32° / -9°, but
+    // the two-body cap's weak arms no longer hang still: rubbing against the body they
+    // creep up to -43° at frame 50 and settle near -53°, and the comparison this scene
+    // makes is between the caps, not the friction models.
+    p.physics.contact = ContactModel::ForceCapped;
+    let id = add_person(
+        &mut p,
+        "poser",
+        person_rig_with_clavicles(),
+        Vec3::new(0.0, 1.5, 0.0),
+        0.0,
+        &[],
+    );
+    constrain(
+        &mut p,
+        id,
+        0,
+        120,
+        "Lock",
+        &["poser.MetaBodies.hips"],
+        (STRONG, STRONG),
+    );
+    // The whole body is driven, as the scene's first pose drives every joint: the
+    // spine at rest, the arms forward.
+    let arms = ["l", "r"].map(|side| held(&format!("{side}_shoulder"), Property::RotX, -90.0));
+    active_pose(&mut p, id, 0, 120, &[], arms.to_vec());
+    let clip = p.clips.last_mut().unwrap();
+    clip.source.insert("entryBlendPeriod".into(), "0.5".into());
+    p
+}
+
+/// Virtual muscles: hung by the hips, the placeholder (with clavicles) reaches both arms
+/// straight out in front with an active pose at strength 10 (Bendy Stick's "Grab the
+/// stick"). With the two-body muscle cap its shoulders can't hold the arms up (lesson
+/// 27, `arms_out`). `vm` gives it chest-to-hand virtual muscles pulling the centre of
+/// each hand, with these (position, orientation) gains per unit of strength in the
+/// pose preset; endorphin's characters list theirs at 1 in every field. `named`: the
+/// pose names them (as endorphin's whole-body poses do) or only the arm joints, which
+/// leaves them off.
+pub fn virtual_reach(vm: Option<(Gains, Gains)>, named: bool) -> Project {
+    let mut p = new_scene("Virtual reach", 2.0);
+    // As in `arms_out`, whose arms this cap leaves hanging.
+    p.physics.spring_cap = SpringCap::Bodies;
+    p.physics.contact = ContactModel::ForceCapped;
+    let (skeleton, mut rig) = person_rig_with_clavicles();
+    if let Some((linear, angular)) = vm {
+        let chest = rig.body_index("chest").unwrap();
+        for side in ["l", "r"] {
+            let name = format!("{side}_ArmVirtualMuscle");
+            rig.virtual_muscles.push(VirtualMuscleDef {
+                name: name.clone(),
+                muscle: name.clone(),
+                parent_body: chest,
+                body: rig.body_index(&format!("{side}_wrist")).unwrap(),
+                point: [0.0; 3],
+                position: true,
+                orientation: true,
+            });
+            for set in &mut rig.muscle_sets {
+                set.linear.insert(name.clone(), linear);
+                set.muscles.insert(
+                    name.clone(),
+                    MuscleGains {
+                        twist: angular,
+                        swing: angular,
+                    },
+                );
+            }
+        }
+    }
+    let id = add_person(
+        &mut p,
+        "reacher",
+        (skeleton, rig),
+        Vec3::new(0.0, 1.5, 0.0),
+        0.0,
+        &[],
+    );
+    constrain(
+        &mut p,
+        id,
+        0,
+        120,
+        "Lock",
+        &["reacher.MetaBodies.hips"],
+        (STRONG, STRONG),
+    );
+    let arms = ["l", "r"].map(|side| held(&format!("{side}_shoulder"), Property::RotX, -90.0));
+    let mut targets: Vec<String> = ["l", "r"]
+        .iter()
+        .flat_map(|s| ["shoulder", "elbow", "wrist"].map(|j| format!("reacher.Joints.{s}_{j}")))
+        .collect();
+    if named {
+        targets.extend(["l", "r"].map(|s| format!("reacher.Joints.{s}_ArmVirtualMuscle")));
+    }
+    let targets: Vec<&str> = targets.iter().map(String::as_str).collect();
+    active_pose(&mut p, id, 0, 120, &targets, arms.to_vec());
+    p.clips
+        .last_mut()
+        .unwrap()
+        .source
+        .insert("strength".into(), "10".into());
+    p
+}
+
+/// Back-Flip-To-Combo's crouch: one event names the knees and stores the ankles
+/// bent too; nothing names the ankles. Hung by the hips, the placeholder bends its knees
+/// by 60° and (stored, unnamed) its ankles by 30° from frame 10.
+pub fn unnamed_ankles() -> Project {
+    let mut p = new_scene("Unnamed ankles", 2.0);
+    let id = person(&mut p, "poser", Vec3::new(0.0, 1.5, 0.0), 0.0, &[]);
+    constrain(
+        &mut p,
+        id,
+        0,
+        120,
+        "Lock",
+        &["poser.MetaBodies.hips"],
+        (STRONG, STRONG),
+    );
+    let pose = ["l", "r"]
+        .into_iter()
+        .flat_map(|side| {
+            [
+                held(&format!("{side}_knee"), Property::RotX, 60.0),
+                held(&format!("{side}_ankle"), Property::RotX, -30.0),
+            ]
+        })
+        .collect();
+    active_pose(
+        &mut p,
+        id,
+        10,
+        120,
+        &["poser.Joints.l_knee", "poser.Joints.r_knee"],
+        pose,
+    );
+    p
+}
+
+/// A legacy pose that stores muscle targets instead of joint transforms (endorphin's
+/// `dp.nma` format), imported and used as an active pose. The pose is the importer's
+/// hand-written fixture (hips flexed 0.5 rad, knees -1.0, elbows 0.8, on the pose's own
+/// hinges), the character the placeholder with its muscles named as endorphin's
+/// effectors, hung by the hips so it doesn't fall; the pose drives it from frame 10.
+pub fn legacy_pose() -> Project {
+    use crate::io::endorphin::{legacy_fixture, pose_from_text};
+    let mut p = new_scene("Legacy pose", 3.0);
+    let (skeleton, mut rig) = person_rig();
+    legacy_fixture::effector_names(&mut rig);
+    let at = Vec3::new(0.0, 1.5, 0.0);
+    let id = add_person(&mut p, "poser", (skeleton, rig), at, 0.0, &[]);
+    constrain(
+        &mut p,
+        id,
+        0,
+        180,
+        "Lock",
+        &["poser.MetaBodies.hips"],
+        (STRONG, STRONG),
+    );
+    let pose = pose_from_text(&legacy_fixture::xml(0.0), "dp".into(), &p).unwrap();
+    active_pose(&mut p, id, 10, 180, &[], pose.channels);
     p
 }
 
@@ -2427,9 +3113,12 @@ mod tests {
             "catch_rope" => catch_rope(),
             "gymnast_rings" => gymnast_rings(),
             "bendy_stick" => bendy_stick(),
+            "gun_drop" => gun_drop(),
             "heli_leap" => heli_leap(),
             "rotating_floor" => rotating_floor(),
             "turntable" => turntable(),
+            "cylinders" => cylinders(),
+            "cylinder_pile" => cylinder_pile(),
             "tilting_floor" => tilting_floor(),
             "roof_edge" => roof_edge(),
             "cut_rope" => cut_rope(),
@@ -2440,11 +3129,23 @@ mod tests {
             "backflip" => backflip(true),
             "backflip_passive" => backflip(false),
             "curl_hand_back" => curl_hand_back(),
+            "arms_out" => arms_out(SpringCap::Limbs),
+            "arms_out_bodies" => arms_out(SpringCap::Bodies),
+            "unnamed_ankles" => unnamed_ankles(),
+            "mid_air" => mid_air(false, true),
+            "mid_air_limp" => mid_air(false, false),
+            "mid_air_t_pose" => mid_air(true, true),
+            "mid_air_t_pose_limp" => mid_air(true, false),
+            "legacy_pose" => legacy_pose(),
             "balance" => balance_push(1.5, Vec3::Z, true),
             "balance_step" => balance_push(1.5, -Vec3::Z, true),
             "balance_steps" => balance_push(HARD_PUSHES[1], Vec3::Z, true),
             "stagger" => pushed(Some("Stagger"), HARD_PUSHES[1], Vec3::Z),
             "catch_fall" => catch_fall_shove(Vec3::new(0.0, 0.0, 3.5), true),
+            "look_and_reach" => reach_for(Vec3::new(0.4, 1.8, 1.2), Vec3::ZERO, true),
+            "look_and_reach_moving" => {
+                reach_for(Vec3::new(-0.6, 1.5, 1.0), Vec3::new(1.5, 0.0, 0.0), true)
+            }
             path if path.ends_with(".ens") => {
                 let mut project = crate::io::endorphin::import_scene(std::path::Path::new(path))
                     .unwrap()
@@ -2698,6 +3399,145 @@ mod tests {
         assert!(height < 0.1, "dancer rests {height} m above the turntable");
     }
 
+    /// A one-body prop's world transform at every frame.
+    fn prop_track(project: &Project, sim: &Simulation, name: &str) -> Vec<(Quat, Vec3)> {
+        let ci = project
+            .characters
+            .iter()
+            .position(|c| c.name == name)
+            .unwrap();
+        (0..=project.settings.range.end)
+            .map(|f| sim.frame(f).unwrap()[ci].as_ref().unwrap().bodies[0])
+            .collect()
+    }
+
+    /// How a prop ends: its centre, the angle of its axis (local Z) from upright,
+    /// radians, and its fastest speed over the last half second, m/s (jitter at rest).
+    fn settled(project: &Project, sim: &Simulation, name: &str) -> (Vec3, f32, f32) {
+        let track = prop_track(project, sim, name);
+        let fps = project.settings.fps;
+        let (rotation, center) = *track.last().unwrap();
+        let tilt = libm::acosf((rotation * Vec3::Z).dot(Vec3::Y).abs().min(1.0));
+        let last = track.len() - (fps * 0.5) as usize;
+        let jitter = track[last..]
+            .windows(2)
+            .map(|w| w[0].1.distance(w[1].1) * fps)
+            .fold(0.0, f32::max);
+        (center, tilt, jitter)
+    }
+
+    /// The lowest a prop's centre goes once it has first come within 1 mm of `rest`
+    /// (sinking into what it lands on), m.
+    fn lowest_after_landing(project: &Project, sim: &Simulation, name: &str, rest: f32) -> f32 {
+        let track = prop_track(project, sim, name);
+        let landed = track.iter().position(|t| t.1.y < rest + 0.001).unwrap_or(0);
+        track[landed..]
+            .iter()
+            .map(|t| t.1.y)
+            .fold(f32::MAX, f32::min)
+    }
+
+    /// Checks a prop that comes to rest: its centre's height (m) to a millimetre,
+    /// whether it stands (axis upright) or lies (axis level) within half a degree,
+    /// that it never sinks a millimetre below its rest, and that it is still.
+    fn rests(project: &Project, sim: &Simulation, name: &str, height: f32, standing: bool) {
+        let (centre, tilt, jitter) = settled(project, sim, name);
+        let lowest = lowest_after_landing(project, sim, name, height);
+        let lean = if standing {
+            tilt
+        } else {
+            std::f32::consts::FRAC_PI_2 - tilt
+        };
+        println!(
+            "{name:<12} centre y {:.4} m  tilt {:.2}°  lowest {lowest:.4} m  jitter {jitter:.4} m/s",
+            centre.y,
+            tilt.to_degrees()
+        );
+        assert!(
+            (centre.y - height).abs() < 0.001,
+            "{name} rests at {} m, not {height} m",
+            centre.y
+        );
+        assert!(
+            lean.to_degrees() < 0.5,
+            "{name} leans {}°",
+            lean.to_degrees()
+        );
+        assert!(lowest > height - 0.001, "{name} sinks to {lowest} m");
+        assert!(jitter < 0.002, "{name} still moves at {jitter} m/s");
+    }
+
+    /// Lesson 8: cylinders collide as cylinders, with flat caps and a sharp rim.
+    #[test]
+    fn cylinders_rest_on_caps_and_sides() {
+        let project = cylinders();
+        let sim = check(project.clone());
+        // Stood on its cap; as the capsule it used to be, its round end tipped it over.
+        rests(&project, &sim, "standing", 0.25, true);
+        rests(&project, &sim, "disc", 0.02, true);
+        rests(&project, &sim, "on box", 0.7, true);
+        rests(&project, &sim, "across box", 0.6, false);
+        rests(&project, &sim, "lying", 0.1, false);
+        // On the cap 3 cm in from the rim, where a round end would roll it off (a
+        // ball's local Z starts level and it does not roll).
+        rests(&project, &sim, "ball inside", 1.05, false);
+        // Its centre 2 cm past the rim: the sharp edge throws it outwards to the ground.
+        let (ball, _, _) = settled(&project, &sim, "ball outside");
+        println!("ball outside ends at {ball}");
+        assert!((ball.y - 0.05).abs() < 0.001 && ball.z > 0.3, "{ball}");
+
+        // The log rolls straight along +Z on its side, at 2/3 of the 1 m/s it was given
+        // (a solid cylinder rolling), without slowing, drifting or sinking.
+        let track = prop_track(&project, &sim, "log");
+        let fps = project.settings.fps;
+        let (rotation, end) = *track.last().unwrap();
+        let speed = (end.z - track[track.len() - 31].1.z) * fps / 30.0;
+        let lowest = track.iter().map(|t| t.1.y).fold(f32::MAX, f32::min);
+        let axis = rotation * Vec3::Z;
+        println!("log ends at {end}, rolling at {speed:.4} m/s, axis {axis}, lowest {lowest:.4} m");
+        assert!(end.z > 1.8, "log rolled only {} m", end.z);
+        assert!((speed - 2.0 / 3.0).abs() < 0.02, "log rolls at {speed} m/s");
+        assert!((end.x - 2.0).abs() < 0.005, "log drifted to x = {}", end.x);
+        assert!(axis.x.abs() > 0.9999, "log turned: axis {axis}");
+        assert!(
+            lowest > 0.099 && (end.y - 0.1).abs() < 0.001,
+            "log at {lowest} m"
+        );
+    }
+
+    /// Cylinders on cylinders: caps stacked, a cap on a side, sides side by side.
+    #[test]
+    fn cylinder_pile_settles() {
+        let project = cylinder_pile();
+        let (sim, elapsed) = simulate(&project);
+        let report = measure(&project, &sim, elapsed);
+        let steps = project.settings.range.end as f32 / project.settings.fps * project.physics.rate;
+        println!(
+            "{report}  {:.0} µs per step",
+            elapsed.as_secs_f32() * 1e6 / steps
+        );
+        assert!(report.held(), "{report}\n{}", report.places());
+        for (name, height) in [
+            ("disc0", 0.03),
+            ("disc1", 0.09),
+            ("disc2", 0.15),
+            ("base", 0.03),
+            ("post", 0.36),
+            ("plate", 0.03),
+        ] {
+            rests(&project, &sim, name, height, true);
+        }
+        let groove = 0.1 + 0.03f32.sqrt();
+        for (name, height) in [
+            ("pin", 0.16),
+            ("under0", 0.1),
+            ("under1", 0.1),
+            ("top", groove),
+        ] {
+            rests(&project, &sim, name, height, false);
+        }
+    }
+
     /// Without a ground plane, things may go as low as the scenery takes them: a floor
     /// tilting below where the ground would be, or the void beside a roof.
     #[test]
@@ -2914,7 +3754,7 @@ mod tests {
                 let cf = frame(f);
                 // The hips' starting up direction, carried along.
                 let up = cf.bodies[hips].0 * start.inverse() * Vec3::Y;
-                let angle = up.z.atan2(up.y);
+                let angle = libm::atan2f(up.z, up.y);
                 let step = (angle - last + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
                     - std::f32::consts::PI;
                 turned += step;
@@ -3012,6 +3852,198 @@ mod tests {
         assert!(early < 15.0, "elbows bent {early}° before their event");
     }
 
+    /// The left arm's elevation at a frame: degrees above horizontal, shoulder to wrist.
+    fn arm_elevation(project: &Project, sim: &Simulation, frame: i32) -> f32 {
+        let skeleton = &project.characters[0].skeleton;
+        let at = |name: &str| {
+            sim.frame(frame).unwrap()[0].as_ref().unwrap().joints
+                [skeleton.joint_index(name).unwrap()]
+            .1
+        };
+        let arm = at("l_wrist") - at("l_shoulder");
+        libm::atan2f(arm.y, libm::hypotf(arm.x, arm.z)).to_degrees()
+    }
+
+    /// A clavicle holds the whole arm up (lesson 27). With the muscle cap
+    /// counting only the joint's two bodies, the 0.4 kg clavicle's and the shoulder's
+    /// muscles are capped far below what the arm needs: posed straight out, the arms
+    /// stay hanging (-89° at frame 120). Counting the arm they move, the arms come up
+    /// over the 0.5 s ease-in (-32° at frame 30) and hold 9° below horizontal.
+    #[test]
+    fn a_clavicle_holds_the_arm_out() {
+        let elevation = |cap| {
+            let project = arms_out(cap);
+            let sim = check(project.clone());
+            (
+                arm_elevation(&project, &sim, 30),
+                arm_elevation(&project, &sim, 120),
+            )
+        };
+        let (bodies, limbs) = (elevation(SpringCap::Bodies), elevation(SpringCap::Limbs));
+        println!(
+            "arms out: elevation at frames 30 / 120 with the two-body cap {:.0}° / {:.0}°, \
+             with the limb cap {:.0}° / {:.0}°",
+            bodies.0, bodies.1, limbs.0, limbs.1
+        );
+        assert!(limbs.1 > -20.0, "arms at {}° with the limb cap", limbs.1);
+        assert!(
+            bodies.1 < limbs.1 - 45.0,
+            "two-body cap {}°, limb cap {}°",
+            bodies.1,
+            limbs.1
+        );
+        // Eased in over 0.5 s: on their way up at a quarter second.
+        assert!(
+            (-75.0..-10.0).contains(&limbs.0),
+            "arms at {}° at frame 30",
+            limbs.0
+        );
+    }
+
+    /// How far the hands' centres are from where the pose puts them relative to the
+    /// chest (m, the worse hand), averaged over frames 60-120, after the reach.
+    fn reach_error(project: &Project, sim: &Simulation) -> f32 {
+        let c = &project.characters[0];
+        let rig = c.physics.as_ref().unwrap();
+        let mut pose = Pose::rest(c.skeleton.joints.len());
+        for side in ["l", "r"] {
+            let j = c.skeleton.joint_index(&format!("{side}_shoulder")).unwrap();
+            pose.joints[j][0] = -90.0;
+        }
+        let wanted = rig_bodies(rig, &world_transforms(&c.skeleton, &pose));
+        let chest = rig.body_index("chest").unwrap();
+        let relative = |bodies: &[(Quat, Vec3)], hand: usize| {
+            bodies[chest].0.inverse() * (bodies[hand].1 - bodies[chest].1)
+        };
+        let frames = 60..=120;
+        let total: f32 = frames
+            .clone()
+            .map(|frame| {
+                let now = &sim.frame(frame).unwrap()[0].as_ref().unwrap().bodies;
+                ["l", "r"]
+                    .iter()
+                    .map(|side| {
+                        let hand = rig.body_index(&format!("{side}_wrist")).unwrap();
+                        (relative(now, hand) - relative(&wanted, hand)).length()
+                    })
+                    .fold(0.0, f32::max)
+            })
+            .sum();
+        total / frames.count() as f32
+    }
+
+    /// Virtual muscles (`virtual_reach`): with its shoulders too weak to hold the arms
+    /// up under the two-body cap, the reacher's hands swing about 0.3 m from where the
+    /// pose puts them (0.12-0.48 m over frames 60-120). Chest-to-hand virtual muscles
+    /// at 20 N/m, 2 N·s/m and 20 N per unit of strength (strength 10) bring them within
+    /// 5 cm and hold them there, with no joint pulled apart. endorphin's own gains, 1 in
+    /// every field, are too weak to lift the arms and brake them instead (0.6 m: the
+    /// orientation drive's damping resists the arm turning). A pose that doesn't name
+    /// the virtual muscles leaves them off: the same motion, exactly, as without them.
+    #[test]
+    fn virtual_muscles_pull_the_hands_to_the_pose() {
+        let gains = |stiffness, damping, force_limit| Gains {
+            stiffness,
+            damping,
+            force_limit,
+        };
+        let stand_in = (gains(20.0, 2.0, 20.0), gains(1.0, 1.0, 1.0));
+        let endorphins = (gains(1.0, 1.0, 1.0), gains(1.0, 1.0, 1.0));
+        let run = |vm: Option<(Gains, Gains)>, named: bool| {
+            let project = virtual_reach(vm, named);
+            let sim = check(project.clone());
+            let (stretch, at) = joint_stretch(&project, &sim, "reacher", 0..=120, |_| true);
+            (reach_error(&project, &sim), stretch, at, sim)
+        };
+        let (without, without_stretch, _, plain) = run(None, true);
+        let (with, stretch, at, _) = run(Some(stand_in), true);
+        let (stock, stock_stretch, _, _) = run(Some(endorphins), true);
+        let (unnamed, _, _, off) = run(Some(stand_in), false);
+        println!(
+            "virtual reach, hand error over frames 60-120: {without:.3} m without virtual \
+             muscles, {with:.3} m with them, {stock:.3} m with endorphin's gains; max joint \
+             stretch {stretch:.4} m at {at} ({without_stretch:.4} m without, \
+             {stock_stretch:.4} m with endorphin's gains)"
+        );
+        assert!(
+            without > 0.15,
+            "hands {without} m off without virtual muscles"
+        );
+        assert!(with < 0.1, "hands {with} m off with them");
+        assert!(
+            with < 0.5 * without,
+            "hands {with} m off with them, {without} without"
+        );
+        assert!(stretch < 0.01, "a joint stretched {stretch} m at {at}");
+        assert!(stock_stretch < 0.01, "a joint stretched {stock_stretch} m");
+        assert_eq!(
+            unnamed, without,
+            "a pose that doesn't name them leaves them off"
+        );
+        for frame in [30, 120] {
+            assert_eq!(
+                off.frame(frame).unwrap()[0].as_ref().unwrap().bodies,
+                plain.frame(frame).unwrap()[0].as_ref().unwrap().bodies
+            );
+        }
+    }
+
+    /// A joint no running pose names follows the pose that drives its limb (the lesson
+    /// on active poses): the ankles bend with the knees' event that stores them.
+    #[test]
+    fn an_unnamed_joint_follows_its_limbs_pose() {
+        let project = unnamed_ankles();
+        let sim = check(project.clone());
+        let knee = bend(&project, &sim, 100, "l_knee", "l_ankle");
+        let rest = bend(&project, &sim, 5, "l_ankle", "l_toe");
+        let ankle = bend(&project, &sim, 100, "l_ankle", "l_toe");
+        println!(
+            "unnamed ankles: knees {knee:.0}°, ankles {:.0}° from rest",
+            ankle - rest
+        );
+        assert!((45.0..75.0).contains(&knee), "knees bent {knee}°");
+        assert!(
+            (ankle - rest).abs() > 20.0,
+            "ankles turned {}°",
+            ankle - rest
+        );
+    }
+
+    /// A legacy pose's muscle targets drive the joints to their angles as an active
+    /// pose. Before, the pose didn't import at all ("stores muscle (effector) targets
+    /// instead of joint transforms"). Now, held for two seconds: knees 57° (the target
+    /// is 1.0 rad, 57°), elbows 45° (0.8 rad, 46°), hips flexed 28° (0.5 rad, 29°).
+    #[test]
+    fn legacy_pose_drives_joints_to_its_muscle_targets() {
+        let project = legacy_pose();
+        let sim = check(project.clone());
+        let skeleton = &project.characters[0].skeleton;
+        let joints = |f: i32| &sim.frame(f).unwrap()[0].as_ref().unwrap().joints;
+        let at = |f: i32, name: &str| joints(f)[skeleton.joint_index(name).unwrap()];
+        // The thigh's angle from straight down in the hips' frame, degrees.
+        let flexion = |f: i32| {
+            let (hips, _) = at(f, "hips");
+            let thigh = hips.inverse() * (at(f, "l_knee").1 - at(f, "l_hip").1);
+            thigh.angle_between(-Vec3::Y).to_degrees()
+        };
+        let knees = bend(&project, &sim, 150, "l_knee", "l_ankle");
+        let right = bend(&project, &sim, 150, "r_knee", "r_ankle");
+        let elbows = bend(&project, &sim, 150, "l_elbow", "l_wrist");
+        let hips = flexion(150);
+        let early = bend(&project, &sim, 8, "l_knee", "l_ankle");
+        println!(
+            "legacy pose: knees {knees:.0}° (right {right:.0}°), elbows {elbows:.0}°, hips {hips:.0}° \
+             at frame 150; knees {early:.0}° at 8"
+        );
+        assert!((47.0..67.0).contains(&knees), "knees bent {knees}°");
+        assert!((knees - right).abs() < 2.0, "knees {knees}° and {right}°");
+        assert!((36.0..56.0).contains(&elbows), "elbows bent {elbows}°");
+        assert!((19.0..39.0).contains(&hips), "hips flexed {hips}°");
+        // Forwards: the knee ends up in front of the hip (the character faces +Z).
+        assert!(at(150, "l_knee").1.z > at(150, "l_hip").1.z + 0.1);
+        assert!(early < 10.0, "knees bent {early}° before the event");
+    }
+
     /// A head that may collide with its parent but overlaps the neck at rest isn't
     /// thrown off it when the simulation starts (lesson 19). It turned 44° against the
     /// neck within the first second; now 2.6°.
@@ -3038,9 +4070,73 @@ mod tests {
 
     /// endorphin's Car Hit stretched a joint by 6 cm. The stand-in's character takes the
     /// hit within limits, so this guards against regressions rather than reproducing it.
+    /// The keyed car drives on and runs the pedestrian over: over 41 runs with its speed
+    /// nudged by up to ±2e-3 (`NM_SURVEY=car_hit nudge_survey`) the worst joint opens
+    /// 0.56 to 2.4 cm (1.95 to 12.7 cm, 5 runs over 5 cm, before lesson 29).
     #[test]
     fn car_hit_keeps_joints_together() {
         check(car_hit());
+    }
+
+    /// A fingerprint of everything a simulation produced: every frame's joints, bodies
+    /// and level for every character, bit for bit (64-bit FNV-1a).
+    fn fingerprint(sim: &Simulation, frames: std::ops::RangeInclusive<i32>) -> u64 {
+        let mut hash = 0xcbf2_9ce4_8422_2325u64;
+        let mut eat = |bits: u32| {
+            for byte in bits.to_le_bytes() {
+                hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+            }
+        };
+        for frame in frames {
+            for c in sim.frame(frame).unwrap().iter().flatten() {
+                eat(c.level as u32);
+                for (q, v) in c.joints.iter().chain(&c.bodies) {
+                    q.to_array()
+                        .into_iter()
+                        .chain(v.to_array())
+                        .for_each(|x| eat(x.to_bits()));
+                }
+            }
+        }
+        hash
+    }
+
+    /// The simulation is bit-identical on every platform (lesson 30): CI runs this on
+    /// Linux, Windows and macOS, in debug, and it runs here in release too. Three
+    /// stand-ins that turn a last-bit difference into a different outcome within a
+    /// second or two (a car running a character over, Explosion's landing, Stagger
+    /// stepping after a hard push), each hashed whole. A change to the physics changes
+    /// these on purpose: run the test, check the other tests still pass, and copy the
+    /// new values it prints. If one platform alone disagrees, something in the physics
+    /// is rounding the platform's way again (a maths function not from `libm`, say).
+    #[test]
+    fn simulations_are_bit_identical_everywhere() {
+        let scenes = [
+            ("car hit", car_hit(), 0x13fe_6b43_2574_a7a3u64),
+            ("explosion", mid_air(true, true), 0x946d_7389_3aab_f2fd),
+            (
+                "stagger",
+                pushed(Some("Stagger"), 2.8, Vec3::Z),
+                0xe2ab_f4f1_7094_e2cc,
+            ),
+        ];
+        let mut wrong = Vec::new();
+        for (name, project, expected) in scenes {
+            let (sim, _) = simulate(&project);
+            let range = project.settings.range;
+            let hash = fingerprint(&sim, range.start..=range.end);
+            println!("{name}: {hash:#018x}");
+            if hash != expected {
+                wrong.push(format!("{name}: {hash:#018x}, expected {expected:#018x}"));
+                // Frame by frame, to compare with a platform that agrees and find
+                // where they part.
+                let frames: Vec<String> = (range.start..=range.end)
+                    .map(|f| format!("{:04x}", fingerprint(&sim, f..=f) & 0xffff))
+                    .collect();
+                println!("{name} by frame: {}", frames.join(" "));
+            }
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("; "));
     }
 
     /// Heavy join (lesson 20): the car falls behind its carrier as it drives off (23 cm
@@ -3099,6 +4195,73 @@ mod tests {
             "still {} m/s 6 frames after landing",
             after[0]
         );
+    }
+
+    /// What the gun drop measures: the lowest finger centre above the ground, m, how far
+    /// either hand got from where its join holds it on the prop, m, and how far it turned
+    /// away from the prop, degrees.
+    fn gun_drop_numbers(project: &Project, sim: &Simulation) -> (f32, f32, f32) {
+        let holder = project
+            .characters
+            .iter()
+            .position(|c| c.name == "holder")
+            .unwrap();
+        let gun = project
+            .characters
+            .iter()
+            .position(|c| c.name == "gun")
+            .unwrap();
+        let rig = project.characters[holder].physics.as_ref().unwrap();
+        let body = |name: &str| rig.body_index(name).unwrap();
+        let at = |frame: i32, ci: usize, bi: usize| {
+            sim.frame(frame).unwrap()[ci].as_ref().unwrap().bodies[bi]
+        };
+        let (mut low, mut gap, mut turn) = (f32::MAX, 0.0f32, 0.0f32);
+        for side in ["l", "r"] {
+            let hand = body(&format!("{side}_wrist"));
+            let finger = body(&format!("{side}_fingers"));
+            let held = |frame: i32| {
+                let (gr, gp) = at(frame, gun, 0);
+                let (hr, hp) = at(frame, holder, hand);
+                (gr.inverse() * (hp - gp), gr.inverse() * hr)
+            };
+            let (start, start_turn) = held(0);
+            for frame in 1..=project.settings.range.end {
+                low = low.min(at(frame, holder, finger).1.y);
+                let (offset, rotation) = held(frame);
+                gap = gap.max(offset.distance(start));
+                turn = turn.max((start_turn.inverse() * rotation).to_scaled_axis().length());
+            }
+        }
+        (low, gap, turn.to_degrees())
+    }
+
+    /// Walk With Gun's pattern: a character holding a 550 kg prop drops with it. The
+    /// fingers hang below the prop's underside, so on landing they are between the
+    /// hand that holds the prop and the ground. Contacts are soft at a fixed frequency,
+    /// which makes their stiffness go with the finger's own 0.39 kg rather than with
+    /// what presses on it: the finger sank 1.4 cm into the ground (2.5 cm in the scene
+    /// with Coulomb friction). Contacts against the ground now join the direct solve
+    /// of a group with a lock in it (lesson 25).
+    /// Over the nudged runs (the prop's mass ±4e-4) the finger stays above the ground.
+    #[test]
+    fn gun_drop_keeps_the_fingers_out_of_the_ground() {
+        for nudge in nudges() {
+            let project = gun_drop_nudged(nudge);
+            let (sim, elapsed) = simulate(&project);
+            let report = measure(&project, &sim, elapsed);
+            let (low, gap, turn) = gun_drop_numbers(&project, &sim);
+            println!(
+                "Gun drop ({nudge:+.0e}): {report}\n{}  lowest finger {low:.4} m, hand off the prop by {gap:.4} m and turned {turn:.1}°",
+                report.places()
+            );
+            assert!(report.ok(), "{report}\n{}", report.places());
+            assert!(low > -0.005, "a finger sank to {low} m (nudge {nudge})");
+            assert!(
+                gap < 0.02,
+                "a hand came {gap} m off the prop (nudge {nudge})"
+            );
+        }
     }
 
     /// endorphin's Car Hit: a heavy car joined to a keyed carrier catches the
@@ -3315,8 +4478,9 @@ mod behaviour_tests {
     /// after. Near its limit, which pushes it survives turns on small differences in
     /// where a foot lands, so each set is checked as a count. Over 101 runs with the
     /// speeds nudged by up to ±1e-3 (`nudge_survey`) the counts were 5-8 of 8
-    /// backwards, 3-7 of 22 sideways and 6-11 of 12 forwards; each minimum here is one
-    /// below the worst.
+    /// backwards, 3-7 of 22 sideways and 6-11 of 12 forwards when these minimums were
+    /// set, one below the worst; with Coulomb friction and the higher swing they are
+    /// 6-8, 8-12 and 9-12.
     fn stepping_sets() -> [(&'static str, Pushes, usize); 3] {
         let sideways = [speeds(Vec3::X, 1.9, 2.8), speeds(-Vec3::X, 1.7, 2.8)].concat();
         [
@@ -3388,8 +4552,9 @@ mod behaviour_tests {
     /// and its feet go more than 1.5 times as far as Balance's. How many steps one
     /// push takes turns on small differences in where a foot lands (pushed at 2.5 m/s,
     /// 2 to 6 over 9 nudged runs). Over 101 runs with the speeds nudged by up to ±1e-3
-    /// (`nudge_survey`), the fewest after one hard push was 3, the total 17 to 31, and
-    /// the feet went 2.3 to 4.2 times as far as Balance's.
+    /// (`nudge_survey`), the fewest after one hard push was 3, the total 25 to 41, and
+    /// the feet went 1.9 to 4.5 times as far as Balance's (3, 17 to 31 and 2.3 to 4.2
+    /// on force-capped friction, before Stagger shuffled and stepped short).
     #[test]
     fn stagger_keeps_stepping_after_a_hard_push() {
         let (stagger, balance_moved) = stagger_and_balance(0.0);
@@ -3417,7 +4582,7 @@ mod behaviour_tests {
     /// How far the numbers the stepping tests and `car_carry_keeps_joints_together`
     /// assert on move when the scenes are nudged (`nudges`): run it after changing
     /// the physics or a behaviour, and keep each test's bound clear of the worst.
-    /// `NM_SURVEY=car|balance|stagger` runs one part (all when unset); `NM_NUDGES` and
+    /// `NM_SURVEY=car|car_hit|explosion|balance|stagger` runs one part (all when unset); `NM_NUDGES` and
     /// `NM_NUDGE_STEP` set the nudges. `cargo test --release nudge_survey -- --ignored
     /// --nocapture`
     #[test]
@@ -3466,6 +4631,79 @@ mod behaviour_tests {
                 range(&mut after),
                 range(&mut after_body),
                 range(&mut whole),
+            );
+        }
+        if wanted("car_hit") {
+            let mut stretch = Vec::new();
+            for &nudge in &nudges {
+                let project = car_hit_nudged(nudge);
+                let (sim, elapsed) = simulate(&project);
+                let r = measure(&project, &sim, elapsed);
+                println!(
+                    "car hit {nudge:+.1e}: stretch {:.2} cm at {}, fastest {:.1} m/s at {}, lowest {:.3} m at {}",
+                    r.stretch * 100.0,
+                    r.places[1],
+                    r.fastest,
+                    r.places[2],
+                    r.lowest,
+                    r.places[0]
+                );
+                stretch.push(r.stretch * 100.0);
+            }
+            println!(
+                "car hit, max joint stretch (cm): {} (test wants < 5)",
+                range(&mut stretch)
+            );
+        }
+        if wanted("explosion") {
+            let [
+                mut high,
+                mut low,
+                mut turned,
+                mut landed,
+                mut tilt,
+                mut settled,
+                mut stretch,
+            ] = [(); 7].map(|_| Vec::new());
+            for &nudge in &nudges {
+                let project = mid_air_nudged(true, true, nudge);
+                let (sim, elapsed) = simulate(&project);
+                let r = measure(&project, &sim, elapsed);
+                let f = flight(&project, &sim);
+                let e = explosion_numbers(&f);
+                println!(
+                    "explosion {nudge:+.1e}: arms up to {:.0}° at {}, down to {:.0}° at {}; turned {:.0}°; lands at {} on {}; tilt {:.0}° at 200; settled {:.3} m/s; stretch {:.2} cm at {}",
+                    e.high,
+                    e.at_high,
+                    e.low,
+                    e.at_low,
+                    e.turned,
+                    e.landed,
+                    f.lowest[e.landed].1,
+                    f.tilt[200],
+                    e.settled,
+                    r.stretch * 100.0,
+                    r.places[1]
+                );
+                high.push(e.high);
+                low.push(e.low);
+                turned.push(e.turned);
+                landed.push(e.landed as f32);
+                tilt.push(f.tilt[200]);
+                settled.push(e.settled);
+                stretch.push(r.stretch * 100.0);
+            }
+            // Settling is asserted on in hundredths.
+            settled.iter_mut().for_each(|s| *s *= 100.0);
+            println!(
+                "explosion: arms up {} °, down {} °, turned {} °, lands at frame {}, trunk tilted {} ° at 200, bodies moving {} cm/s at the end (test wants < 10), max joint stretch {} cm (sweep wants < 5)",
+                range(&mut high),
+                range(&mut low),
+                range(&mut turned),
+                range(&mut landed),
+                range(&mut tilt),
+                range(&mut settled),
+                range(&mut stretch),
             );
         }
         if wanted("balance") {
@@ -3734,6 +4972,161 @@ mod behaviour_tests {
         assert!(off < 1e-3, "frame {end} is {off:.3} m from the animation");
     }
 
+    /// Look and Reach at a frame: how far each arm (shoulder joint to finger tips)
+    /// points off the ball and how far its fingers are from it, and how far the head's
+    /// forward points off it, in degrees and metres.
+    struct Reaching {
+        arm_off: [f32; 2],
+        hand_gap: [f32; 2],
+        head_off: f32,
+    }
+
+    fn reaching(project: &Project, sim: &Simulation, frame: i32) -> Reaching {
+        let c = &project.characters[0];
+        let rig = c.physics.as_ref().unwrap();
+        let cf = sim.frame(frame).unwrap()[0].as_ref().unwrap();
+        let ball = sim.frame(frame).unwrap()[1].as_ref().unwrap().bodies[0].1;
+        let deg = |a: Vec3, b: Vec3| a.angle_between(b).to_degrees();
+        let body = |name: &str| cf.bodies[rig.body_index(name).unwrap()];
+        let arm = |side: &str| {
+            let shoulder =
+                cf.joints[c.skeleton.joint_index(&format!("{side}_shoulder")).unwrap()].1;
+            let tip = body(&format!("{side}_fingers")).1;
+            (deg(tip - shoulder, ball - shoulder), tip.distance(ball))
+        };
+        let (l, r) = (arm("l"), arm("r"));
+        // The head faces +Z at rest.
+        let rest = rig_bodies(
+            rig,
+            &world_transforms(&c.skeleton, &Pose::rest(c.skeleton.joints.len())),
+        );
+        let head = rig.body_index("head").unwrap();
+        let (rotation, at) = cf.bodies[head];
+        let forward = rotation * rest[head].0.inverse() * Vec3::Z;
+        Reaching {
+            arm_off: [l.0, r.0],
+            hand_gap: [l.1, r.1],
+            head_off: deg(forward, ball - at),
+        }
+    }
+
+    /// The first frame both arms point within `degrees` of the ball.
+    fn reached(project: &Project, sim: &Simulation, degrees: f32) -> Option<i32> {
+        (0..=project.settings.range.end).find(|&f| {
+            let r = reaching(project, sim, f);
+            r.arm_off[0] < degrees && r.arm_off[1] < degrees
+        })
+    }
+
+    /// Look and Reach with the ball in front of the chest, up to the left (out of
+    /// reach, as in endorphin's scene): measured against endorphin's run of "Hands
+    /// reach and look at" (docs/behaviours.md). There both arms swing from a T-pose to
+    /// point at the box by frame 20-24 and the head has turned to it by frame 15.
+    #[test]
+    fn look_and_reach_points_the_arms_and_head_at_the_target() {
+        let ball = Vec3::new(0.4, 1.8, 1.2);
+        for t_pose in [false, true] {
+            let project = reach_for(ball, Vec3::ZERO, t_pose);
+            let (sim, time) = simulate(&project);
+            let report = measure(&project, &sim, time);
+            let first = reached(&project, &sim, 20.0);
+            let head = (0..=180).find(|&f| reaching(&project, &sim, f).head_off < 15.0);
+            let end = reaching(&project, &sim, 120);
+            println!(
+                "look and reach (T-pose {t_pose}): arms within 20° at frame {first:?}, head \
+                 within 15° at {head:?}; at 2 s arms {:.1}° {:.1}° off, fingers {:.2} {:.2} m \
+                 from the ball, head {:.1}° off. {report}",
+                end.arm_off[0], end.arm_off[1], end.hand_gap[0], end.hand_gap[1], end.head_off
+            );
+            assert!(report.ok(), "{report}");
+            // endorphin: frame 20-24. Here 22 (hanging arms) and 23 (T-pose).
+            assert!(
+                first.is_some_and(|f| (16..=30).contains(&f)),
+                "arms not there at endorphin's pace: {first:?}"
+            );
+            assert!(head.is_some_and(|f| f <= 20), "head too slow: {head:?}");
+            assert!(end.arm_off.iter().all(|&a| a < 8.0), "arms off");
+            assert!(end.head_off < 8.0, "head off {}", end.head_off);
+        }
+    }
+
+    /// A ball within reach: both hands get to it (fingers' centres within 8 cm of its
+    /// centre, the two hands kept 8 cm apart).
+    #[test]
+    fn look_and_reach_gets_the_hands_to_a_target_in_reach() {
+        let project = reach_for(Vec3::new(0.1, 1.35, 0.45), Vec3::ZERO, true);
+        let (sim, time) = simulate(&project);
+        let report = measure(&project, &sim, time);
+        let end = reaching(&project, &sim, 120);
+        println!(
+            "in reach: fingers {:.3} {:.3} m from the ball at 2 s. {report}",
+            end.hand_gap[0], end.hand_gap[1]
+        );
+        assert!(report.ok(), "{report}");
+        assert!(end.hand_gap.iter().all(|&g| g < 0.08), "{:?}", end.hand_gap);
+    }
+
+    /// The hands follow a ball moving 1.5 m sideways over 3 s, and the head with them.
+    #[test]
+    fn look_and_reach_follows_a_moving_target() {
+        let project = reach_for(Vec3::new(-0.6, 1.5, 1.0), Vec3::new(1.5, 0.0, 0.0), true);
+        let (sim, time) = simulate(&project);
+        let report = measure(&project, &sim, time);
+        assert!(report.ok(), "{report}");
+        let worst = (60..=180).map(|f| reaching(&project, &sim, f)).fold(
+            (0.0f32, 0.0f32),
+            |(arm, head), r| {
+                (
+                    arm.max(r.arm_off[0]).max(r.arm_off[1]),
+                    head.max(r.head_off),
+                )
+            },
+        );
+        println!(
+            "following: arms at most {:.1}° off, head {:.1}° off from 1 s to 3 s. {report}",
+            worst.0, worst.1
+        );
+        assert!(worst.0 < 12.0 && worst.1 < 10.0, "{worst:?}");
+    }
+
+    /// Two runs give the same bodies, bit for bit, and moving the ball by up to 4e-4 m
+    /// (as another platform's rounding might move a body) moves the numbers above only
+    /// a little.
+    #[test]
+    fn look_and_reach_is_deterministic_and_robust() {
+        let ball = Vec3::new(0.4, 1.8, 1.2);
+        let project = reach_for(ball, Vec3::ZERO, true);
+        let (sim, _) = simulate(&project);
+        let (again, _) = simulate(&project);
+        for frame in [30, 90, 180] {
+            assert_eq!(
+                sim.frame(frame).unwrap()[0].as_ref().unwrap().bodies,
+                again.frame(frame).unwrap()[0].as_ref().unwrap().bodies,
+                "frame {frame} differs between runs"
+            );
+        }
+        let base = (
+            reached(&project, &sim, 20.0).unwrap(),
+            reaching(&project, &sim, 120),
+        );
+        for nudge in nudges() {
+            let project = reach_for(ball + Vec3::splat(nudge), Vec3::ZERO, true);
+            let (sim, _) = simulate(&project);
+            let first = reached(&project, &sim, 20.0).unwrap();
+            let end = reaching(&project, &sim, 120);
+            let moved = (0..2)
+                .map(|i| (end.arm_off[i] - base.1.arm_off[i]).abs())
+                .fold(0.0f32, f32::max);
+            println!(
+                "nudge {nudge:+.0e}: within 20° at frame {first} (unnudged {}), arms moved by \
+                 at most {moved:.3}°",
+                base.0
+            );
+            assert!((first - base.0).abs() <= 2, "{first} vs {}", base.0);
+            assert!(moved < 0.5, "arms moved {moved}°");
+        }
+    }
+
     #[test]
     fn writhe_keeps_moving_and_is_deterministic() {
         let project = limp_then(Some("Writhe"));
@@ -3770,6 +5163,205 @@ mod behaviour_tests {
             assert_eq!(a.bodies, b.bodies, "frame {frame} differs between runs");
         }
     }
+
+    /// What `mid_air` shows, per frame: (left and right upper arms' elevation above
+    /// the horizontal, deg; how far the pelvis has turned since frame 0, deg; the
+    /// trunk's tilt from upright, deg; lowest body centre and its name).
+    struct Flight {
+        arms: Vec<(f32, f32)>,
+        turned: Vec<f32>,
+        tilt: Vec<f32>,
+        lowest: Vec<(f32, String)>,
+        speed: Vec<f32>,
+    }
+
+    fn flight(project: &Project, sim: &Simulation) -> Flight {
+        let c = &project.characters[0];
+        let rig = c.physics.as_ref().unwrap();
+        let joint = |n: &str| c.skeleton.joint_index(n).unwrap();
+        let hips = rig.body_index("hips").unwrap();
+        let start = sim.frame(0).unwrap()[0].as_ref().unwrap().bodies[hips].0;
+        let mut f = Flight {
+            arms: vec![],
+            turned: vec![],
+            tilt: vec![],
+            lowest: vec![],
+            speed: vec![],
+        };
+        let mut last: Option<Vec<Vec3>> = None;
+        for frame in 0..=project.settings.range.end {
+            let cf = sim.frame(frame).unwrap()[0].as_ref().unwrap();
+            let at = |n: &str| cf.joints[joint(n)].1;
+            let elevation = |from: &str, to: &str| {
+                let v = at(to) - at(from);
+                libm::atan2f(v.y, v.with_y(0.0).length()).to_degrees()
+            };
+            f.arms.push((
+                elevation("l_shoulder", "l_elbow"),
+                elevation("r_shoulder", "r_elbow"),
+            ));
+            f.turned.push(
+                (cf.bodies[hips].0 * start.inverse())
+                    .to_axis_angle()
+                    .1
+                    .to_degrees(),
+            );
+            let trunk = (at("neck") - at("hips")).normalize();
+            f.tilt
+                .push(libm::acosf(trunk.y.clamp(-1.0, 1.0)).to_degrees());
+            let (b, low) = cf
+                .bodies
+                .iter()
+                .enumerate()
+                .min_by(|a, b| a.1.1.y.total_cmp(&b.1.1.y))
+                .unwrap();
+            f.lowest.push((low.1.y, rig.bodies[b].name.clone()));
+            let now: Vec<Vec3> = cf.bodies.iter().map(|b| b.1).collect();
+            f.speed.push(last.map_or(0.0, |last| {
+                let fps = project.settings.fps;
+                now.iter()
+                    .zip(&last)
+                    .map(|(a, b)| a.distance(*b))
+                    .sum::<f32>()
+                    * fps
+                    / now.len() as f32
+            }));
+            last = Some(now);
+        }
+        f
+    }
+
+    /// Highest (or lowest, `-1`) mean elevation of the two upper arms over `frames`,
+    /// with its frame.
+    fn arm_extreme(f: &Flight, frames: std::ops::RangeInclusive<usize>, sign: f32) -> (f32, usize) {
+        frames
+            .map(|i| ((f.arms[i].0 + f.arms[i].1) / 2.0, i))
+            .max_by(|a, b| (sign * a.0).total_cmp(&(sign * b.0)))
+            .unwrap()
+    }
+
+    /// What `explosion_flails_in_mid_air_like_endorphins` asserts on: the arms'
+    /// highest mean elevation before frame 30 and its frame, the lowest after it until
+    /// landing and its frame, deg; the pelvis' largest turn in the air, deg; the
+    /// landing frame; the bodies' mean speed over the last 20 frames, m/s.
+    struct ExplosionNumbers {
+        high: f32,
+        at_high: usize,
+        low: f32,
+        at_low: usize,
+        turned: f32,
+        landed: usize,
+        settled: f32,
+    }
+
+    fn explosion_numbers(f: &Flight) -> ExplosionNumbers {
+        let landed = f.lowest.iter().position(|l| l.0 < 0.1).unwrap();
+        let (high, at_high) = arm_extreme(f, 0..=30, 1.0);
+        let (low, at_low) = arm_extreme(f, 30..=landed, -1.0);
+        let turned = f.turned[..landed].iter().fold(0.0f32, |a, &b| a.max(b));
+        let settled = f.speed[190..].iter().sum::<f32>() / f.speed[190..].len() as f32;
+        ExplosionNumbers {
+            high,
+            at_high,
+            low,
+            at_low,
+            turned,
+            landed,
+            settled,
+        }
+    }
+
+    /// Explosion, measured against endorphin's "Writhe in mid-air 2.5" (both
+    /// characters start in a T-pose 4 m up, Amplitude and Speed 0.6, Strength 0.5):
+    /// its arms go from out to the sides up to +35-38° between frames 20 and 30, down
+    /// to -40 to -58° at 42-46 and are coming back up at 52; the body falls upright,
+    /// lands feet first at about frame 56, goes down on its back and lies still.
+    /// Over 41 runs with the drop's height nudged by up to ±2e-3 (`NM_SURVEY=explosion
+    /// nudge_survey`) no joint opens more than 1.4 cm (15 cm before lesson 29), and the
+    /// bodies move 0.23 to 2.9 cm/s over the last 20 frames, this run 1.1 (up to 20
+    /// before lesson 31 damped a limp body's joints). Results are bit-identical
+    /// everywhere, so this run is the same on CI.
+    #[test]
+    fn explosion_flails_in_mid_air_like_endorphins() {
+        let project = mid_air(true, true);
+        let (sim, time) = simulate(&project);
+        let report = measure(&project, &sim, time);
+        println!("explosion run: {report}");
+        assert!(report.ok(), "{report}");
+        let f = flight(&project, &sim);
+        let ExplosionNumbers {
+            high,
+            at_high,
+            low,
+            at_low,
+            turned,
+            landed,
+            settled,
+        } = explosion_numbers(&f);
+        println!(
+            "explosion: arms up to {high:.0}° at frame {at_high}, down to {low:.0}° at \
+             {at_low}; pelvis turned {turned:.0}° in the air; lands at frame {landed} on \
+             {}; trunk tilted {:.0}° at frame 200; bodies moving {settled:.2} m/s over the \
+             last 20 frames",
+            f.lowest[landed].1, f.tilt[200]
+        );
+        assert!((30.0..60.0).contains(&high), "arms up to {high}°");
+        assert!((14..=28).contains(&at_high), "highest at {at_high}");
+        assert!((-70.0..-30.0).contains(&low), "arms down to {low}°");
+        assert!((36..=54).contains(&at_low), "lowest at {at_low}");
+        assert!(turned < 20.0, "turned {turned}° in the air");
+        assert!((50..=60).contains(&landed), "landed at {landed}");
+        assert!(
+            ["ankle", "toe", "knee"]
+                .iter()
+                .any(|n| f.lowest[landed].1.ends_with(n)),
+            "landed on {}",
+            f.lowest[landed].1
+        );
+        assert!(f.tilt[200] > 60.0, "trunk {}° from upright", f.tilt[200]);
+        assert!(settled < 0.1, "still moving at {settled} m/s");
+
+        // Limp, the same character drops with its arms out and lands sprawled.
+        let limp = mid_air(true, false);
+        let (limp_sim, _) = simulate(&limp);
+        let lf = flight(&limp, &limp_sim);
+        let still = lf.arms[..landed]
+            .iter()
+            .fold(0.0f32, |a, b| a.max(b.0.abs()).max(b.1.abs()));
+        println!("limp: arms within {still:.1}° of out to the sides until it lands");
+        assert!(still < 5.0, "limp arms moved {still}°");
+    }
+
+    /// The same on the placeholder, which rests with its arms hanging: the arms come up
+    /// and flap, it stays upright in the air, and two runs agree bit for bit.
+    #[test]
+    fn explosion_works_on_the_placeholder_and_is_deterministic() {
+        let project = mid_air(false, true);
+        let (sim, time) = simulate(&project);
+        let report = measure(&project, &sim, time);
+        println!("explosion on the placeholder: {report}");
+        assert!(report.ok(), "{report}");
+        let f = flight(&project, &sim);
+        let landed = f.lowest.iter().position(|l| l.0 < 0.1).unwrap();
+        let (high, at_high) = arm_extreme(&f, 5..=30, 1.0);
+        let (low, at_low) = arm_extreme(&f, 30..=landed, -1.0);
+        let turned = f.turned[..landed].iter().fold(0.0f32, |a, &b| a.max(b));
+        println!(
+            "placeholder: arms up to {high:.0}° at frame {at_high}, down to {low:.0}° at \
+             {at_low}; turned {turned:.0}° in the air; lands at {landed} on {}",
+            f.lowest[landed].1
+        );
+        assert!(high > 10.0 && low < -20.0, "arms {low}° to {high}°");
+        assert!(turned < 20.0, "turned {turned}° in the air");
+        let (again, _) = simulate(&project);
+        for frame in [30, 60, 120] {
+            let (a, b) = (
+                sim.frame(frame).unwrap()[0].as_ref().unwrap(),
+                again.frame(frame).unwrap()[0].as_ref().unwrap(),
+            );
+            assert_eq!(a.bodies, b.bodies, "frame {frame} differs between runs");
+        }
+    }
 }
 
 /// Simulates every sample scene shipped with a local endorphin install and checks the
@@ -3794,7 +5386,10 @@ mod endorphin_scenes {
         paths.sort();
         for path in paths {
             let name = path.file_stem().unwrap().to_string_lossy().into_owned();
-            if name.contains("Large File") {
+            // `NM_SCENES=Car,Rope` sweeps only scenes whose names contain one of these.
+            if let Ok(only) = std::env::var("NM_SCENES")
+                && !only.split(',').any(|part| name.contains(part.trim()))
+            {
                 continue;
             }
             // The whole range: a scene can go wrong long after its first seconds.
@@ -3820,5 +5415,342 @@ mod endorphin_scenes {
             }
         }
         assert!(failures.is_empty(), "{failures:?}");
+    }
+}
+
+/// The physics settings the editor changes (gravity, rate, contact model, material
+/// interactions and pairs) must reach the simulation, and leave results alone when
+/// they aren't touched.
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+    use crate::document::physics::{Interaction, PhysicsSettings};
+    use crate::document::{Document, Edit};
+
+    /// A 0.5 m box released at rest `height` m up, over the default ground, for two
+    /// seconds at 60 frames per second.
+    fn dropped_box(height: f32) -> Project {
+        let mut p = new_scene("Dropped box", 2.0);
+        let free = Limits {
+            twist_min: 0.0,
+            twist_max: 0.0,
+            swing1: 0.0,
+            swing2: 0.0,
+        };
+        let no_muscle = Gains {
+            stiffness: 0.0,
+            damping: 0.0,
+            force_limit: 0.0,
+        };
+        let piece = Piece::at(
+            Geometry::Box {
+                size: [0.5, 0.5, 0.5],
+            },
+            10.0,
+            Quat::IDENTITY,
+            Vec3::ZERO,
+        );
+        add_prop(
+            &mut p,
+            "box",
+            CharacterKind::Prop,
+            prop_rig(
+                vec![("body", None, Vec3::new(0.0, height, 0.0), piece)],
+                free,
+                no_muscle,
+            ),
+            SimLevel::Simulated,
+        );
+        p
+    }
+
+    fn box_at(sim: &Simulation, frame: i32) -> Vec3 {
+        sim.frame(frame).unwrap()[0].as_ref().unwrap().bodies[0].1
+    }
+
+    /// Applies `change` to the project's physics settings the way the inspector does.
+    fn edited(project: &Project, change: impl FnOnce(&mut PhysicsSettings)) -> Project {
+        let mut doc = Document::new(project.clone());
+        let before = doc.project.physics.clone();
+        let mut after = before.clone();
+        change(&mut after);
+        doc.apply(
+            "Edit physics settings",
+            Edit::Physics { before, after },
+            false,
+        );
+        doc.project
+    }
+
+    /// How high the box bounces after its first landing, m.
+    fn rebound(project: &Project) -> f32 {
+        let (sim, _) = simulate(project);
+        let end = project.settings.range.end;
+        let ys: Vec<f32> = (0..=end).map(|f| box_at(&sim, f).y).collect();
+        let landing = (0..ys.len())
+            .min_by(|&a, &b| ys[a].total_cmp(&ys[b]))
+            .unwrap();
+        // The lowest point before the box rises again is the first landing.
+        let first_landing = (1..ys.len())
+            .find(|&i| ys[i] > ys[i - 1] && ys[i - 1] < 0.6)
+            .map_or(landing, |i| i - 1);
+        let peak = ys[first_landing..].iter().copied().fold(f32::MIN, f32::max);
+        peak - ys[first_landing]
+    }
+
+    /// Nudge-proof bounds: how far the numbers moved is in the assertion messages.
+    #[test]
+    fn zero_gravity_keeps_a_body_still() {
+        let project = dropped_box(2.0);
+        let (falling, _) = simulate(&project);
+        let (floating, _) = simulate(&edited(&project, |p| p.gravity = [0.0; 3]));
+        let end = project.settings.range.end;
+        eprintln!(
+            "default: y {:.3} -> {:.3}; zero gravity: y {:.3} -> {:.3}",
+            box_at(&falling, 0).y,
+            box_at(&falling, end).y,
+            box_at(&floating, 0).y,
+            box_at(&floating, end).y
+        );
+        assert!(box_at(&falling, end).y < 0.3, "it lands under gravity");
+        for f in [0, end / 2, end] {
+            let p = box_at(&floating, f);
+            assert!(
+                (p - Vec3::new(0.0, 2.0, 0.0)).length() < 1e-3,
+                "frame {f}: {p}"
+            );
+        }
+    }
+
+    #[test]
+    fn edited_gravity_sets_how_fast_it_falls() {
+        // Released 10 m up: at 9.81 m/s² a box released 5 m up was already on the
+        // ground (centre 0.25 m up) by frame 59, so it seemed to fall 4.72 m (lesson 32).
+        let project = dropped_box(10.0);
+        // After one second of free fall from rest: g / 2 metres.
+        let drop_after_one_second = |g: f32| {
+            let moon = edited(&project, |p| p.gravity = [0.0, -g, 0.0]);
+            let (sim, _) = simulate(&moon);
+            10.0 - box_at(&sim, 60).y
+        };
+        let earth = drop_after_one_second(9.81);
+        let moon = drop_after_one_second(1.62);
+        eprintln!("one second of fall: {earth:.4} m at 9.81, {moon:.4} m at 1.62");
+        // Free fall is g / 2: 4.905 and 0.81 m. Semi-implicit Euler at 480 substeps a
+        // second adds g·h·t / 2: 4.9152 and 0.8117 m.
+        assert!((earth - 4.905).abs() < 0.015, "{earth}");
+        assert!((moon - 0.81).abs() < 0.005, "{moon}");
+        assert!(earth > 5.0 * moon, "{earth} vs {moon}");
+        // Sideways gravity too.
+        let sideways = edited(&project, |p| p.gravity = [3.0, 0.0, 0.0]);
+        let (sim, _) = simulate(&sideways);
+        let p = box_at(&sim, 60);
+        assert!((p.x - 1.5).abs() < 0.01 && (p.y - 10.0).abs() < 1e-3, "{p}");
+    }
+
+    /// Stand-in for lesson 32: a free body falls g·t²/2 and a thrown one follows the
+    /// parabola, with nothing taking energy from it at speed. Free fall has no knife
+    /// edge (nothing in it is chaotic), so the bounds are the integrator's own error.
+    #[test]
+    fn a_free_body_follows_the_parabola() {
+        let g = 9.81;
+        // Semi-implicit Euler: n substeps of h after a start at rest fall g·h²·n(n+1)/2,
+        // which is g·t²/2 plus g·h·t/2 (1.0 cm after a second at 480 substeps a second).
+        let h = 1.0 / 480.0;
+        let euler = |t: f32| {
+            let n = (t / h).round();
+            g * h * h * n * (n + 1.0) / 2.0
+        };
+        let project = dropped_box(10.0);
+        let (sim, _) = simulate(&project);
+        let fallen = 10.0 - box_at(&sim, 60).y;
+        let start = Vec3::new(0.0, 10.0, 0.0);
+        let thrown = {
+            let mut p = project.clone();
+            let id = p.characters[0].id;
+            push(
+                &mut p,
+                id,
+                0,
+                "box.MetaBodies.body",
+                Vec3::new(3.0, 4.0, -2.0),
+            );
+            p
+        };
+        let (flight, _) = simulate(&thrown);
+        let mut worst = 0.0f32;
+        for frame in [10, 30, 60, 90] {
+            let t = frame as f32 / 60.0;
+            let p = box_at(&flight, frame);
+            let parabola = start + Vec3::new(3.0, 4.0, -2.0) * t - Vec3::Y * (g * t * t / 2.0);
+            let off = (p - parabola).length();
+            eprintln!(
+                "thrown, frame {frame}: {p} against {parabola}, {off:.4} m off ({:.4} m \
+                 for the integrator)",
+                (p.y - (start.y + 4.0 * t - euler(t))).abs()
+            );
+            assert!(off < 0.02, "frame {frame}: {p} against {parabola}");
+            // Nothing velocity-dependent: the integrator's own error, to 1 mm.
+            assert!(
+                (p.y - (start.y + 4.0 * t - euler(t))).abs() < 1e-3,
+                "frame {frame}: {p}"
+            );
+            assert!((p.x - 3.0 * t).abs() < 1e-3 && (p.z + 2.0 * t).abs() < 1e-3);
+            worst = worst.max(off);
+        }
+        eprintln!(
+            "free fall in one second: {fallen:.4} m (g/2 4.905, the integrator {:.4}); \
+             thrown, at most {worst:.4} m off the parabola",
+            euler(1.0)
+        );
+        assert!((fallen - euler(1.0)).abs() < 1e-3, "fell {fallen} m");
+        assert!((fallen - 4.905).abs() < 0.015, "fell {fallen} m");
+    }
+
+    #[test]
+    fn edited_restitution_changes_the_bounce() {
+        let project = dropped_box(1.5);
+        let dead = rebound(&edited(&project, |p| {
+            p.interactions.get_mut("Default").unwrap().restitution = 0.0;
+        }));
+        let lively = rebound(&edited(&project, |p| {
+            p.interactions.get_mut("Default").unwrap().restitution = 0.9;
+        }));
+        eprintln!("rebound: {dead:.3} m at restitution 0, {lively:.3} m at 0.9");
+        assert!(dead < 0.1, "{dead}");
+        assert!(lively > 0.5, "{lively}");
+    }
+
+    #[test]
+    fn a_material_pair_picks_the_interaction() {
+        let project = dropped_box(1.5);
+        let plain = rebound(&edited(&project, |p| {
+            p.interactions.get_mut("Default").unwrap().restitution = 0.0;
+        }));
+        // The box's shapes are "default" and the ground "tarmac": pair them with a
+        // bouncy interaction added in the same edit.
+        let bouncy = rebound(&edited(&project, |p| {
+            p.interactions.get_mut("Default").unwrap().restitution = 0.0;
+            p.interactions.insert(
+                "Bouncy".into(),
+                Interaction {
+                    restitution: 0.9,
+                    friction: 100.0,
+                    adhesion: 0.0,
+                    softness: 0.0,
+                },
+            );
+            p.pairs
+                .push(("tarmac".into(), "default".into(), "Bouncy".into()));
+        }));
+        eprintln!("rebound: {plain:.3} m unpaired, {bouncy:.3} m paired with Bouncy");
+        assert!(plain < 0.1, "{plain}");
+        assert!(bouncy > 0.5, "{bouncy}");
+    }
+
+    #[test]
+    fn edited_friction_changes_how_far_a_box_slides() {
+        let mut project = dropped_box(0.26);
+        let id = project.characters[0].id;
+        push(
+            &mut project,
+            id,
+            30,
+            "box.MetaBodies.body",
+            Vec3::new(3.0, 0.0, 0.0),
+        );
+        let slid = |friction: f32, contact: ContactModel| {
+            let edit = edited(&project, |p| {
+                p.contact = contact;
+                p.interactions.get_mut("Default").unwrap().friction = friction;
+            });
+            let (sim, _) = simulate(&edit);
+            box_at(&sim, edit.settings.range.end).x
+        };
+        let grippy = slid(100.0, ContactModel::Coulomb);
+        let slippery = slid(5.0, ContactModel::Coulomb);
+        eprintln!("slid {grippy:.2} m at mu 1, {slippery:.2} m at mu 0.05");
+        // v² / 2μg: about 0.46 m at μ 1; at μ 0.05 it is still moving at the end.
+        assert!((0.3..0.7).contains(&grippy), "{grippy}");
+        assert!(slippery > 2.0 * grippy, "{slippery}");
+    }
+
+    #[test]
+    fn a_different_simulation_rate_still_agrees() {
+        let project = dropped_box(5.0);
+        let at = |rate: f32| {
+            let (sim, _) = simulate(&edited(&project, |p| p.rate = rate));
+            box_at(&sim, 60).y
+        };
+        let (slow, normal, fast) = (at(60.0), at(120.0), at(240.0));
+        eprintln!(
+            "height after one second: {slow:.3} at 60 Hz, {normal:.3} at 120, {fast:.3} at 240"
+        );
+        assert!((normal - fast).abs() < 0.05, "{normal} vs {fast}");
+        assert!((normal - slow).abs() < 0.1, "{normal} vs {slow}");
+    }
+
+    #[test]
+    fn untouched_and_undone_settings_leave_the_motion_identical() {
+        let project = dropped_box(1.5);
+        let (reference, _) = simulate(&project);
+
+        // Edit, then undo: same project, same motion, bit for bit.
+        let mut doc = Document::new(project.clone());
+        let before = doc.project.physics.clone();
+        let mut after = before.clone();
+        after.gravity = [0.0; 3];
+        after.contact = ContactModel::Coulomb;
+        doc.apply(
+            "Edit physics settings",
+            Edit::Physics { before, after },
+            false,
+        );
+        doc.undo();
+        assert_eq!(doc.project, project);
+        let (again, _) = simulate(&doc.project);
+        for f in 0..=project.settings.range.end {
+            assert_eq!(box_at(&reference, f), box_at(&again, f), "frame {f}");
+        }
+    }
+
+    #[test]
+    fn the_default_settings_are_what_the_tests_were_tuned_on() {
+        let p = PhysicsSettings::default();
+        assert_eq!(p.rate, 120.0);
+        assert_eq!(p.gravity, [0.0, -9.81, 0.0]);
+        // Coulomb since lesson 26; the stand-ins that need force caps say so.
+        assert_eq!(p.contact, ContactModel::Coulomb);
+        let default = p.interactions["Default"];
+        assert_eq!(
+            (
+                default.restitution,
+                default.friction,
+                default.adhesion,
+                default.softness
+            ),
+            (0.2, 100.0, 0.0, 0.0)
+        );
+        assert_eq!(p.interactions["Grippy"].friction, 300.0);
+        assert_eq!(p.interactions.len(), 2);
+        assert_eq!(p.pairs.len(), 2);
+    }
+
+    #[test]
+    fn saving_and_reopening_keeps_the_edited_settings_and_the_motion() {
+        let project = edited(&dropped_box(1.5), |p| {
+            p.gravity = [0.5, -4.0, 0.0];
+            p.rate = 240.0;
+            p.contact = ContactModel::Coulomb;
+            p.pairs
+                .push(("steel".into(), "ice".into(), "Grippy".into()));
+        });
+        let text = crate::io::to_string(&project).unwrap();
+        let reopened = crate::io::from_str(&text).unwrap();
+        assert_eq!(reopened.physics, project.physics);
+        let (a, _) = simulate(&project);
+        let (b, _) = simulate(&reopened);
+        let end = project.settings.range.end;
+        assert_eq!(box_at(&a, end), box_at(&b, end));
     }
 }

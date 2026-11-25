@@ -1,10 +1,11 @@
 //! Narrow-phase collision between primitive shapes.
 //!
-//! Spheres, capsules and long cylinders are handled as a line segment with a radius (a
-//! long cylinder collides as a capsule of the same overall length). Flat cylinders
-//! (discs, wheels, turntables) are a flat disc with a rounded rim of half their height.
-//! Boxes are oriented boxes. The ground is an infinite plane. Contacts are generated up
-//! to `margin` before touching so the solver can stop fast bodies before they tunnel.
+//! Spheres and capsules are handled as a line segment with a radius. Cylinders are
+//! exact: flat caps with a sharp rim, long ones (logs, forearms) and flat ones (discs,
+//! wheels, turntables) alike. Boxes are oriented boxes. The ground is an infinite
+//! plane. Contacts are generated up to `margin` before touching so the solver can stop
+//! fast bodies before they tunnel. Flat faces resting on each other touch at several
+//! points (a box's corners, a cap's rim as a polygon) so they rest without rocking.
 
 use glam::{Mat3, Quat, Vec3};
 
@@ -33,24 +34,27 @@ pub struct Contact {
 
 enum Form {
     /// Segment from `a` to `b` swept by `radius` (a sphere has a == b).
-    Swept { a: Vec3, b: Vec3, radius: f32 },
+    Swept {
+        a: Vec3,
+        b: Vec3,
+        radius: f32,
+    },
     Cuboid {
         rotation: Quat,
         center: Vec3,
         half: Vec3,
     },
-    /// A flat disc of radius `core` across the plane through `center` normal to the
-    /// rotation's Z, swept by `radius` (a cylinder shorter than it is wide).
-    Disc {
-        rotation: Quat,
-        center: Vec3,
-        core: f32,
-        radius: f32,
-    },
+    Cylinder(Cyl),
 }
 
-/// Points spread around a disc's rim, used to touch it against flat things.
+/// Points spread around a cylinder's cap rim, used to touch it against flat things.
 const RIM_POINTS: usize = 6;
+
+/// A cap rests on its rim points only while it faces what it touches within 60°
+/// (the cosine). Lying on its side, a cylinder rests on its side line instead: rim
+/// points near the bottom then turn with it as it rolls, and pushing up behind the
+/// line they would roll it further, faster and faster.
+const CAP_FACING: f32 = 0.5;
 
 fn form(shape: &Placed) -> Form {
     let axis = shape.rotation * Vec3::Z;
@@ -62,15 +66,12 @@ fn form(shape: &Placed) -> Form {
     match shape.geometry {
         Geometry::Sphere { radius } => swept(radius, 0.0),
         Geometry::Capsule { radius, length } => swept(radius, length * 0.5),
-        Geometry::Cylinder { radius, length } if length >= 2.0 * radius => {
-            swept(radius, length * 0.5 - radius)
-        }
-        Geometry::Cylinder { radius, length } => Form::Disc {
+        Geometry::Cylinder { radius, length } => Form::Cylinder(Cyl {
             rotation: shape.rotation,
             center: shape.position,
-            core: radius - length * 0.5,
-            radius: length * 0.5,
-        },
+            radius,
+            half: length * 0.5,
+        }),
         Geometry::Box { size } => Form::Cuboid {
             rotation: shape.rotation,
             center: shape.position,
@@ -118,21 +119,17 @@ pub fn with_ground(shape: &Placed, height: f32, margin: f32, out: &mut Vec<Conta
                 push(corner, 0.0, i as u8);
             }
         }
-        Form::Disc {
-            rotation,
-            center,
-            core,
-            radius,
-        } => {
-            for (i, p) in rim(rotation, center, core).into_iter().enumerate() {
-                push(p, radius, i as u8);
+        Form::Cylinder(c) => {
+            // A cap down rests on its rim; a cylinder on its side, or tilted onto its
+            // rim, on the lowest point of each cap's rim, which falls between samples.
+            if let Some((first, rim)) = c.facing_rim(-Vec3::Y) {
+                for (i, p) in (first..).zip(rim) {
+                    push(p, 0.0, i);
+                }
             }
-            // A tilted or upright disc (a wheel) rests on the lowest point of its rim,
-            // which usually falls between the samples.
-            let axis = rotation * Vec3::Z;
-            let down = axis * axis.y - Vec3::Y;
-            if down.length() > 0.1 {
-                push(center + down.normalize() * core, radius, RIM_POINTS as u8);
+            if let Some((p0, p1)) = c.side_line(-Vec3::Y) {
+                push(p0, 0.0, 2 * RIM_POINTS as u8);
+                push(p1, 0.0, 2 * RIM_POINTS as u8 + 1);
             }
         }
     }
@@ -231,19 +228,14 @@ pub fn between(a: &Placed, b: &Placed, margin: f32, out: &mut Vec<Contact>) {
             );
         }
         (
-            Form::Disc {
-                rotation,
-                center,
-                core,
-                radius: rd,
-            },
+            Form::Cylinder(c),
             Form::Swept {
                 a: s0,
                 b: s1,
                 radius,
             },
         ) => {
-            swept_vs_disc(s0, s1, radius, rotation, center, core, rd, margin, out);
+            swept_vs_cylinder(s0, s1, radius, &c, margin, out);
         }
         (
             Form::Swept {
@@ -251,151 +243,153 @@ pub fn between(a: &Placed, b: &Placed, margin: f32, out: &mut Vec<Contact>) {
                 b: s1,
                 radius,
             },
-            Form::Disc {
-                rotation,
-                center,
-                core,
-                radius: rd,
-            },
+            Form::Cylinder(c),
         ) => {
             let mut found = Vec::new();
-            swept_vs_disc(
-                s0, s1, radius, rotation, center, core, rd, margin, &mut found,
-            );
+            swept_vs_cylinder(s0, s1, radius, &c, margin, &mut found);
             flip(found, out);
         }
         (
-            Form::Disc {
+            Form::Cylinder(c),
+            Form::Cuboid {
                 rotation,
                 center,
-                core,
-                radius,
-            },
-            Form::Cuboid {
-                rotation: br,
-                center: bc,
                 half,
             },
         ) => {
             let mut found = Vec::new();
-            disc_vs_box(
-                rotation, center, core, radius, br, bc, half, margin, &mut found,
-            );
+            cylinder_vs_box(&c, rotation, center, half, margin, &mut found);
             flip(found, out);
         }
         (
             Form::Cuboid {
-                rotation: br,
-                center: bc,
-                half,
-            },
-            Form::Disc {
                 rotation,
                 center,
-                core,
-                radius,
+                half,
             },
+            Form::Cylinder(c),
         ) => {
-            disc_vs_box(rotation, center, core, radius, br, bc, half, margin, out);
+            cylinder_vs_box(&c, rotation, center, half, margin, out);
         }
-        (
-            Form::Disc {
-                rotation: ra,
-                center: ca,
-                core: ka,
-                radius: rad_a,
-            },
-            Form::Disc {
-                rotation: rb,
-                center: cb,
-                core: kb,
-                radius: rad_b,
-            },
-        ) => {
-            // Each rim against the other disc, and the closest points of the two cores.
-            for (i, p) in rim(rb, cb, kb).into_iter().enumerate() {
-                point_vs_disc(p, rad_b, ra, ca, ka, rad_a, margin, i as u8, out);
-            }
-            let mut q = cb;
-            for _ in 0..6 {
-                q = closest_on_disc(closest_on_disc(q, ra, ca, ka), rb, cb, kb);
-            }
-            point_vs_disc(
-                q,
-                rad_b,
-                ra,
-                ca,
-                ka,
-                rad_a,
-                margin,
-                (2 * RIM_POINTS) as u8,
-                out,
-            );
-            let mut found = Vec::new();
-            for (i, p) in rim(ra, ca, ka).into_iter().enumerate() {
-                point_vs_disc(
-                    p,
-                    rad_a,
-                    rb,
-                    cb,
-                    kb,
-                    rad_b,
-                    margin,
-                    (RIM_POINTS + i) as u8,
-                    &mut found,
-                );
-            }
-            flip(found, out);
+        (Form::Cylinder(ca), Form::Cylinder(cb)) => {
+            cylinder_vs_cylinder(&ca, &cb, margin, out);
         }
     }
 }
 
-/// Points around a disc's core rim, spread evenly from its local X axis.
-fn rim(rotation: Quat, center: Vec3, core: f32) -> [Vec3; RIM_POINTS] {
-    std::array::from_fn(|i| {
-        let angle = i as f32 * std::f32::consts::TAU / RIM_POINTS as f32;
-        center + rotation * Vec3::new(angle.cos() * core, angle.sin() * core, 0.0)
-    })
-}
-
-/// The point of a disc's core nearest `p`.
-fn closest_on_disc(p: Vec3, rotation: Quat, center: Vec3, core: f32) -> Vec3 {
-    let axis = rotation * Vec3::Z;
-    let in_plane = (p - center) - axis * (p - center).dot(axis);
-    center + in_plane.clamp_length_max(core)
-}
-
-/// A sphere of radius `r` at `p` against a disc (A). Normals point from the disc.
-#[allow(clippy::too_many_arguments)]
-fn point_vs_disc(
-    p: Vec3,
-    r: f32,
+/// A placed cylinder: its axis is the rotation's Z.
+#[derive(Clone, Copy)]
+struct Cyl {
     rotation: Quat,
     center: Vec3,
-    core: f32,
     radius: f32,
-    margin: f32,
-    feature: u8,
-    out: &mut Vec<Contact>,
-) {
-    let q = closest_on_disc(p, rotation, center, core);
-    let d = p - q;
-    let distance = d.length();
-    let normal = if distance > 1e-6 {
-        d / distance
-    } else {
-        // On the core itself: out through the nearer face.
-        let axis = rotation * Vec3::Z;
-        if (p - center).dot(axis) < 0.0 {
-            -axis
+    half: f32,
+}
+
+impl Cyl {
+    fn axis(&self) -> Vec3 {
+        self.rotation * Vec3::Z
+    }
+
+    /// Centre of cap `side` (-1 or +1 along the axis).
+    fn cap(&self, side: f32) -> Vec3 {
+        self.center + self.axis() * (self.half * side)
+    }
+
+    /// Points around the rim of cap `side`, spread evenly from the local X axis: the
+    /// cap as a polygon, to rest it on flat things.
+    fn rim(&self, side: f32) -> [Vec3; RIM_POINTS] {
+        std::array::from_fn(|i| {
+            let angle = i as f32 * std::f32::consts::TAU / RIM_POINTS as f32;
+            let local = Vec3::new(
+                libm::cosf(angle) * self.radius,
+                libm::sinf(angle) * self.radius,
+                self.half * side,
+            );
+            self.center + self.rotation * local
+        })
+    }
+
+    /// The rim of the cap facing `dir` (a unit vector), and the feature id of its
+    /// first point, if it faces `dir` within the `CAP_FACING` angle.
+    fn facing_rim(&self, dir: Vec3) -> Option<(u8, [Vec3; RIM_POINTS])> {
+        let along = self.axis().dot(dir);
+        (along.abs() >= CAP_FACING).then(|| {
+            let side = along.signum();
+            (
+                if side < 0.0 { 0 } else { RIM_POINTS as u8 },
+                self.rim(side),
+            )
+        })
+    }
+
+    /// The point furthest along `dir` on each cap's rim (the line of the side facing
+    /// `dir`), or nothing when the caps face `dir` square on and every rim point is
+    /// as far along it as the others.
+    fn side_line(&self, dir: Vec3) -> Option<(Vec3, Vec3)> {
+        let axis = self.axis();
+        let across = dir - axis * dir.dot(axis);
+        let len = across.length();
+        (len > 1e-4 * dir.length()).then(|| {
+            let out = across * (self.radius / len);
+            (self.cap(-1.0) + out, self.cap(1.0) + out)
+        })
+    }
+
+    /// Half the cylinder's extent along the unit vector `n`.
+    fn extent(&self, n: Vec3) -> f32 {
+        let along = self.axis().dot(n).abs();
+        self.half * along + self.radius * (1.0 - along * along).max(0.0).sqrt()
+    }
+
+    /// The point of the (solid) cylinder nearest `p`.
+    fn closest(&self, p: Vec3) -> Vec3 {
+        let local = self.rotation.inverse() * (p - self.center);
+        let across = local.truncate().clamp_length_max(self.radius);
+        self.center + self.rotation * across.extend(local.z.clamp(-self.half, self.half))
+    }
+}
+
+/// A sphere of radius `r` at `p` against cylinder `c` (A): the exact nearest points, or
+/// when `p` is inside, out through the nearer of the caps and the side. Normals point
+/// from the cylinder.
+fn point_vs_cylinder(p: Vec3, r: f32, c: &Cyl, margin: f32, feature: u8, out: &mut Vec<Contact>) {
+    let local = c.rotation.inverse() * (p - c.center);
+    let across = local.truncate();
+    let from_axis = across.length();
+    let (surface, normal_local, separation) = if from_axis <= c.radius && local.z.abs() <= c.half {
+        let to_cap = c.half - local.z.abs();
+        let to_side = c.radius - from_axis;
+        if to_cap <= to_side {
+            let side = if local.z < 0.0 { -1.0 } else { 1.0 };
+            (across.extend(c.half * side), Vec3::Z * side, -to_cap - r)
         } else {
-            axis
+            let out_dir = if from_axis > 1e-6 {
+                across / from_axis
+            } else {
+                glam::Vec2::X
+            };
+            (
+                (out_dir * c.radius).extend(local.z),
+                out_dir.extend(0.0),
+                -to_side - r,
+            )
         }
+    } else {
+        let q = across
+            .clamp_length_max(c.radius)
+            .extend(local.z.clamp(-c.half, c.half));
+        let d = local - q;
+        let len = d.length();
+        if len < 1e-9 {
+            return;
+        }
+        (q, d / len, len - r)
     };
-    let separation = distance - radius - r;
     if separation < margin {
+        let normal = c.rotation * normal_local;
         out.push(Contact {
-            point: q + normal * (radius + separation * 0.5),
+            point: c.center + c.rotation * surface + normal * (separation * 0.5),
             normal,
             separation,
             feature,
@@ -403,94 +397,318 @@ fn point_vs_disc(
     }
 }
 
-/// Disc is A, swept shape is B.
-#[allow(clippy::too_many_arguments)]
-fn swept_vs_disc(
-    s0: Vec3,
-    s1: Vec3,
-    r: f32,
-    rotation: Quat,
-    center: Vec3,
-    core: f32,
-    radius: f32,
+/// A point of another cylinder against cylinder `c` (A), which it touches along `n`
+/// (a unit vector from `c`): against the cap facing `n` if one does within the
+/// `CAP_FACING` angle and `p` is over it, else against the side if `p` is beside it,
+/// else the exact nearest points. A point on the rim's very edge (where a disc
+/// stacked on one as wide, or a log beside one as long, has its corners) then pushes
+/// the way they touch, not off the cap or side it is just as near.
+fn point_toward_cylinder(
+    p: Vec3,
+    c: &Cyl,
+    n: Vec3,
     margin: f32,
+    feature: u8,
     out: &mut Vec<Contact>,
 ) {
-    let mut candidates = vec![(s0, 0u8)];
-    if s0.distance_squared(s1) > 1e-12 {
-        candidates.push((s1, 1));
-        // The segment point nearest the disc, by alternating projections.
-        let mut t = 0.5;
-        for _ in 0..4 {
-            let q = closest_on_disc(s0.lerp(s1, t), rotation, center, core);
-            t = segment_param(q, s0, s1);
+    // A millimetre's grace past the rim or the cap, for edges that line up.
+    const GRACE: f32 = 1e-3;
+    let local = c.rotation.inverse() * (p - c.center);
+    let across = local.truncate();
+    let from_axis = across.length();
+    let along = c.axis().dot(n);
+    let (normal_local, separation) = if along.abs() >= CAP_FACING {
+        if from_axis > c.radius + GRACE || local.z.abs() > c.half + c.half.max(margin) {
+            return point_vs_cylinder(p, 0.0, c, margin, feature, out);
         }
-        candidates.push((s0.lerp(s1, t), 2));
-    }
-    for (p, feature) in candidates {
-        point_vs_disc(p, r, rotation, center, core, radius, margin, feature, out);
+        let side = along.signum();
+        (Vec3::Z * side, local.z * side - c.half)
+    } else {
+        if local.z.abs() > c.half + GRACE || from_axis < 1e-6 {
+            return point_vs_cylinder(p, 0.0, c, margin, feature, out);
+        }
+        ((across / from_axis).extend(0.0), from_axis - c.radius)
+    };
+    if separation < margin {
+        let normal = c.rotation * normal_local;
+        out.push(Contact {
+            point: p - normal * (separation * 0.5),
+            normal,
+            separation,
+            feature,
+        });
     }
 }
 
-/// Box is A, disc is B: the box's corners against the disc, and the disc's rim, centre
-/// and point nearest the box against the box.
-#[allow(clippy::too_many_arguments)]
-fn disc_vs_box(
-    rotation: Quat,
-    center: Vec3,
-    core: f32,
-    radius: f32,
+/// Alternating projections between two convex shapes, given each one's nearest-point
+/// map: the pair of nearest points when they are apart, a point in both when they
+/// overlap.
+fn nearest_pair(
+    start: Vec3,
+    onto_a: impl Fn(Vec3) -> Vec3,
+    onto_b: impl Fn(Vec3) -> Vec3,
+) -> (Vec3, Vec3) {
+    let mut b = onto_b(start);
+    let mut a = onto_a(b);
+    for _ in 0..6 {
+        b = onto_b(a);
+        a = onto_a(b);
+    }
+    (a, b)
+}
+
+/// Cylinder is A, swept shape (sphere or capsule) is B: the segment's ends and its
+/// point nearest the cylinder against the cylinder, and the cylinder's side facing
+/// the segment against the swept shape (a cylinder lying along a capsule).
+fn swept_vs_cylinder(s0: Vec3, s1: Vec3, r: f32, c: &Cyl, margin: f32, out: &mut Vec<Contact>) {
+    point_vs_cylinder(s0, r, c, margin, 0, out);
+    if s0.distance_squared(s1) <= 1e-12 {
+        return;
+    }
+    point_vs_cylinder(s1, r, c, margin, 1, out);
+    let (on_cylinder, on_segment) = nearest_pair(
+        c.center,
+        |p| c.closest(p),
+        |p| closest_on_segment(p, s0, s1),
+    );
+    point_vs_cylinder(on_segment, r, c, margin, 2, out);
+    let toward = on_segment - on_cylinder;
+    if toward.length_squared() > 1e-12
+        && let Some((p0, p1)) = c.side_line(toward)
+    {
+        for (p, feature) in [(p0, 3), (p1, 4)] {
+            let on = closest_on_segment(p, s0, s1);
+            push_spheres(p, 0.0, on, r, margin, feature, out);
+        }
+    }
+}
+
+/// Box is A, cylinder is B (normals from the box). As between two boxes, the box face
+/// that separates them most is the reference face; the cylinder's cap facing it (as a
+/// polygon) and its side line facing it are clipped to that face, so a cylinder
+/// standing or lying on a box rests on several points, and on the box's edge where it
+/// hangs over. The box's corners touch the cylinder's caps and side (a foot on a
+/// turntable), and the nearest points catch edges crossing.
+fn cylinder_vs_box(
+    c: &Cyl,
     box_rotation: Quat,
     box_center: Vec3,
     half: Vec3,
     margin: f32,
     out: &mut Vec<Contact>,
 ) {
+    let rb = Mat3::from_quat(box_rotation);
+    let d = c.center - box_center;
+    let box_extent = |n: Vec3| {
+        (0..3)
+            .map(|k| half[k] * rb.col(k).dot(n).abs())
+            .sum::<f32>()
+    };
+    // Reference face (separation, axis); the box's faces and the cylinder's axis are
+    // separating axes.
+    let mut face = (f32::MIN, 0);
+    for k in 0..3 {
+        let n = rb.col(k);
+        let s = d.dot(n).abs() - half[k] - c.extent(n);
+        if s > margin {
+            return;
+        }
+        if s > face.0 {
+            face = (s, k);
+        }
+    }
+    let axis = c.axis();
+    if d.dot(axis).abs() - c.half - box_extent(axis) > margin {
+        return;
+    }
+
     let mut found = Vec::new();
     for (i, corner) in corners(box_rotation, box_center, half)
         .into_iter()
         .enumerate()
     {
-        point_vs_disc(
-            corner, 0.0, rotation, center, core, radius, margin, i as u8, &mut found,
-        );
+        point_vs_cylinder(corner, 0.0, c, margin, i as u8, &mut found);
+    }
+
+    let k = face.1;
+    let n = rb.col(k) * d.dot(rb.col(k)).signum();
+    let face_center = box_center + n * half[k];
+    let (u, v) = ((k + 1) % 3, (k + 2) % 3);
+    let push = |p: Vec3, feature: u8, out: &mut Vec<Contact>| {
+        let s = (p - face_center).dot(n);
+        if s < margin {
+            out.push(Contact {
+                point: p - n * (s * 0.5),
+                normal: n,
+                separation: s,
+                feature,
+            });
+        }
+    };
+
+    // The cap facing the face, clipped to it.
+    let mut polygon: Vec<(Vec3, u8)> = match c.facing_rim(-n) {
+        Some((_, rim)) => (0u8..).zip(rim).map(|(i, p)| (p, i)).collect(),
+        None => Vec::new(),
+    };
+    let sides = [
+        (rb.col(u), half[u]),
+        (-rb.col(u), half[u]),
+        (rb.col(v), half[v]),
+        (-rb.col(v), half[v]),
+    ];
+    for (plane, (dir, limit)) in (0u8..).zip(sides) {
+        let outside = |p: Vec3| (p - face_center).dot(dir) - limit;
+        let mut clipped = Vec::with_capacity(polygon.len() + 1);
+        for (i, &(p, f)) in polygon.iter().enumerate() {
+            let q = polygon[(i + 1) % polygon.len()].0;
+            let (dp, dq) = (outside(p), outside(q));
+            if dp <= 0.0 {
+                clipped.push((p, f));
+            }
+            if (dp <= 0.0) != (dq <= 0.0) {
+                clipped.push((
+                    p + (q - p) * (dp / (dp - dq)),
+                    RIM_POINTS as u8 + 2 * plane + u8::from(dp <= 0.0),
+                ));
+            }
+        }
+        polygon = clipped;
+        if polygon.is_empty() {
+            break;
+        }
+    }
+    for (p, f) in polygon {
+        // A corner of the face over the cap is the box's corner, touched below.
+        let l = rb.transpose() * (p - box_center);
+        let at_corner = |m: usize| (l[m].abs() - half[m]).abs() < 1e-4;
+        if !(at_corner(u) && at_corner(v)) {
+            push(p, 8 + f, out);
+        }
+    }
+
+    // The side line facing the face, clipped to it (a cylinder lying on the box).
+    let side_line = c.side_line(-n);
+    if let Some((p0, p1)) = side_line {
+        let to_local = |p: Vec3| rb.transpose() * (p - box_center);
+        let (l0, l1) = (to_local(p0), to_local(p1));
+        let (mut t0, mut t1) = (0.0f32, 1.0f32);
+        for m in [u, v] {
+            let (start, delta) = (l0[m], l1[m] - l0[m]);
+            if delta.abs() < 1e-9 {
+                if start.abs() > half[m] {
+                    t1 = -1.0;
+                }
+                continue;
+            }
+            let (ta, tb) = ((-half[m] - start) / delta, (half[m] - start) / delta);
+            t0 = t0.max(ta.min(tb));
+            t1 = t1.min(ta.max(tb));
+        }
+        if t0 <= t1 {
+            push(p0.lerp(p1, t0), 24 + RIM_POINTS as u8, out);
+            push(p0.lerp(p1, t1), 25 + RIM_POINTS as u8, out);
+        }
+    }
+
+    // Edges crossing: the box point nearest the cylinder's side line facing the face,
+    // or, caps facing it, nearest the cylinder (its axis when they overlap, the
+    // deepest). The nearest points of the whole cylinder are anywhere along a line
+    // contact, or anywhere in both overlapping, and beside a lying cylinder's line of
+    // support they roll it (see `CAP_FACING`).
+    let onto_box =
+        |p: Vec3| box_center + rb * (rb.transpose() * (p - box_center)).clamp(-half, half);
+    let on_box = match side_line {
+        Some((p0, p1)) => nearest_pair(c.center, |p| closest_on_segment(p, p0, p1), onto_box).1,
+        None => {
+            let (on_cylinder, on_box) = nearest_pair(c.center, |p| c.closest(p), onto_box);
+            if on_cylinder.distance_squared(on_box) > 1e-12 {
+                on_box
+            } else {
+                let (end0, end1) = (c.cap(-1.0), c.cap(1.0));
+                nearest_pair(c.center, |p| closest_on_segment(p, end0, end1), onto_box).1
+            }
+        }
+    };
+    point_vs_cylinder(on_box, 0.0, c, margin, 26 + RIM_POINTS as u8, &mut found);
+    out.extend(found.into_iter().map(|c| Contact {
+        normal: -c.normal,
+        ..c
+    }));
+}
+
+/// Two cylinders (normals from A to B): each one's cap rims against the other (caps
+/// stacked), each one's side line facing the other against it (logs side by side),
+/// and the nearest points (crossed).
+fn cylinder_vs_cylinder(a: &Cyl, b: &Cyl, margin: f32, out: &mut Vec<Contact>) {
+    let d = b.center - a.center;
+    let (on_a, on_b) = nearest_pair(a.center, |p| a.closest(p), |p| b.closest(p));
+    // The direction they touch along: from the nearest points when apart, else the
+    // candidate axis that separates them most.
+    let separation = |n: Vec3| n.dot(d) - a.extent(n) - b.extent(n);
+    let gap = on_b - on_a;
+    let n = if gap.length_squared() > 1e-10 {
+        gap.normalize()
+    } else {
+        let (aa, ab) = (a.axis(), b.axis());
+        let across = |axis: Vec3, v: Vec3| (v - axis * v.dot(axis)).normalize_or_zero();
+        [
+            aa,
+            ab,
+            aa.cross(ab).normalize_or_zero(),
+            across(aa, d),
+            across(ab, d),
+        ]
+        .into_iter()
+        .filter(|n| n.length_squared() > 0.5)
+        .map(|n| if n.dot(d) < 0.0 { -n } else { n })
+        .max_by(|x, y| separation(*x).total_cmp(&separation(*y)))
+        .unwrap_or(Vec3::Y)
+    };
+    if separation(n) > margin {
+        return;
+    }
+    let (b_line, a_line) = (b.side_line(-n), a.side_line(n));
+
+    if let Some((first, rim)) = b.facing_rim(-n) {
+        for (i, p) in (first..).zip(rim) {
+            point_toward_cylinder(p, a, n, margin, i, out);
+        }
+    }
+    let lines = 4 * RIM_POINTS as u8;
+    if let Some((p0, p1)) = b_line {
+        point_toward_cylinder(p0, a, n, margin, lines, out);
+        point_toward_cylinder(p1, a, n, margin, lines + 1, out);
+    }
+    // Crossed, or a cap on a side: where each one's side line facing the other comes
+    // nearest the other's axis, the deepest point. (The nearest points found by
+    // alternating projections are anywhere along a line contact, or anywhere in both
+    // overlapping, and beside a lying cylinder's line of support they roll it; see
+    // `CAP_FACING`.) Caps facing each other: the nearest points.
+    let deepest = |(p0, p1): (Vec3, Vec3), other: &Cyl| {
+        closest_between_segments(p0, p1, other.cap(-1.0), other.cap(1.0)).0
+    };
+    match b_line {
+        Some(line) => point_toward_cylinder(deepest(line, a), a, n, margin, lines + 4, out),
+        None if a_line.is_none() => point_toward_cylinder(on_b, a, n, margin, lines + 4, out),
+        None => {}
+    }
+    let mut found = Vec::new();
+    if let Some((first, rim)) = a.facing_rim(n) {
+        for (i, p) in (first..).zip(rim) {
+            let feature = 2 * RIM_POINTS as u8 + i;
+            point_toward_cylinder(p, b, -n, margin, feature, &mut found);
+        }
+    }
+    if let Some((p0, p1)) = a_line {
+        point_toward_cylinder(p0, b, -n, margin, lines + 2, &mut found);
+        point_toward_cylinder(p1, b, -n, margin, lines + 3, &mut found);
+        point_toward_cylinder(deepest((p0, p1), b), b, -n, margin, lines + 5, &mut found);
     }
     out.extend(found.into_iter().map(|c| Contact {
         normal: -c.normal,
         ..c
     }));
-    // The disc point nearest the box, by alternating projections (both are convex):
-    // catches a box passing under the disc away from the rim samples and the centre.
-    let mut nearest = center;
-    for _ in 0..6 {
-        let local = box_rotation.inverse() * (nearest - box_center);
-        nearest = closest_on_disc(
-            box_center + box_rotation * local.clamp(-half, half),
-            rotation,
-            center,
-            core,
-        );
-    }
-    let points = rim(rotation, center, core)
-        .into_iter()
-        .chain([center, nearest]);
-    for (i, p) in points.enumerate() {
-        let mut one = Vec::new();
-        swept_vs_box(
-            p,
-            p,
-            radius,
-            box_rotation,
-            box_center,
-            half,
-            margin,
-            &mut one,
-        );
-        out.extend(one.into_iter().map(|c| Contact {
-            feature: 8 + i as u8,
-            ..c
-        }));
-    }
 }
 
 /// Oriented boxes A and B (rotation matrices, centres, half sizes): the separating axis
@@ -1022,6 +1240,81 @@ mod tests {
         assert!(
             out.iter()
                 .any(|c| (c.normal - Vec3::Y).length() < 1e-4 && c.separation < 0.0),
+            "{out:?}"
+        );
+    }
+
+    fn cylinder(radius: f32, length: f32, rotation: Quat, at: Vec3) -> Placed {
+        Placed {
+            geometry: Geometry::Cylinder { radius, length },
+            rotation,
+            position: at,
+        }
+    }
+
+    /// A long cylinder has a flat cap and a sharp rim, not a capsule's round end.
+    #[test]
+    fn cylinder_has_flat_caps_and_a_sharp_rim() {
+        let up = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+        let pillar = cylinder(0.2, 1.0, up, Vec3::new(0.0, 0.5, 0.0));
+        let touch = |at: Vec3| {
+            let mut out = Vec::new();
+            between(&pillar, &sphere(0.05, at), 0.02, &mut out);
+            assert_eq!(out.len(), 1, "{out:?}");
+            out[0]
+        };
+        // On the cap 3 cm in from the rim: straight up.
+        let c = touch(Vec3::new(0.17, 1.04, 0.0));
+        assert!((c.normal - Vec3::Y).length() < 1e-5 && (c.separation + 0.01).abs() < 1e-5);
+        // Over the rim's edge: out from the edge.
+        let c = touch(Vec3::new(0.22, 1.02, 0.0));
+        let gap = Vec3::new(0.02, 0.02, 0.0);
+        assert!((c.normal - gap.normalize()).length() < 1e-4, "{c:?}");
+        assert!((c.separation - (gap.length() - 0.05)).abs() < 1e-5, "{c:?}");
+        // Beside the side.
+        let c = touch(Vec3::new(0.24, 0.5, 0.0));
+        assert!((c.normal - Vec3::X).length() < 1e-5 && (c.separation + 0.01).abs() < 1e-5);
+
+        // Standing on the ground it rests on its rim; lying, on its side's two ends.
+        let mut out = Vec::new();
+        with_ground(&pillar, 0.0, 0.01, &mut out);
+        assert_eq!(out.len(), RIM_POINTS);
+        assert!(out.iter().all(|c| c.separation.abs() < 1e-5));
+        let lying = cylinder(
+            0.2,
+            1.0,
+            Quat::from_rotation_y(0.3),
+            Vec3::new(0.0, 0.2, 0.0),
+        );
+        out.clear();
+        with_ground(&lying, 0.0, 0.01, &mut out);
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert!(out.iter().all(|c| c.separation.abs() < 1e-5));
+    }
+
+    /// Discs as wide stacked push each other up, not sideways off their lined-up
+    /// rims; logs as long side by side push apart along the line between them.
+    #[test]
+    fn cylinders_touch_along_the_way_they_face() {
+        let up = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+        let below = cylinder(0.3, 0.06, up, Vec3::new(0.0, 0.03, 0.0));
+        for tilt in [0.0, 0.001] {
+            let above = cylinder(0.3, 0.06, Quat::from_rotation_z(tilt) * up, Vec3::Y * 0.089);
+            let mut out = Vec::new();
+            between(&below, &above, 0.02, &mut out);
+            assert!(out.len() >= RIM_POINTS, "{out:?}");
+            assert!(out.iter().all(|c| c.normal.y > 0.999), "{out:?}");
+        }
+        let along = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        let left = cylinder(0.1, 0.8, along, Vec3::new(0.0, 0.1, -0.1));
+        let right = cylinder(0.1, 0.8, along, Vec3::new(0.0, 0.1, 0.099));
+        let mut out = Vec::new();
+        between(&left, &right, 0.02, &mut out);
+        assert!(out.len() >= 2, "{out:?}");
+        assert!(
+            out.iter().all(
+                |c| (c.normal - Vec3::Z).length() < 1e-4 && (c.separation + 0.001).abs() < 1e-5
+            ),
             "{out:?}"
         );
     }

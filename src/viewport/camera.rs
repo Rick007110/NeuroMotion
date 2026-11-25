@@ -29,9 +29,9 @@ impl Default for OrbitCamera {
 impl OrbitCamera {
     pub fn eye(&self) -> Vec3 {
         let dir = Vec3::new(
-            self.yaw.sin() * self.pitch.cos(),
-            self.pitch.sin(),
-            self.yaw.cos() * self.pitch.cos(),
+            libm::sinf(self.yaw) * libm::cosf(self.pitch),
+            libm::sinf(self.pitch),
+            libm::cosf(self.yaw) * libm::cosf(self.pitch),
         );
         self.target + dir * self.distance
     }
@@ -68,7 +68,7 @@ impl OrbitCamera {
         let right = forward.cross(Vec3::Y).normalize();
         let up = right.cross(forward);
         let world_per_px =
-            2.0 * self.distance * (self.fov_y * 0.5).tan() / viewport_height.max(1.0);
+            2.0 * self.distance * libm::tanf(self.fov_y * 0.5) / viewport_height.max(1.0);
         self.target += (-right * drag.x + up * drag.y) * world_per_px;
     }
 
@@ -85,7 +85,7 @@ impl OrbitCamera {
         }
         let radius = ((max - min).length() * 0.5).max(0.5);
         self.target = (min + max) * 0.5;
-        self.distance = (radius / (self.fov_y * 0.5).tan() * 1.15).clamp(0.4, 60.0);
+        self.distance = (radius / libm::tanf(self.fov_y * 0.5) * 1.15).clamp(0.4, 60.0);
     }
 
     pub fn zoom(&mut self, factor: f32) {

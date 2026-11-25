@@ -81,6 +81,11 @@ pub struct PhysicsRig {
     pub muscle_sets: Vec<MuscleSet>,
     /// Treat every body's inertia as a sphere's (endorphin's default).
     pub isotropic_inertia: bool,
+    /// Cartesian springs between distant bodies (chest to hand, pelvis to heel) that
+    /// active poses and animations pull with. They aren't bones: nothing in the
+    /// skeleton or exported motion shows them. Projects saved before them have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub virtual_muscles: Vec<VirtualMuscleDef>,
 }
 
 impl PhysicsRig {
@@ -137,7 +142,7 @@ impl Geometry {
     pub fn volume(&self) -> f32 {
         use std::f32::consts::PI;
         match *self {
-            Geometry::Sphere { radius } => 4.0 / 3.0 * PI * radius.powi(3),
+            Geometry::Sphere { radius } => 4.0 / 3.0 * PI * radius * radius * radius,
             Geometry::Capsule { radius, length } => {
                 PI * radius * radius * (length + 4.0 / 3.0 * radius)
             }
@@ -188,6 +193,32 @@ pub struct JointDef {
     pub muscle: String,
 }
 
+/// A virtual muscle: a force-limited spring that pulls a point on `body` towards where
+/// the target pose puts it relative to `parent_body`, and turns `body` towards the
+/// target pose's orientation relative to it (docs/physics-design.md, virtual muscles).
+/// It adds no joint and no degree of freedom: the two bodies stay connected only
+/// through the skeleton between them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VirtualMuscleDef {
+    /// Its name in the character file ("LeftArmVirtualMuscle"); active poses and
+    /// animations name it to drive it.
+    pub name: String,
+    /// Muscle (effector) name, for its entry in a [`MuscleSet`].
+    pub muscle: String,
+    /// The body it pulls from (the chest, the pelvis).
+    pub parent_body: usize,
+    /// The body it pulls (a hand, a heel).
+    pub body: usize,
+    /// The point on `body` it pulls, in that body's frame (metres): where the helper
+    /// joint sits at rest.
+    pub point: [f32; 3],
+    /// Whether it drives position, and orientation. Its gains are its entries in the
+    /// muscle presets, like a joint's: `MuscleSet::linear` for position, the swing
+    /// gains for orientation.
+    pub position: bool,
+    pub orientation: bool,
+}
+
 /// Angular limits, all in radians, measured between the limit frames.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Limits {
@@ -216,6 +247,11 @@ pub struct MuscleSet {
     /// Gains per muscle name; muscles not listed use `fallback`.
     pub muscles: BTreeMap<String, MuscleGains>,
     pub fallback: MuscleGains,
+    /// Position-drive gains (N/m, N·s/m, N) per muscle name, for the muscles that drive
+    /// a position: virtual muscles. A virtual muscle not listed doesn't drive position
+    /// with this preset. Projects saved before them have none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub linear: BTreeMap<String, Gains>,
 }
 
 impl MuscleSet {
@@ -247,6 +283,9 @@ pub struct PhysicsSettings {
     /// Infinite ground plane at this height, if any.
     pub ground: Option<Ground>,
     pub contact: ContactModel,
+    /// What the solver's muscle spring cap counts as the mass a muscle moves.
+    #[serde(default)]
+    pub spring_cap: SpringCap,
     pub interactions: BTreeMap<String, Interaction>,
     /// `(material, material) -> interaction name`, order-insensitive.
     pub pairs: Vec<(String, String, String)>,
@@ -263,15 +302,32 @@ pub struct Ground {
 #[serde(rename_all = "snake_case")]
 pub enum ContactModel {
     /// Each contact's friction force is capped at the interaction's `friction` value in
-    /// newtons, whatever the load. NeuroMotion's own default for now: Balance and
-    /// Stagger were tuned on it, and lose ground with load-proportional grip
-    /// (docs/physics-design.md, lesson 21).
-    #[default]
+    /// newtons, whatever the load. NeuroMotion's default until Balance and Stagger were
+    /// made to work with Coulomb friction; projects saved then keep it (they store
+    /// their contact model).
     ForceCapped,
     /// Coulomb friction: the cap is `friction / 100` times the normal force, so
     /// endorphin's Default (100) is μ = 1 and its Grippy (300) μ = 3. That is what
-    /// endorphin's friction values mean (lesson 21), so imported scenes use it.
+    /// endorphin's friction values mean (lesson 21): imported scenes and new projects
+    /// use it.
+    #[default]
     Coulomb,
+}
+
+/// What a muscle spring's 30 Hz cap (docs/physics-design.md, lesson 4) measures the
+/// moved mass by.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpringCap {
+    /// The two bodies the joint connects. NeuroMotion's own default for now: Balance
+    /// and Stagger were tuned on it, and lose their stepping with stronger leg muscles.
+    #[default]
+    Bodies,
+    /// The whole limb hanging from the joint against the rest of the body, as endorphin's
+    /// muscles behave: a clavicle holds the arm up, a knee in a crouch the body above
+    /// it. Imported scenes use it (lesson 27). Each character is then solved as one
+    /// system, so the cap can be as high as the two-body one (lesson 38).
+    Limbs,
 }
 
 /// How two materials behave when they touch.
@@ -303,7 +359,8 @@ impl Default for PhysicsSettings {
                 height: 0.0,
                 material: "tarmac".to_owned(),
             }),
-            contact: ContactModel::ForceCapped,
+            contact: ContactModel::Coulomb,
+            spring_cap: SpringCap::Bodies,
             interactions,
             pairs: vec![
                 ("rubber".into(), "tarmac".into(), "Grippy".into()),

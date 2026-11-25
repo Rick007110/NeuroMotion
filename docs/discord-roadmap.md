@@ -2,20 +2,26 @@
 
 ### ✅ Done
 - Opens **endorphin 2.5** scenes, characters and poses (`.ens`, `.nmc`, `.nma`)
-- Own physics engine at **120 Hz**: all **16 endorphin sample scenes** simulate stably over their **full length**
+- Own physics engine at **120 Hz**: all **17 endorphin sample scenes** simulate stably over their **full length**, faster than real time (Bridge Escape too)
 - **Car Hit matches endorphin**: compared frame by frame with endorphin's own run
 - Friction and constraints that behave like endorphin's, smooth transitions back to animation
+- Balance and Stagger on endorphin's friction, now used by NeuroMotion's own projects too
 - Behaviours: **Balance** (with stepping), **Stagger**, **CatchFall**, **BodyFoetal**, **Writhe**, now running in imported scenes too
+- **Look and Reach** (hands reach for a target, the head looks at it) and **Explosion** (writhe in mid-air), compared with endorphin's own runs
 - Sever events, constraints, active poses, forces
-- Export to **FBX** and **BVH**, bake simulation to keys
+- Export to **FBX** and **BVH**, bake simulation to keys, optionally at 2x or 4x the frame rate
+- Smooth playback on 60 Hz+ displays: frames are interpolated between physics frames
+- **Same results on Windows, macOS and Linux**, bit for bit
+- **Exact cylinders**: flat caps and a sharp rim, so posts, forearms and logs rest on them as they should
+- **Scored against endorphin**: 36 measurements of endorphin's own runs in 5 scenes, checked by a test on every change
+- Edit the scene's **physics settings** (gravity, rate, materials) in the app, and browse the scene's bodies in a **scene tree**
 - **v0.1.0 beta** with downloads for Windows, macOS and Linux, and our new logo
 
 ### 🔨 In progress
-- Comparing **more scenes with endorphin, by numbers**, so every change is checked against endorphin's real results
+- Comparing **more scenes with endorphin, by numbers**: exports of endorphin's results instead of recordings, and more scenes
 - Active poses applied the way endorphin does (Back-Flip-To-Combo)
-- New behaviours: **Look and Reach** and **Explosion**, designed from endorphin's own runs
-- Balance and Stagger tuned for the new friction, and stepping sideways
-- **Physics settings panel** (gravity, materials, friction) and a **scene tree**
+- Stepping on endorphin's own characters (Stagger Walk), and stepping sideways
+- **Virtual muscles**: active poses pull the hands and heels toward the pose
 
 ### 📋 Planned
 - More behaviours: **JumpDive**, **Legs Kick**, **Arms Windmill** and the rest of endorphin's library

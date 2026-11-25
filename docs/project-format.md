@@ -38,6 +38,17 @@ Pretty-printed JSON, chosen over RON because every language and diff tool reads 
         ]
       }
     ],
+    "physics": {
+      "rate": 120.0,
+      "gravity": [0.0, -9.81, 0.0],
+      "ground": { "height": 0.0, "material": "tarmac" },
+      "contact": "coulomb",
+      "spring_cap": "bodies",
+      "interactions": {
+        "Default": { "restitution": 0.2, "friction": 100.0, "adhesion": 0.0, "softness": 0.0 }
+      },
+      "pairs": [ ["skin", "tarmac", "Default"] ]
+    },
     "next_id": 5
   }
 }
@@ -53,8 +64,35 @@ Pretty-printed JSON, chosen over RON because every language and diff tool reads 
 - `rest_rotation` is the joint's rest orientation relative to its parent (`[x, y, z, w]`);
   rotation channels are applied on top of it.
 - Version 1 files (single top-level `skeleton`) are migrated automatically on load.
+- `physics.contact` is the friction model: `"coulomb"` (μ = the interaction's
+  friction / 100, endorphin's meaning, the default for new projects) or
+  `"force_capped"` (a cap of that many newtons per contact, what NeuroMotion used
+  before). A project keeps the one it was saved with, so it simulates as it did; a
+  file with no `physics` settings gets the default.
+- `physics.spring_cap` is what the muscle spring cap counts as the mass a muscle
+  moves: `"bodies"` (the joint's two bodies, the default, what Balance and Stagger are
+  tuned on) or `"limbs"` (the whole limb hanging from the joint, as endorphin's muscles
+  behave; imported scenes get it). A file without it gets `"bodies"`.
+- A character's physics rig may list `virtual_muscles`: springs between two of its
+  bodies (endorphin's chest-to-hand and pelvis-to-heel virtual muscles), each with
+  `name`, `muscle` (its preset entry), `parent_body`, `body`, `point` (metres, in the
+  body's frame) and whether it drives `position` and `orientation`. A muscle preset
+  may list `linear` gains (position drives, per muscle name). Both are left out of
+  files that have none and missing in older files, which load with none; the version
+  stays 2. They aren't joints: the skeleton and exported motion don't show them.
 - Key frames are local to the clip. Rotations are degrees, offsets are metres added to
   the joint's rest offset.
 - `skeleton.source` points at an external rig file; `joints` is a cached copy so the
   project still opens without it. Parents always precede children.
 - `interp` is the curve *leaving* that key: `step`, `linear` or `smooth`.
+- `physics` holds the scene-wide physics settings and is optional: a file without it (older
+  builds wrote none) opens with the defaults shown above. Those defaults were force caps
+  until Coulomb friction became the default (physics-design.md, lesson 26), so such a
+  file now simulates with Coulomb friction; a file that stores its settings keeps them.
+  `rate` is physics ticks per second (each frame is split into `round(rate / fps)` steps,
+  at least one); `gravity` is in m/s²; `ground` is `null` for a scene without a ground
+  plane; `contact` and `spring_cap` are described above; each interaction has `restitution`, `friction`,
+  `adhesion` (N) and `softness`; each pair is `[material, material, interaction]`, in
+  either order, and unlisted pairs use the `Default` interaction. The editor's Physics
+  group on the project page edits all of these (docs/layout.md). Adding the editing needed
+  no format change: the fields were already stored, so the version stays 2.

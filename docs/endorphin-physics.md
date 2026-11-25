@@ -59,8 +59,13 @@ guess rather than read from a file, it says so.
 - Gains this stiff are stable at 120 Hz because the solver treats each drive as a
   force-limited constraint row instead of an explicit spring. That is inferred from
   the drive modes and Karma's design.
-- "Virtual muscles" link the chest to the hands and the pelvis to the feet. They act
-  as Cartesian springs for reaching and planting.
+- "Virtual muscles" link the chest to the hands and the pelvis to the heels. They act
+  as Cartesian springs for reaching and planting. In the files they are helper joints
+  (`isVirtualMuscle="true"`) under the upper spine and the root, riding the hand and
+  heel bodies, constraining nothing (no enabled degrees of freedom, 2.6 m limits), with
+  an effector each driving position and orientation, listed at 1 in every field of
+  every preset. Whole-body active poses name them; animations key them; no behaviour
+  event names them (docs/endorphin-formats.md, docs/physics-design.md lesson 35).
 
 ## Animation versus simulation (the timeline)
 

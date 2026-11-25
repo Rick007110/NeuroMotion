@@ -17,8 +17,10 @@ use std::time::Instant;
 
 use glam::{Quat, Vec3};
 
-use super::behaviour::{Behaviour, Drive, Layout};
-use super::world::{Body, CollisionFlags, Joint, Lock, Motion, Muscle, Shape, World};
+use super::behaviour::{Aim, Behaviour, Drive, Layout, LookAndReach};
+use super::world::{
+    Body, CollisionFlags, Joint, Lock, Motion, Muscle, Shape, VirtualMuscle, World,
+};
 use crate::document::physics::{Gains, MuscleGains, MuscleSet, PhysicsRig, SimLevel};
 use crate::document::{CharacterKind, Clip, ClipKind, Pose, Project, world_transforms};
 
@@ -80,10 +82,21 @@ struct Plan {
     poses: Vec<PoseTarget>,
     /// (start, end, strength) of clips whose animation the muscles follow.
     active: Vec<(i32, i32, f32)>,
-    /// (start, end, behaviour) of behaviour events NeuroMotion has a controller for.
-    behaviours: Vec<(i32, i32, Behaviour)>,
+    /// Behaviour events NeuroMotion has a controller for.
+    behaviours: Vec<BehaviourSpan>,
     /// Joints cut or switched off, from the frame each event starts.
     severs: Vec<Sever>,
+}
+
+/// A behaviour event: when it runs, which controller, and the settings it reads.
+struct BehaviourSpan {
+    start: i32,
+    end: i32,
+    behaviour: Behaviour,
+    /// The event's settings, as imported.
+    source: std::collections::BTreeMap<String, String>,
+    /// Look and Reach's settings, with its targets found in the world (`build`).
+    reach: Option<LookAndReach>,
 }
 
 /// A sever event aimed at one joint of the rig.
@@ -125,8 +138,12 @@ struct PoseTarget {
     end: i32,
     blend: i32,
     strength: f32,
-    /// Local rotation target per skeleton joint (`None` = not part of the pose).
-    targets: Vec<Option<Quat>>,
+    /// The stored pose: a local rotation per skeleton joint.
+    pose: Vec<Quat>,
+    /// The joints the event drives (all of them if it names none).
+    named: Vec<bool>,
+    /// The rig's virtual muscles it drives (all of them if it names nothing).
+    virtual_named: Vec<bool>,
 }
 
 impl Simulation {
@@ -230,6 +247,7 @@ pub fn rig_bodies(rig: &PhysicsRig, joints: &[(Quat, Vec3)]) -> Vec<(Quat, Vec3)
 fn build(project: &Project) -> Running {
     let settings = &project.physics;
     let mut world = World::new(Vec3::from(settings.gravity), settings.contact);
+    world.spring_cap = settings.spring_cap;
 
     // Materials: every name used by the ground or any shape.
     let mut materials: Vec<String> = Vec::new();
@@ -382,6 +400,15 @@ fn build(project: &Project) -> Running {
     world.set_materials(materials.len(), |a, b| {
         settings.interaction(&materials[a], &materials[b])
     });
+    // Targets name bodies of any character, so they are found once all are in the world.
+    for plan in &mut plans {
+        for span in &mut plan.behaviours {
+            if span.behaviour == Behaviour::LookAndReach {
+                let aim = |name: &str| aim_at(project, &bindings, name);
+                span.reach = Some(LookAndReach::read(&span.source, &aim));
+            }
+        }
+    }
     let constraints = constraints(project, &bindings);
     Running {
         world,
@@ -414,6 +441,34 @@ fn constraints(project: &Project, bindings: &[Option<Binding>]) -> Vec<Constrain
             })
         })
         .collect()
+}
+
+/// A behaviour's target as a point on a body in the world. Scenes name a body
+/// (`character.MetaBodies.Body`: its centre) or a collision surface by its path
+/// (`character.root.<joints>.Body.Surface`: the body it is on; the shape's centre if
+/// the body has only one, as shapes aren't named, else the body's).
+fn aim_at(project: &Project, bindings: &[Option<Binding>], name: &str) -> Option<Aim> {
+    let (character, path) = name.trim().split_once('.')?;
+    let ci = project
+        .characters
+        .iter()
+        .position(|c| c.name == character)?;
+    let binding = bindings.get(ci)?.as_ref()?;
+    let rig = &binding.rig;
+    let mut parts = path.rsplit('.');
+    let (last, before) = (parts.next()?, parts.next());
+    let (body, surface) = match rig.body_index(last) {
+        Some(b) => (b, false),
+        None => (rig.body_index(before?)?, true),
+    };
+    let offset = match rig.bodies[body].shapes.as_slice() {
+        [one] if surface => Vec3::from(one.frame.position),
+        _ => Vec3::ZERO,
+    };
+    Some(Aim {
+        body: binding.first_body + body,
+        offset,
+    })
 }
 
 fn constraint_clips(project: &Project) -> impl Iterator<Item = &Clip> {
@@ -764,7 +819,13 @@ fn plan(project: &Project, character_index: usize) -> Plan {
                 "Behaviour" => {
                     let name = clip.source.get("behaviourName").unwrap_or(&clip.props.name);
                     if let Some(behaviour) = Behaviour::from_name(name) {
-                        plan.behaviours.push((start, end, behaviour));
+                        plan.behaviours.push(BehaviourSpan {
+                            start,
+                            end,
+                            behaviour: behaviour.with_settings(&clip.source),
+                            source: clip.source.clone(),
+                            reach: None,
+                        });
                     }
                 }
                 "Sever" => {
@@ -811,18 +872,18 @@ fn plan(project: &Project, character_index: usize) -> Plan {
                     let present: Vec<bool> = (0..skeleton.joints.len())
                         .map(|j| named.is_empty() || named.contains(&j))
                         .collect();
-                    let locals = local_rotations(skeleton, &pose);
                     plan.poses.push(PoseTarget {
                         start,
                         end,
                         blend: number(clip, "entryBlendPeriod")
                             .map_or(0, |s| (s * fps).round() as i32),
                         strength: number(clip, "strength").unwrap_or(1.0),
-                        targets: locals
-                            .into_iter()
-                            .zip(present)
-                            .map(|(q, p)| p.then_some(q))
-                            .collect(),
+                        pose: local_rotations(skeleton, &pose),
+                        named: present,
+                        virtual_named: character
+                            .physics
+                            .as_ref()
+                            .map_or_else(Vec::new, |rig| virtual_named(clip, rig)),
                     });
                 }
                 _ => {}
@@ -832,6 +893,25 @@ fn plan(project: &Project, character_index: usize) -> Plan {
     plan.switches.sort_by_key(|s| s.0);
     plan.momentum.sort_by_key(|s| s.0);
     plan
+}
+
+/// Which of the rig's virtual muscles an active pose drives: those its `targets` name
+/// (`character.Joints.LeftArmVirtualMuscle`, as endorphin lists them), or all of them
+/// when it names nothing (NeuroMotion's own poses). endorphin's whole-body poses list
+/// every joint, virtual muscles included; poses of only the legs or only the arms leave
+/// them out.
+fn virtual_named(clip: &Clip, rig: &PhysicsRig) -> Vec<bool> {
+    let named: Vec<&str> = clip
+        .source
+        .get("targets")
+        .into_iter()
+        .flat_map(|t| t.split(','))
+        .filter_map(|n| n.trim().rsplit('.').next())
+        .collect();
+    rig.virtual_muscles
+        .iter()
+        .map(|vm| named.is_empty() || named.contains(&vm.name.as_str()))
+        .collect()
 }
 
 /// The bodies of a character's rig (`rig`, named `character`) a force event pushes:
@@ -938,6 +1018,7 @@ fn step_frame(project: &Project, running: &mut Running) -> Frame {
     for tick in 0..ticks {
         let t = frame as f32 + (tick + 1) as f32 / ticks as f32;
         let poses = project.evaluate(t);
+        running.world.virtual_muscles.clear();
         for (ci, binding) in running.bindings.iter().enumerate() {
             let Some(binding) = binding else { continue };
             let character = &project.characters[ci];
@@ -1078,6 +1159,24 @@ fn set_muscles(
             })
             .collect()
     };
+    // A joint no running pose names (a foot, when one event drives the thighs and calves
+    // and another the spine and arms) is held by the pose driving the limb it belongs
+    // to: the one naming its nearest ancestor, at that pose's stored value. Every event
+    // stores the whole body, so the foot gets the angle the author posed with the legs.
+    let driver = |joint: usize| -> Option<usize> {
+        let names = |j: usize| poses.iter().any(|(p, _)| p.named[j]);
+        if names(joint) {
+            return Some(joint);
+        }
+        let mut up = skeleton.joints[joint].parent;
+        while let Some(j) = up {
+            if names(j) {
+                return Some(j);
+            }
+            up = skeleton.joints[j].parent;
+        }
+        None
+    };
     let joints = &binding.rig.joints;
     let (mut targets, mut gains): (Vec<Quat>, Vec<MuscleGains>) = joints
         .iter()
@@ -1086,10 +1185,11 @@ fn set_muscles(
                 .as_ref()
                 .map_or(binding.frozen[jd.joint], |l| l[jd.joint]);
             let mut gains = gains_of(base_set, &jd.muscle, base_strength);
-            for &(p, ramp) in &poses {
-                let Some(pose) = p.targets.get(jd.joint).copied().flatten() else {
-                    continue;
-                };
+            let Some(by) = driver(jd.joint) else {
+                return (target, gains);
+            };
+            for &(p, ramp) in poses.iter().filter(|(p, _)| p.named[by]) {
+                let pose = p.pose[jd.joint];
                 let held = gains_of(pose_set, &jd.muscle, p.strength);
                 target = target.slerp(pose, ramp);
                 gains = MuscleGains {
@@ -1101,12 +1201,17 @@ fn set_muscles(
         })
         .unzip();
     // The latest behaviour running now takes over from there.
-    let behaviour = plan
+    let span = plan
         .behaviours
         .iter()
         .rev()
-        .find(|(s, e, _)| *s <= frame && frame < *e);
-    if let (Some(&(start, _, behaviour)), Some(layout)) = (behaviour, &binding.layout) {
+        .find(|b| b.start <= frame && frame < b.end);
+    // Virtual muscles pull towards the active poses, unless a behaviour is in charge:
+    // NeuroMotion's behaviours set joint targets only.
+    if span.is_none() || binding.layout.is_none() {
+        set_virtual_muscles(world, binding, plan, skeleton, &poses, frame);
+    }
+    if let (Some(span), Some(layout)) = (span, &binding.layout) {
         let mut drive = Drive {
             world,
             first_body: binding.first_body,
@@ -1115,9 +1220,10 @@ fn set_muscles(
             layout,
             targets: &mut targets,
             gains: &mut gains,
-            elapsed: ((t - start as f32) / project.settings.fps.max(1.0)).max(0.0),
+            elapsed: ((t - span.start as f32) / project.settings.fps.max(1.0)).max(0.0),
+            settings: span.reach.as_ref(),
         };
-        behaviour.drive(&mut drive);
+        span.behaviour.drive(&mut drive);
     }
     for (j, (target, gains)) in targets.into_iter().zip(gains).enumerate() {
         let Some(joint) = world.joints.get_mut(binding.first_joint + j) else {
@@ -1130,6 +1236,157 @@ fn set_muscles(
             swing: gains.swing,
         });
     }
+}
+
+/// Adds this tick's virtual muscles of one character to the world. Each pulls its hand
+/// or heel to where the active poses running now put it relative to the chest or
+/// pelvis; a later pose takes over from an earlier one during its ease-in, as for the
+/// joints. The gains are its entries in the pose preset (`DesiredPoseCalibration`)
+/// times the event's strength, as for a joint's muscle; a preset without an entry for
+/// it drives nothing. One that no running pose names, or that has a joint between its
+/// two bodies cut or switched off, stays off.
+///
+/// Active animations don't drive them yet, though endorphin's list them among the
+/// joints they drive and key them: at the strengths the sample scenes give their
+/// active animations (0.1 to 1, so at most 1 N and 1 N·m with endorphin's gains) they
+/// change nothing measurable, but their tiny pulls were enough to tip Multi Martial's
+/// chaotic Stagger landing into a 5.6 cm mid-foot stretch (docs/physics-design.md).
+fn set_virtual_muscles(
+    world: &mut World,
+    binding: &Binding,
+    plan: &Plan,
+    skeleton: &crate::document::SkeletonRef,
+    poses: &[(&PoseTarget, f32)],
+    frame: i32,
+) {
+    let rig = &binding.rig;
+    if rig.virtual_muscles.is_empty() {
+        return;
+    }
+    // (position, orientation) gains of a virtual muscle in the pose preset at `strength`.
+    let set = rig.muscle_set("DesiredPoseCalibration");
+    let gains = |vm: &crate::document::physics::VirtualMuscleDef, strength: f32| {
+        let linear = set
+            .and_then(|s| s.linear.get(&vm.muscle))
+            .filter(|_| vm.position);
+        let angular = set
+            .and_then(|s| s.muscles.get(&vm.muscle))
+            .map(|g| g.swing)
+            .filter(|_| vm.orientation);
+        (
+            linear.map(|&g| scale(g, strength)),
+            angular.map(|g| scale(g, strength)),
+        )
+    };
+    // Body transforms of each target pose, worked out once.
+    let bodies_of = |locals: &[Quat]| rig_bodies(rig, &posed(skeleton, locals));
+    let pose_bodies: Vec<Vec<(Quat, Vec3)>> =
+        poses.iter().map(|(p, _)| bodies_of(&p.pose)).collect();
+    for (v, vm) in rig.virtual_muscles.iter().enumerate() {
+        if severed_between(rig, plan, frame, vm.parent_body, vm.body) {
+            continue;
+        }
+        // The target: the body's rotation relative to the parent body, and where the
+        // pulled point is in the parent body's frame.
+        let relative = |bodies: &[(Quat, Vec3)]| {
+            let (qa, xa) = bodies[vm.parent_body];
+            let (qb, xb) = bodies[vm.body];
+            let ia = qa.inverse();
+            (
+                (ia * qb).normalize(),
+                ia * (xb + qb * Vec3::from(vm.point) - xa),
+            )
+        };
+        let mut drive: Option<((Quat, Vec3), _, _)> = None;
+        for ((p, ramp), bodies) in poses.iter().zip(&pose_bodies) {
+            if !p.virtual_named.get(v).copied().unwrap_or(false) {
+                continue;
+            }
+            let target = relative(bodies);
+            let (linear, angular) = gains(vm, p.strength);
+            drive = Some(match drive {
+                None => (
+                    target,
+                    linear.map(|g| scale(g, *ramp)),
+                    angular.map(|g| scale(g, *ramp)),
+                ),
+                Some(((r, x), l, a)) => (
+                    (r.slerp(target.0, *ramp), x.lerp(target.1, *ramp)),
+                    mix(l, linear, *ramp),
+                    mix(a, angular, *ramp),
+                ),
+            });
+        }
+        let Some(((rotation, position), linear, angular)) = drive else {
+            continue;
+        };
+        if linear.is_none() && angular.is_none() {
+            continue;
+        }
+        world.virtual_muscles.push(VirtualMuscle {
+            anchor: binding.first_body + vm.parent_body,
+            body: binding.first_body + vm.body,
+            point: Vec3::from(vm.point),
+            target_position: position,
+            target_rotation: rotation,
+            linear,
+            angular,
+        });
+    }
+}
+
+/// Optional gains moved fraction `t` of the way from `a` to `b` (an absent drive counts
+/// as no drive).
+fn mix(a: Option<Gains>, b: Option<Gains>, t: f32) -> Option<Gains> {
+    const NONE: Gains = Gains {
+        stiffness: 0.0,
+        damping: 0.0,
+        force_limit: 0.0,
+    };
+    (a.is_some() || b.is_some()).then(|| blend(a.unwrap_or(NONE), b.unwrap_or(NONE), t))
+}
+
+/// Whether a joint on the chain from `body` up to `ancestor` is cut or has its muscle
+/// switched off at `frame`: a virtual muscle across it would pull a severed hand.
+fn severed_between(
+    rig: &PhysicsRig,
+    plan: &Plan,
+    frame: i32,
+    ancestor: usize,
+    body: usize,
+) -> bool {
+    let mut at = body;
+    for _ in 0..rig.joints.len() {
+        if at == ancestor {
+            return false;
+        }
+        let Some((j, joint)) = rig.joints.iter().enumerate().find(|(_, j)| j.body == at) else {
+            return false;
+        };
+        if plan.severs.iter().any(|s| s.joint == j && s.start <= frame) {
+            return true;
+        }
+        at = joint.parent_body;
+    }
+    false
+}
+
+/// World transforms of a skeleton whose joints have these local rotations, at their
+/// rest offsets.
+fn posed(skeleton: &crate::document::SkeletonRef, locals: &[Quat]) -> Vec<(Quat, Vec3)> {
+    let mut out: Vec<(Quat, Vec3)> = Vec::with_capacity(skeleton.joints.len());
+    for (i, joint) in skeleton.joints.iter().enumerate() {
+        let local = locals.get(i).copied().unwrap_or(Quat::IDENTITY);
+        let offset = Vec3::from(joint.offset);
+        out.push(match joint.parent.filter(|&p| p < i) {
+            Some(p) => {
+                let (pr, pp) = out[p];
+                ((pr * local).normalize(), pp + pr * offset)
+            }
+            None => (local, offset),
+        });
+    }
+    out
 }
 
 const DEFAULT_GAINS: MuscleGains = MuscleGains {

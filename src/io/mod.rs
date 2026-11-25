@@ -183,6 +183,22 @@ mod tests {
         assert_eq!(from_str(&text).unwrap(), project);
     }
 
+    /// A rig without virtual muscles is written as older builds wrote it, so files saved
+    /// before them (no `virtual_muscles`, no presets' `linear` gains) load, with none.
+    #[test]
+    fn rigs_without_virtual_muscles_keep_the_old_format() {
+        let project = placeholder_project();
+        assert!(project.characters[0].physics.is_some());
+        let text = to_string(&project).unwrap();
+        assert!(!text.contains("virtual_muscles") && !text.contains("\"linear\""));
+        let rig = from_str(&text).unwrap().characters[0]
+            .physics
+            .clone()
+            .unwrap();
+        assert!(rig.virtual_muscles.is_empty());
+        assert!(rig.muscle_sets.iter().all(|s| s.linear.is_empty()));
+    }
+
     #[test]
     fn migrates_v1_projects() {
         let project = placeholder_project();
@@ -238,10 +254,35 @@ mod tests {
             crate::document::SimLevel::Animated
         );
         assert!(project.characters[0].physics.is_none());
+        // No physics settings in the file: the defaults (Coulomb friction since lesson 26).
+        assert_eq!(
+            project.physics,
+            crate::document::physics::PhysicsSettings::default()
+        );
         assert_eq!(project.evaluate(30.0)[0].joints[1][0], 20.0);
         // Edits made by this build allocate ids past the loaded ones.
         let mut doc = crate::document::Document::new(project);
         assert!(doc.add_track(1, "Layer") > 3);
+    }
+
+    /// New projects use Coulomb friction; one saved with the force caps NeuroMotion
+    /// used before keeps them, so it simulates as it did when it was made.
+    #[test]
+    fn keeps_the_contact_model_a_project_was_saved_with() {
+        use crate::document::physics::ContactModel;
+        let project = placeholder_project();
+        assert_eq!(project.physics.contact, ContactModel::Coulomb);
+        let text = to_string(&project).unwrap();
+        let old = text.replacen(
+            "\"contact\": \"coulomb\"",
+            "\"contact\": \"force_capped\"",
+            1,
+        );
+        assert_ne!(old, text);
+        assert_eq!(
+            from_str(&old).unwrap().physics.contact,
+            ContactModel::ForceCapped
+        );
     }
 
     #[test]
