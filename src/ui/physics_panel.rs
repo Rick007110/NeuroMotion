@@ -195,8 +195,8 @@ pub(super) fn settings_group(ui: &mut Ui, doc: &mut Document) {
                 .on_hover_text(
                     "How much of their preset's stiffness and damping active poses bend a \
                      joint with (its swing; the twist about the bone, all a knee or elbow \
-                     has, always gets all of it). Imported scenes use 1/16 (0.0625), \
-                     as endorphin's own runs bend; your own projects use 1.",
+                     has, gets all of it). Imported scenes use 1/16 (0.0625), as \
+                     endorphin's own runs bend; your own projects use 1.",
                 ),
             );
             ui.end_row();
@@ -216,6 +216,38 @@ pub(super) fn settings_group(ui: &mut Ui, doc: &mut Document) {
                      what they stand on; your own projects use 60.",
                 ),
             );
+            ui.end_row();
+
+            ui.label("Rigid footing");
+            ui.checkbox(&mut p.rigid_contacts, "").on_hover_text(
+                "Hold a character's contacts that carry weight on the ground and scenery \
+                 rigidly, solved with the whole body, so a planted foot doesn't sink at \
+                 all. Needs the whole-limb muscle cap. Imported scenes use it.",
+            );
+            ui.end_row();
+
+            ui.label("Pose twist limit");
+            ui.horizontal(|ui| {
+                let mut on = p.pose_twist_limit.is_some();
+                let mut share = p.pose_twist_limit.unwrap_or(0.4);
+                ui.checkbox(&mut on, "");
+                g.drag(
+                    &ui.add_enabled(
+                        on,
+                        DragValue::new(&mut share)
+                            .range(0.0..=1.0)
+                            .speed(0.005)
+                            .max_decimals(3),
+                    )
+                    .on_hover_text(
+                        "The most an active pose's twist muscles (all a knee or elbow has) \
+                         push, as a share of their preset's limit, whatever the pose's \
+                         strength. Imported scenes use 0.4; off, the limit grows with the \
+                         strength like every other muscle's.",
+                    ),
+                );
+                p.pose_twist_limit = on.then_some(share);
+            });
             ui.end_row();
 
             ui.label("Ground");

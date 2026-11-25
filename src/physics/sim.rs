@@ -249,6 +249,7 @@ fn build(project: &Project) -> Running {
     let mut world = World::new(Vec3::from(settings.gravity), settings.contact);
     world.spring_cap = settings.spring_cap;
     world.contact_hertz = settings.contact_hertz;
+    world.rigid_contacts = settings.rigid_contacts;
 
     // Materials: every name used by the ground or any shape.
     let mut materials: Vec<String> = Vec::new();
@@ -1208,11 +1209,19 @@ fn set_muscles(
                 let pose = p.pose[jd.joint];
                 let mut held = gains_of(pose_set, &jd.muscle, p.strength);
                 // endorphin's swing muscles hold a pose at a sixteenth of what its preset
-                // says, its twist muscles (the knees' and elbows' only axis) at all of it
-                // (lesson 46); the force limit is the preset's either way.
+                // says (lesson 46). Its twist muscles (the knees' and elbows' only axis)
+                // measure at about a quarter, but here keep all of it: a quarter loses
+                // Back-Flip-To-Combo's jump (lessons 49 and 50). The force limit is the
+                // preset's times the strength, except for twist where the project says.
                 let share = project.physics.pose_swing_share;
                 held.swing.stiffness *= share;
                 held.swing.damping *= share;
+                // endorphin's knees push no more than about 400 N·m whatever the
+                // pose's strength (lesson 50).
+                if let Some(limit) = project.physics.pose_twist_limit {
+                    let preset = pose_set.map_or(DEFAULT_GAINS, |s| s.gains(&jd.muscle));
+                    held.twist.force_limit = preset.twist.force_limit * limit;
+                }
                 target = target.slerp(pose, ramp);
                 gains = MuscleGains {
                     twist: blend(gains.twist, held.twist, ramp),

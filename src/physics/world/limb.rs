@@ -22,7 +22,7 @@
 
 use glam::Vec3;
 
-use super::{JointRows, MAX_PUSH_SPEED, STATIC, SolverBody};
+use super::{ContactRow, JointRows, MAX_PUSH_SPEED, STATIC, SolverBody};
 
 /// Most rounds of switching rows onto and off their bounds, per pass. A pass that runs
 /// out ends with its rows clamped, not solved, and the next pass starts from that
@@ -31,11 +31,25 @@ use super::{JointRows, MAX_PUSH_SPEED, STATIC, SolverBody};
 /// 45). Most passes settle in 0-3 rounds; over their whole ranges the 17 sample scenes
 /// have 323 passes that need more than 8 and 13 that need more than 24.
 const PIVOTS: usize = 24;
+/// More rounds per contact row in the system: a character landing on a floor puts
+/// dozens of contact rows onto or off their bounds at once, and with 24 rounds a hand
+/// landing in Catch Rope ran out with its finger contacts at no impulse while they
+/// closed at 7 m/s, and the finger joint opened 20 cm (lesson 50).
+const PIVOTS_PER_CONTACT_ROW: usize = 2;
 /// Rows off the factor's guess beyond which it is factored again.
 const REFACTOR: usize = 6;
 /// Further rounds that only put rows past their bounds onto them.
 const SETTLE: usize = 4;
 const NONE: usize = usize::MAX;
+/// Softness of a contact row solved with its character, as a share of its body's own
+/// inverse mass along it. A foot's corners on a floor repeat each other (four normals
+/// on a body its ankle leaves only three ways to move), so rigid rows couldn't be
+/// solved; this little give (0.2 µm a substep under a planted foot's load) settles how
+/// they share the load.
+const CONTACT_SOFTNESS: f32 = 1e-4;
+/// Most rows a joint's block may have: a body's contacts beyond it are left to the
+/// contact pass.
+const MAX_BLOCK: usize = 48;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Source {
@@ -45,6 +59,8 @@ enum Source {
     Muscle(usize),
     /// One of the joint's limit rows (a stop or a soft-zone spring).
     Limit(usize),
+    /// A contact against the ground or fixed scenery: its normal (0) or a tangent (1, 2).
+    Contact(usize, usize),
 }
 
 struct Row {
@@ -67,6 +83,9 @@ struct Row {
     /// Where each of its moving bodies' velocity changes sit in the solution vector, and
     /// its Jacobian there.
     parts: [(usize, [f64; 6]); 2],
+    /// A Coulomb friction row's normal row and friction coefficient: its bounds are ±μ
+    /// times the normal impulse.
+    friction: Option<(usize, f32)>,
 }
 
 impl Row {
@@ -127,12 +146,19 @@ pub(super) struct Articulation {
 impl Articulation {
     /// Builds the articulations of every jointed group among `joints`, and marks the
     /// joints they solve. A joint that would close a loop, or a second joint holding a
-    /// group to something that doesn't move, is left to sequential impulses.
+    /// group to something that doesn't move, is left to sequential impulses. With
+    /// `ground`, a group's contacts against the ground and fixed scenery (bodies `fixed`
+    /// says don't move) are solved with it too, rigid (lesson 50), and marked in
+    /// `articulated`.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn build(
         sb: &[SolverBody],
         joints: &mut [JointRows],
         bias_rate: f32,
         h: f32,
+        ground: Option<&GroundContacts>,
+        contacts: &[ContactRow],
+        articulated: &mut [bool],
     ) -> Vec<Articulation> {
         let moves = |i: usize| i != STATIC && sb[i].inv_mass > 0.0;
         // Jointed groups: union-find over joints whose bodies both move.
@@ -165,18 +191,31 @@ impl Articulation {
         // Only groups with a muscle: ropes and props made of jointed links have nothing
         // stiff to hold and stay with sequential impulses.
         groups.retain(|(_, list)| list.iter().any(|&j| joints[j].muscle.is_some()));
-        groups
+        let articulations: Vec<Articulation> = groups
             .into_iter()
-            .filter_map(|(_, list)| Articulation::new(sb, joints, &list, bias_rate, h))
-            .collect()
+            .filter_map(|(_, list)| {
+                Articulation::new(sb, joints, &list, bias_rate, h, ground, contacts)
+            })
+            .collect();
+        for a in &articulations {
+            for r in &a.rows {
+                if let Source::Contact(c, _) = r.source {
+                    articulated[c] = true;
+                }
+            }
+        }
+        articulations
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn new(
         sb: &[SolverBody],
         joints: &mut [JointRows],
         list: &[usize],
         bias_rate: f32,
         h: f32,
+        ground: Option<&GroundContacts>,
+        contacts: &[ContactRow],
     ) -> Option<Articulation> {
         let moves = |i: usize| i != STATIC && sb[i].inv_mass > 0.0;
         let mut bodies: Vec<usize> = list
@@ -201,7 +240,29 @@ impl Articulation {
                 adjacent[b].push(j);
             }
         }
-        // Breadth first: (joint, or else body; parent node).
+        // Contacts against the ground and fixed scenery, by body: each body's go into the
+        // block of the joint above it (lesson 50).
+        let mut touching: Vec<Vec<usize>> = vec![Vec::new(); bodies.len()];
+        if let Some(ground) = ground {
+            for (ci, c) in contacts.iter().enumerate() {
+                let (body, other) = match (body_index(c.a), body_index(c.b)) {
+                    (Some(a), None) => (a, c.b),
+                    (None, Some(b)) => (b, c.a),
+                    _ => continue,
+                };
+                // Only contacts that carry a load: they pushed at the end of the last
+                // substep and still touch. A new one (a hand or foot landing) goes to the
+                // contact pass first, as before: taken rigid at first touch, a landing
+                // finger or a foot wedged against a ledge got impulses of hundreds of
+                // N·s, and limbs came apart (lesson 50).
+                let carrying = c.impulse[0] > 0.0 && c.separation < ground.touching;
+                if carrying && (other == STATIC || ground.fixed[other]) {
+                    touching[body].push(ci);
+                }
+            }
+        }
+        // Breadth first: (joint, or else body; parent node). A joint of `NONE` holds only
+        // the root body's contacts.
         let mut order: Vec<(Option<usize>, usize, usize)> = Vec::new();
         let mut seen = vec![false; bodies.len()];
         let mut used = vec![false; joints.len()];
@@ -220,7 +281,12 @@ impl Articulation {
             None => {
                 let j = &joints[list[0]];
                 let b = if moves(j.a) { j.a } else { j.b };
-                order.push((None, b, NONE));
+                if touching[body_index(b)?].is_empty() {
+                    order.push((None, b, NONE));
+                } else {
+                    order.push((Some(NONE), NONE, NONE));
+                    order.push((None, b, 0));
+                }
                 b
             }
         };
@@ -249,23 +315,36 @@ impl Articulation {
             next += 1;
         }
 
-        // Rows of the joints in the tree; those out of the factor start at the bound
-        // they sit at.
+        // Rows of the joints in the tree, each with its child body's contacts; those out
+        // of the factor start at the bound they sit at.
         let mut rows = Vec::new();
         let mut row_range = vec![(0, 0); order.len()];
         for (k, &(joint, _, _)) in order.iter().enumerate() {
             if let Some(ji) = joint {
                 let start = rows.len();
-                push_rows(&mut rows, sb, &joints[ji], ji, bias_rate, h);
-                joints[ji].direct = true;
+                if ji != NONE {
+                    push_rows(&mut rows, sb, &joints[ji], ji, bias_rate, h);
+                    joints[ji].direct = true;
+                }
+                // The joint's child body comes right after it.
+                if let (Some(ground), Some(child)) =
+                    (ground, order.get(k + 1).and_then(|o| body_index(o.1)))
+                {
+                    for &ci in &touching[child] {
+                        if rows.len() - start + 3 > MAX_BLOCK {
+                            break;
+                        }
+                        push_contact_rows(&mut rows, sb, &contacts[ci], ci, ground, h);
+                    }
+                }
                 row_range[k] = (start, rows.len());
             }
         }
-        let at = rows
+        let at: Vec<Option<f64>> = rows
             .iter()
             .map(|r| {
                 r.slot.is_none().then(|| {
-                    let lambda = Self::accumulated(r, joints) as f64;
+                    let lambda = Self::accumulated(r, joints, contacts) as f64;
                     if r.near_upper(lambda) {
                         r.upper as f64
                     } else {
@@ -440,7 +519,7 @@ impl Articulation {
     /// Solves the factored system for right-hand side `x`, in place.
     fn solve_system(&self, x: &mut [f64]) {
         let dot = |a: &[f64], b: &[f64]| a.iter().zip(b).map(|(a, b)| a * b).sum::<f64>();
-        let mut z = [0.0f64; 16];
+        let mut z = [0.0f64; MAX_BLOCK];
         // Forward: each node's part, less what its children pass up.
         for node in self.nodes.iter().rev() {
             if node.parent == NONE || node.n == 0 {
@@ -516,15 +595,15 @@ impl Articulation {
     }
 
     /// The row's accumulated impulse so far.
-    fn accumulated(r: &Row, joints: &[JointRows]) -> f32 {
-        let j = &joints[r.joint];
+    fn accumulated(r: &Row, joints: &[JointRows], contacts: &[ContactRow]) -> f32 {
         match r.source {
-            Source::Anchor(axis) => j.point_impulse[axis],
-            Source::Muscle(k) => j
+            Source::Anchor(axis) => joints[r.joint].point_impulse[axis],
+            Source::Muscle(k) => joints[r.joint]
                 .muscle
                 .as_ref()
                 .map_or(0.0, |m| m.frame.col(k).dot(m.impulse)),
-            Source::Limit(l) => j.limits[l].impulse,
+            Source::Limit(l) => joints[r.joint].limits[l].impulse,
+            Source::Contact(c, k) => contacts[c].impulse[k],
         }
     }
 
@@ -533,14 +612,32 @@ impl Articulation {
         &mut self,
         sb: &mut [SolverBody],
         joints: &mut [JointRows],
+        contacts: &mut [ContactRow],
         use_bias: bool,
     ) {
         let pass = if use_bias { 0 } else { 1 };
         let so_far: Vec<f64> = self
             .rows
             .iter()
-            .map(|r| Self::accumulated(r, joints) as f64)
+            .map(|r| Self::accumulated(r, joints, contacts) as f64)
             .collect();
+        // Coulomb friction: ±μ times the normal impulse so far. A row that was sliding
+        // stays at the new bound, on the same side.
+        for i in 0..self.rows.len() {
+            let Some((normal, mu)) = self.rows[i].friction else {
+                continue;
+            };
+            let limit = mu * (so_far[normal] as f32).max(0.0);
+            let r = &mut self.rows[i];
+            r.lower = -limit;
+            r.upper = limit;
+            self.at[i] = match self.at[i] {
+                _ if limit == 0.0 => Some(0.0),
+                Some(at) if at > 0.0 => Some(limit as f64),
+                Some(at) if at < 0.0 => Some(-limit as f64),
+                _ => None,
+            };
+        }
         // What each row's equation asks for: −(J v + bias + γ λ).
         let wanted: Vec<f64> = self
             .rows
@@ -571,7 +668,13 @@ impl Articulation {
         let mut u: Vec<f64> = Vec::new();
         let mut y = free.clone();
         let mut fewest = usize::MAX;
-        for round in 0..PIVOTS + SETTLE {
+        let contact_rows = self
+            .rows
+            .iter()
+            .filter(|r| matches!(r.source, Source::Contact(..)))
+            .count();
+        let pivots = PIVOTS + PIVOTS_PER_CONTACT_ROW * contact_rows;
+        for round in 0..=pivots + SETTLE {
             // Rows held at a bound in the factor, let in from out of it, or put on a
             // bound from off it.
             changed.clear();
@@ -592,9 +695,16 @@ impl Articulation {
                     *y += col * uk;
                 }
             }
+            // The last round only solves with what the rounds before it settled on.
+            if round == pivots + SETTLE {
+                break;
+            }
             let mut wrong: Vec<(usize, Option<f64>)> = Vec::new();
             for (i, r) in self.rows.iter().enumerate() {
-                if r.lower == f32::NEG_INFINITY && r.upper == f32::INFINITY {
+                // Unbounded rows are never wrong; a row with no room (friction with no
+                // load) stays at its one value.
+                if (r.lower == f32::NEG_INFINITY && r.upper == f32::INFINITY) || r.lower == r.upper
+                {
                     continue;
                 }
                 let d = match r.slot {
@@ -620,7 +730,7 @@ impl Articulation {
             // Out of rounds: only rows past their bounds still switch, onto them, so the
             // impulses stay consistent (clamping one row alone would leave the joints
             // around it to take up the difference).
-            let settle = round >= PIVOTS;
+            let settle = round >= pivots;
             if settle {
                 wrong.retain(|w| w.1.is_some());
             }
@@ -660,15 +770,15 @@ impl Articulation {
             if d == 0.0 || !d.is_finite() {
                 continue;
             }
-            let j = &mut joints[r.joint];
             match r.source {
-                Source::Anchor(axis) => j.point_impulse[axis] += d,
+                Source::Anchor(axis) => joints[r.joint].point_impulse[axis] += d,
                 Source::Muscle(k) => {
-                    if let Some(m) = j.muscle.as_mut() {
+                    if let Some(m) = joints[r.joint].muscle.as_mut() {
                         m.impulse += m.frame.col(k) * d;
                     }
                 }
-                Source::Limit(l) => j.limits[l].impulse += d,
+                Source::Limit(l) => joints[r.joint].limits[l].impulse += d,
+                Source::Contact(c, k) => contacts[c].impulse[k] += d,
             }
             if r.a != STATIC {
                 let body = &mut sb[r.a];
@@ -751,6 +861,7 @@ fn push_rows(
             bias: [push[axis], 0.0],
             slot: Some(0),
             parts: [(NONE, [0.0; 6]); 2],
+            friction: None,
         });
     }
     if let Some(m) = &j.muscle {
@@ -775,6 +886,7 @@ fn push_rows(
                 bias: [bias, bias],
                 slot: (warm.abs() < m.bound[k] * (1.0 - 1e-6)).then_some(0),
                 parts: [(NONE, [0.0; 6]); 2],
+                friction: None,
             });
         }
     }
@@ -820,7 +932,89 @@ fn push_rows(
             bias,
             slot: active.then_some(0),
             parts: [(NONE, [0.0; 6]); 2],
+            friction: None,
         });
+    }
+}
+
+/// What a character's contacts against the ground and fixed scenery need to be solved
+/// with it (lesson 50).
+pub(super) struct GroundContacts {
+    /// Per body: it doesn't move and isn't keyed (massless scenery).
+    pub fixed: Vec<bool>,
+    /// Share of a contact's overlap pushed apart per second.
+    pub bias_rate: f32,
+    /// Coulomb friction (bounded by the normal impulse), else a fixed force cap.
+    pub coulomb: bool,
+    /// A contact this close (m) that pushed in the last substep carries a load.
+    pub touching: f32,
+}
+
+/// A contact's three rows: its normal, which only pushes (or pulls up to its adhesion),
+/// and two friction rows. The normal starts in the factor if it pushed at the end of the
+/// last substep, friction if it did and didn't slide; the others at their bounds.
+fn push_contact_rows(
+    rows: &mut Vec<Row>,
+    sb: &[SolverBody],
+    c: &ContactRow,
+    ci: usize,
+    ground: &GroundContacts,
+    h: f32,
+) {
+    let normal = rows.len();
+    // Its body's own inverse mass along `dir`, for the rows' little give.
+    let own = |dir: Vec3| {
+        [(c.a, c.ra), (c.b, c.rb)]
+            .into_iter()
+            .filter(|&(i, _)| i != STATIC)
+            .map(|(i, r)| sb[i].inv_mass + r.cross(dir).dot(sb[i].inv_i * r.cross(dir)))
+            .sum::<f32>()
+    };
+    let row = |k: usize, dir: Vec3| Row {
+        joint: NONE,
+        source: Source::Contact(ci, k),
+        a: c.a,
+        b: c.b,
+        jacobian: [-dir, -c.ra.cross(dir), dir, c.rb.cross(dir)],
+        gamma: CONTACT_SOFTNESS * own(dir),
+        lower: f32::NEG_INFINITY,
+        upper: f32::INFINITY,
+        bias: [0.0; 2],
+        slot: Some(0),
+        parts: [(NONE, [0.0; 6]); 2],
+        friction: None,
+    };
+    // Still apart: it may close the gap this substep, no more. Overlapping: pushed apart
+    // while correcting positions, as the contact pass does.
+    let bias = if c.separation > 0.0 {
+        [c.separation / h; 2]
+    } else {
+        [(ground.bias_rate * c.separation).max(-MAX_PUSH_SPEED), 0.0]
+    };
+    let pushing = c.impulse[0] > 0.0;
+    let r = row(0, c.normal);
+    rows.push(Row {
+        gamma: r.gamma,
+        lower: -c.interaction.adhesion * h,
+        bias,
+        slot: pushing.then_some(0),
+        ..r
+    });
+    let touching = c.separation <= 0.0 || pushing;
+    for k in 0..2 {
+        let mut r = row(k + 1, c.tangents[k]);
+        let limit = if ground.coulomb {
+            r.friction = Some((normal, c.interaction.friction / 100.0));
+            c.interaction.friction / 100.0 * c.impulse[0].max(0.0)
+        } else if touching {
+            c.interaction.friction * h
+        } else {
+            0.0
+        };
+        r.lower = -limit;
+        r.upper = limit;
+        r.slot = (pushing && c.impulse[k + 1].abs() < limit * (1.0 - 1e-3)).then_some(0);
+        rows.push(r);
     }
 }
 

@@ -18,7 +18,7 @@ mod limb;
 use crate::document::physics::{
     CONTACT_HERTZ, ContactModel, Gains, Geometry, Interaction, Limits, SpringCap,
 };
-use limb::Articulation;
+use limb::{Articulation, GroundContacts};
 
 pub const SUBSTEPS: usize = 4;
 const ITERATIONS: usize = 4;
@@ -323,6 +323,9 @@ pub struct World {
     pub spring_cap: SpringCap,
     /// Contacts' natural frequency, Hz, capped at a quarter of the substep rate.
     pub contact_hertz: f32,
+    /// With `SpringCap::Limbs`: a character's contacts that carry a load against the
+    /// ground and fixed scenery are solved rigidly with the rest of it (lesson 50).
+    pub rigid_contacts: bool,
     material_count: usize,
     /// `interactions[a * material_count + b]`.
     interactions: Vec<Interaction>,
@@ -648,6 +651,7 @@ impl World {
             contact_model,
             spring_cap: SpringCap::default(),
             contact_hertz: CONTACT_HERTZ,
+            rigid_contacts: false,
             material_count: 0,
             interactions: Vec::new(),
             contact_cache: HashMap::new(),
@@ -805,9 +809,37 @@ impl World {
             }
         }
         // With whole-limb muscles, every jointed group's joints, muscles and stops are
-        // solved as one system (lesson 38).
+        // solved as one system (lesson 38), with its contacts against the ground and
+        // fixed scenery (lesson 50).
+        let mut articulated = vec![false; contacts.len()];
         let mut articulations = if self.spring_cap == SpringCap::Limbs {
-            Articulation::build(&sb, &mut joints, joint_soft.bias_rate, h)
+            let ground = self.rigid_contacts.then(|| GroundContacts {
+                fixed: self
+                    .bodies
+                    .iter()
+                    .map(|b| match b.motion {
+                        // Massless scenery, which never moves (lesson 11).
+                        Motion::Dynamic => !b.is_dynamic(),
+                        // Keyed scenery standing still; one that moves can move on.
+                        Motion::Kinematic { .. } => {
+                            b.linear_velocity == Vec3::ZERO && b.angular_velocity == Vec3::ZERO
+                        }
+                        Motion::Ghost => false,
+                    })
+                    .collect(),
+                bias_rate: contact_soft.bias_rate,
+                coulomb: self.contact_model == ContactModel::Coulomb,
+                touching: CRUSH_SEPARATION,
+            });
+            Articulation::build(
+                &sb,
+                &mut joints,
+                joint_soft.bias_rate,
+                h,
+                ground.as_ref(),
+                &contacts,
+                &mut articulated,
+            )
         } else {
             Vec::new()
         };
@@ -824,6 +856,7 @@ impl World {
                 &mut articulations,
                 &mut contacts,
                 &mut held,
+                &articulated,
                 joint_soft.bias_rate,
                 contact_soft,
                 h,
@@ -865,6 +898,7 @@ impl World {
                 &mut articulations,
                 &mut contacts,
                 &mut held,
+                &articulated,
                 0.0,
                 contact_soft,
                 h,
@@ -937,6 +971,7 @@ impl World {
         articulations: &mut [Articulation],
         contacts: &mut [ContactRow],
         held: &mut [bool],
+        articulated: &[bool],
         lock_bias_rate: f32,
         contact_soft: Softness,
         h: f32,
@@ -945,15 +980,15 @@ impl World {
     ) {
         if first {
             for a in articulations.iter_mut() {
-                a.solve(sb, joints, use_bias);
+                a.solve(sb, joints, contacts, use_bias);
             }
         }
         solve_locks(sb, locks, lock_bias_rate);
         solve_groups(sb, groups, joints, locks, contacts, held, false, use_bias);
-        self.solve_contacts(sb, contacts, held, contact_soft, h, use_bias);
+        self.solve_contacts(sb, contacts, held, articulated, contact_soft, h, use_bias);
         if !articulations.is_empty() {
             for a in articulations.iter_mut() {
-                a.solve(sb, joints, use_bias);
+                a.solve(sb, joints, contacts, use_bias);
             }
             solve_groups(sb, groups, joints, locks, contacts, held, false, use_bias);
         }
@@ -2081,11 +2116,13 @@ impl World {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn solve_contacts(
         &self,
         sb: &mut [SolverBody],
         contacts: &mut [ContactRow],
         held: &[bool],
+        articulated: &[bool],
         soft_params: Softness,
         h: f32,
         use_bias: bool,
@@ -2097,7 +2134,13 @@ impl World {
         } else {
             handed_velocity
         };
-        for (c, &held) in contacts.iter_mut().zip(held) {
+        // Contacts a character's whole-body solve holds rigidly are its alone (lesson 50).
+        for ((c, &held), _) in contacts
+            .iter_mut()
+            .zip(held)
+            .zip(articulated)
+            .filter(|(_, articulated)| !**articulated)
+        {
             // Friction first, limited by the current normal impulse or a fixed force cap.
             // The cap only holds surfaces that touch: a contact found inside the
             // speculative margin, still apart and not pushing, has nothing to grip with.
