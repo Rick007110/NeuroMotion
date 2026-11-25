@@ -2303,8 +2303,9 @@ Measured joint by joint against Back-Flip-To-Combo's export, the trunk gave one 
       (endorphin -118 / -326 / -523; -109 / -297 / -466 before). It turns faster than
       endorphin's while the flip's -100 N·m drive acts (246-297), though it is less
       tucked (hips 80° and spine 38° at 270, endorphin's 90° and 50°). How endorphin
-      reads the drive's negative strength (lesson 13) is still the open question; no
-      row measures the turn.
+      reads the drive's negative strength (lesson 13) is still the open question.
+      Three rows now measure the turn since frame 190, at 260, 297 and 330 (endorphin
+      -247 / -523 / -689 ± 10°; -270 / -655 / -863 now, -216 / -466 / -593 before).
 
     Stand-in `bent_over` (`a_pose_bends_swing_joints_with_a_sixteenth`): hung by the
     hips, the placeholder bends spine and chest 12° each and the knees 90° with

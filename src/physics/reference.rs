@@ -95,6 +95,9 @@ pub enum Measure {
     At(i32),
     /// The value at the second frame minus the value at the first.
     Change(i32, i32),
+    /// How far an angle (degrees) has turned from the first frame to the second,
+    /// followed frame by frame, so whole turns count (a flip's -500°).
+    Turned(i32, i32),
     /// The largest value over frames `from..=to`.
     Max(i32, i32),
     /// The frame of the largest value over `from..=to`.
@@ -558,6 +561,33 @@ pub const SCENES: &[Scene] = &[
                 329.0,
             ),
             fbx(
+                "flip: trunk (pelvis to head) turned since frame 190, frame 260",
+                BACKFLIP_TRUNK,
+                Measure::Turned(190, 260),
+                -246.7,
+                10.0,
+                false,
+                -270.3,
+            ),
+            fbx(
+                "flip: trunk (pelvis to head) turned since frame 190, frame 297",
+                BACKFLIP_TRUNK,
+                Measure::Turned(190, 297),
+                -522.8,
+                10.0,
+                false,
+                -655.1,
+            ),
+            fbx(
+                "flip: trunk (pelvis to head) turned since frame 190, frame 330",
+                BACKFLIP_TRUNK,
+                Measure::Turned(190, 330),
+                -688.5,
+                10.0,
+                false,
+                -862.8,
+            ),
+            fbx(
                 "combo: centre of mass highest, frames 500-620",
                 com(Axis::Y),
                 Measure::Max(500, 620),
@@ -945,6 +975,13 @@ const BACKFLIP_LEAN: Signal = Signal::Pitch(
     Point::Joint("character01", "Pelvis"),
 );
 
+// Back-Flip-To-Combo's flip: the line from the pelvis to the head, whose turn about
+// the side axis (negative backwards) counts the somersault.
+const BACKFLIP_TRUNK: Signal = Signal::Pitch(
+    Point::Joint("character01", "Pelvis"),
+    Point::Joint("character01", "Head"),
+);
+
 const REACH_TARGET: Point = Point::Body("background", "Prop0");
 
 /// How far an arm of the demo's characters (shoulder joint to finger tips) points off
@@ -995,7 +1032,7 @@ impl Measure {
     fn last_frame(self) -> i32 {
         match self {
             Measure::At(f) => f,
-            Measure::Change(a, b) => a.max(b),
+            Measure::Change(a, b) | Measure::Turned(a, b) => a.max(b),
             Measure::Max(_, to)
             | Measure::MaxFrame(_, to)
             | Measure::Min(_, to)
@@ -1198,6 +1235,12 @@ impl Run<'_> {
                     change
                 })
             }
+            Measure::Turned(a, b) => Some(
+                frames(a, b)
+                    .zip(frames(a + 1, b))
+                    .map(|(f, g)| (v(g) - v(f) + 180.0).rem_euclid(360.0) - 180.0)
+                    .sum(),
+            ),
             Measure::Max(a, b) => extreme(a, b, 1.0).map(|e| e.1),
             Measure::MaxFrame(a, b) => extreme(a, b, 1.0).map(|e| e.0 as f32),
             Measure::Min(a, b) => extreme(a, b, -1.0).map(|e| e.1),

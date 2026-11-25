@@ -86,11 +86,11 @@ NeuroMotion, and we need numbers to prove it.
   0.52 m (1.67 m)
 - ✅ **Reference measurements**: scenes measured in endorphin (frames, positions,
   angles) and scored against NeuroMotion by a test, `reference_scores`, so "behaves
-  like endorphin" is checked, not eyeballed. 68 measurements in eight scenes: Car Hit,
+  like endorphin" is checked, not eyeballed. 71 measurements in eight scenes: Car Hit,
   Back-Flip-To-Combo, Tackle, Stagger Walk, Trapeze, Balcony and the Look and Reach
   and Explosion behaviour scenes; 29 are within endorphin's uncertainty, 14 of them
   guarded against regressions, and the known gaps print their error so progress shows
-  ([details](docs/reference-measurements.md)). 66 are read from endorphin's own runs
+  ([details](docs/reference-measurements.md)). 69 are read from endorphin's own runs
   exported as FBX (every joint at every frame, lesson 40; `tools/fbx_motion.py`
   reads an export), which corrected several recording-based rows; two still come from
   a recording. Anyone with endorphin can add rows, using the *Reference measurement*

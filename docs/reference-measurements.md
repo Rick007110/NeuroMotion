@@ -156,16 +156,16 @@ Run with active poses bending swing joints at a sixteenth of their preset
 | Scene | Rows | Within | Guards | Mean error (× uncertainty) |
 |---|---|---|---|---|
 | Car Hit | 20 | 9 | 5 | 1.7 |
-| Back-Flip-To-Combo (#6, the user's own scene) | 18 | 10 | 5 | 1.6 |
+| Back-Flip-To-Combo (#6, the user's own scene) | 21 | 10 | 5 | 1.9 |
 | Tackle (the tackled character) | 9 | 4 | 0 | 1.9 |
 | Hands reach and look at 2.5 (Look and Reach) | 3 | 2 | 1 | 1.4 |
 | Writhe in mid-air 2.5 (Explosion) | 5 | 3 | 3 | 1.2 |
 | Stagger Walk | 4 | 1 | 0 | 3.0 |
 | Trapeze (lesson 43) | 6 | 0 | 0 | 4.0 |
 | Balcony (character01, lesson 43) | 3 | 0 | 0 | 4.0 |
-| In all | 68 | 29 | 14 | |
+| In all | 71 | 29 | 14 | |
 
-66 rows come from endorphin's own runs exported as FBX (lessons 40 and 43); character02's two
+69 rows come from endorphin's own runs exported as FBX (lessons 40 and 43); character02's two
 rows in Hands reach and look at still come from a recording (the export holds
 character01 only). The rows used to be 36, all from recordings (18 within on the build
 with lessons up to 39); the exports showed several of them were misread (lesson 40),
@@ -174,7 +174,9 @@ within too, with Back-Flip-To-Combo 1 of 18 (3.2) and Tackle 4 of 9 (1.5); befor
 lesson 42, Car Hit 10 of 20 (1.9) and Tackle 3 of 9 (2.3). Summed over the six first
 scenes, each row's error in uncertainties (up to 4) went from 129.7 to 123.2 with
 lesson 42; over all eight, lesson 46 took it from 159.9 to 140.1 (21 to 29 rows
-within, all of them Back-Flip-To-Combo's). Ways of
+within, all of them Back-Flip-To-Combo's). Three rows on the flip's turn came after
+it (71 rows, the sum 150.4; it would have been 171.0 before lesson 46, where the flip
+turned too little: those rows count at most 4 each either way). Ways of
 reading endorphin's numbers scored on the recordings are in lessons 34 and 39. The
 baselines are this run's values; every guard holds over `NM_NUDGES=2`, where every
 row's nudged range is within a frame, 0.1° or 2 cm except Stagger Walk's feet (0.15 to
@@ -195,8 +197,9 @@ The known gaps, with their errors on that run:
   the arms 10° short of endorphin's reach. It falls past the box top at 284 (296) and
   reaches the floor at 329 (330). Its knees bend 6.5° less in the crouch, which
   leaves the crouch's centre of mass 0.21 m behind the heels (0.164 m, a guard near
-  its edge), and its combo jump reaches 0.52 m where endorphin's reaches 1.67 m. No
-  row measures the spin: the trunk turns -655° by frame 297, endorphin's -523°.
+  its edge), and its combo jump reaches 0.52 m where endorphin's reaches 1.67 m. It
+  turns too far: the trunk -270 / -655 / -863° by frames 260 / 297 / 330 since 190
+  (endorphin -247 / -523 / -689; -216 / -466 / -593 before lesson 46).
 - **Tackle**: the tackled runner goes down later and slower (centre of mass 0.83 m at
   frame 55, endorphin 0.70; head 0.70 m over it at 60, 0.46) and ends up 0.28 m
   further along z (0.53 m before lesson 42). The tackler runs endorphin's Tackle
