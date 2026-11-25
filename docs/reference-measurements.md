@@ -151,17 +151,17 @@ repository.
 ## What is covered
 
 Run with active poses bending swing joints at a sixteenth of their preset
-(physics-design.md, lesson 46) and drives fading as cos(θ/2) (lesson 47),
-2026-11-25, with `NM_NUDGES=2`:
+(physics-design.md, lesson 46), drives fading as cos(θ/2) (lesson 47) and imported
+scenes' contacts at 120 Hz (lesson 48), 2026-11-25, with `NM_NUDGES=2`:
 
 | Scene | Rows | Within | Guards | Mean error (× uncertainty) |
 |---|---|---|---|---|
-| Car Hit | 20 | 9 | 5 | 1.7 |
-| Back-Flip-To-Combo (#6, the user's own scene) | 21 | 10 | 5 | 1.6 |
-| Tackle (the tackled character) | 9 | 4 | 0 | 1.9 |
+| Car Hit | 20 | 9 | 5 | 1.8 |
+| Back-Flip-To-Combo (#6, the user's own scene) | 21 | 10 | 5 | 1.3 |
+| Tackle (the tackled character) | 9 | 4 | 0 | 2.1 |
 | Hands reach and look at 2.5 (Look and Reach) | 3 | 2 | 1 | 1.4 |
 | Writhe in mid-air 2.5 (Explosion) | 5 | 3 | 3 | 1.2 |
-| Stagger Walk | 4 | 1 | 0 | 3.0 |
+| Stagger Walk | 4 | 1 | 0 | 2.9 |
 | Trapeze (lesson 43) | 6 | 0 | 0 | 4.0 |
 | Balcony (character01, lesson 43) | 3 | 0 | 0 | 4.0 |
 | In all | 71 | 29 | 14 | |
@@ -178,47 +178,54 @@ lesson 42; over all eight, lesson 46 took it from 159.9 to 140.1 (21 to 29 rows
 within, all of them Back-Flip-To-Combo's). Three rows on the flip's turn came after
 it (71 rows, the sum 150.4; it would have been 171.0 before lesson 46, where the flip
 turned too little: those rows count at most 4 each either way); lesson 47's drive
-reading took it to 145.0. Ways of
+reading took it to 145.0, and lesson 48's stiffer contacts to 140.6. Ways of
 reading endorphin's numbers scored on the recordings are in lessons 34 and 39. The
 baselines are this run's values; every guard holds over `NM_NUDGES=2`, where every
-row's nudged range is within a frame, 0.1° or 2 cm except Stagger Walk's feet (0.15 to
-0.51 m along x by frame 96) and the top of its neck (-0.08 to -0.02 m by 108), and
-Back-Flip-To-Combo's combo (0.47 to 0.88 m).
+row's nudged range is within a frame, 0.1° or 2 cm except Stagger Walk's feet (-0.67 to
+-0.50 m along z and 0.06 to 0.11 m along x by frame 96) and the top of its neck (-0.13
+to -0.02 m by 108), Tackle's lying x (0.79 to 0.82 m), Trapeze's landing and standing
+(frames 362 to 433, 0.26 to 4.10 m high at 400, 0.19 to 0.34 m at 600: it stays on
+the platform or falls off it) and Back-Flip-To-Combo's combo (0.62 to 0.70 m).
 
 The known gaps, with their errors on that run:
 
 - **Car Hit**: the car carries the pedestrian along the road and sideways (centre of
-  mass x +0.20 m at frame 68, z -0.21 m; endorphin -0.07, -0.06), because its left
+  mass x +0.19 m at frame 68, z -0.20 m; endorphin -0.07, -0.06), because its left
   foot sticks to the windscreen's face where endorphin's slides up it (lesson 44); it
-  flies 4 cm higher (1.83 m at 70, endorphin 1.79 m at 68; 1.73 m before lesson 42)
+  flies 5 cm higher (1.84 m at 70, endorphin 1.79 m at 68; 1.73 m before lesson 42)
   and folds 20° less at the hips.
 - **Back-Flip-To-Combo**: since lesson 46 it holds its poses as endorphin's does
   until the take-off (its lean, arms, crouch height, hip and spine bends all within)
-  and springs up off the box, but to 3.61 m at frame 233 where endorphin's reaches
-  3.745 m at 242: its take-off starts earlier and pushes less, with the hips 15° and
-  the arms 10° short of endorphin's reach. It falls past the box top at 289 (296) and
-  reaches the floor at 326 (330). Its knees bend 6.5° less in the crouch, which
-  leaves the crouch's centre of mass 0.21 m behind the heels (0.164 m, a guard near
-  its edge), and its combo jump reaches 0.93 m where endorphin's reaches 1.67 m. With
-  the flip's drive read as lesson 47 found it, the trunk turns -262 / -524 / -645°
+  and springs up off the box; since lesson 48 its feet stay on the box top and the
+  crouch keeps its centre of mass 0.17 m behind the heels (endorphin 0.164 m; 0.21
+  before). It jumps to 3.69 m at frame 236 where endorphin's reaches 3.745 m at 242
+  (3.61 m at 233 before): its take-off pushes in a spike where endorphin's pushes a
+  steady 2.9 kN, with the hips 15° and the arms 10° short of endorphin's reach, and
+  its ankles push where endorphin's are limp (lesson 49). It falls past the box top at
+  292 (296) and reaches the floor at 328 (330). Its knees bend 6.5° less in the
+  crouch, and its combo jump reaches 0.70 m where endorphin's reaches 1.67 m (0.93 m
+  before lesson 48, inside the nudged spread of 0.47 to 0.88 m that row had). With
+  the flip's drive read as lesson 47 found it, the trunk turns -263 / -527 / -655°
   by frames 260 / 297 / 330 since 190 (endorphin -247 / -523 / -689; -270 / -655 /
   -863 after lesson 46, -216 / -466 / -593 before it): on time to frame 297, then
-  44° short by 330.
+  34° short by 330, where endorphin's flip gains angular momentum with nothing
+  touching it (lesson 49).
 - **Tackle**: the tackled runner goes down later and slower (centre of mass 0.83 m at
-  frame 55, endorphin 0.70; head 0.70 m over it at 60, 0.46) and ends up 0.28 m
-  further along z (0.53 m before lesson 42). The tackler runs endorphin's Tackle
+  frame 55, endorphin 0.70; head 0.70 m over it at 60, 0.46) and ends up 0.40 m
+  further along z (0.28 m before lesson 48's contacts, 0.53 m before lesson 42). The tackler runs endorphin's Tackle
   behaviour, which NeuroMotion doesn't have.
 - **Look and Reach**: character01's arms reach the box at frame 17 (endorphin 14);
   character02's far arm points at the box by frame 29, where endorphin's waits and
   gets there at about 55 (recording).
 - **Explosion**: the arms are highest at frame 16 (endorphin 28) and lowest at 42 (47).
-- **Stagger Walk**: the feet go 0.59 m back by frame 36 (endorphin 0.26 m) and by 96
-  only 0.56 m back and 0.38 m along +x (endorphin 1.03 m back, 0.58 m along -x).
+- **Stagger Walk**: the feet go 0.41 m back by frame 36 (endorphin 0.26 m; 0.59 m
+  before lesson 48) and by 96 only 0.65 m back and 0.07 m along +x (endorphin 1.03 m
+  back, 0.58 m along -x).
   endorphin's steps one foot at a time, five steps from frame 12; NeuroMotion's
   shuffles both feet from the first frame (lesson 44).
 - **Trapeze**: endorphin's acrobat jumps off the platform (JumpDive, which NeuroMotion
   doesn't have), swings on the bar and lands at 341; NeuroMotion's stays on the
-  platform, then falls off it at 369.
+  platform, then falls off it at 362.
 - **Balcony**: endorphin's character01 goes over the railing and is on the ground at
   frame 96; NeuroMotion's falls on the balcony (its Arms Windmill isn't a behaviour
   NeuroMotion has). The export's first frames don't line up with NeuroMotion's

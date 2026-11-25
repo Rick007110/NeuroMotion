@@ -2451,6 +2451,82 @@ Measured joint by joint against Back-Flip-To-Combo's export, the trunk gave one 
     stand-in left standing on its box, toes locked; its deepest foot corner over frames
     30-200 is 4.7 mm into the box at 60 Hz, 1.2 mm at 120 Hz.
 
+49. **At the take-off endorphin's unnamed ankles are limp, its knees hold a quarter of
+    their preset and push no more than about 400 N·m whatever the strength, and its
+    flip gains angular momentum with nothing touching; none of it is in yet.** (Number
+    to be assigned at integration.) Measured on Back-Flip-To-Combo's export by inverse
+    dynamics: for each joint, everything above it (bodies placed on the exported joints
+    with NeuroMotion's rig, masses and inertia), the rate of change of its angular
+    momentum about a fixed point at the joint less gravity's moment, about world X,
+    half of it per side. Checked on NeuroMotion's own dump the same way, it gives back
+    the knee's 4500 N·m/rad and 450 N·m·s/rad to within 9% (4108-4173 and 416-424
+    fitted over frames 140-188, 1-2 N·m rms). On the lesson 48 build:
+
+    | Frame | 190 | 192 | 194 | 196 | 198 | 200 | 202 | 204 | 206 |
+    |---|---|---|---|---|---|---|---|---|---|
+    | endorphin: net upward force from the box and the locks (N) | 630 | 2836 | 2883 | 2878 | 3040 | 2325 | 1562 | 4248 | 1282 |
+    | knee (N·m) | 132 | 344 | 352 | 357 | 371 | 236 | 220 | 404 | 4 |
+    | ankle | 0 | 2 | 9 | 11 | 32 | 22 | -106 | -133 | -130 |
+    | NeuroMotion: net upward force | 3559 | 5303 | 4467 | 1659 | 228 | -322 | 4330 | 2181 | 25 |
+    | knee | 505 | 783 | 449 | -9 | -182 | -151 | 430 | -26 | -268 |
+    | ankle | -89 | -183 | -115 | -73 | -55 | -31 | -223 | -213 | -108 |
+
+    endorphin pushes off the box with a steady 2.9 kN (3.3 body weights) for eight
+    frames and leaves at 2.6 m/s; NeuroMotion slams 5.3 kN in, hops off at 1.8 m/s by
+    frame 198 (the toe locks pulling the feet back: the negative ground force) and
+    pushes again at 202.
+
+    - **(b) A joint no event names is limp, not held by its limb's pose.** endorphin's
+      ankles push under 10 N·m (17 at most) from frame 102, when the first pose stops
+      naming them, to 199, when the feet's own event starts: through the crouch, where
+      its centre of mass goes from 0.03 to 0.16 m behind the ankles, the rate of change
+      of the angular momentum of everything above the ankles about them is gravity's
+      moment to within a few N·m (-139 against -139 N·m at 190): the crouch is a free
+      fall about the ankles. That is the Default preset's 10 N·m force limit, the
+      muscles a joint keeps when no pose drives it, as NeuroMotion read events before
+      lesson 27. NeuroMotion's ankles, following the legs' event (lesson 27), push 20-70
+      N·m in the crouch and 30-180 N·m plantarflexing from 190, with the event's stored
+      ankle 44° from the crouch's. Going limp from frame 190 on (a diagnostic, not a
+      rule) brings the jump to endorphin's: highest 3.75 m at 238, lowest body 3.60 m,
+      past the box top at 296 and on the floor at 332 (Back-Flip-To-Combo 13 of 21
+      rows, error sum 25.1). Limp throughout, as endorphin's are, the crouch falls back
+      (0.24 m behind the heels at 192, the guard's bound is 0.21) and the jump drops to
+      3.55 m: the follow rule is still a crutch for the crouch. With contacts at 240 Hz
+      (lesson 48, the cap lifted) limp ankles keep the crouch (-0.19 m) and jump to
+      3.69 m, so stiffer contacts are what would let the rule go; not done.
+    - **The knees hold a quarter of their preset.** Fitted as torque = k θ + c θ' over
+      frames 150-188 (the strength-0.45 crouch, target 105.3°), endorphin's knee gives k
+      1105 N·m/rad and c 112, 1 N·m rms: 4500 / 4 and 450 / 4. Frames 206-214 under
+      the strength-2.5 event fit a quarter too (-164 and -103 N·m measured at 210 and
+      212 against -163 and -94). The elbow over frames 60-100 fits 883 (preset × 0.55 =
+      3025, NeuroMotion's own fit 2896). So the twist axis isn't at the whole preset as
+      lesson 46 had it from the elbows' angles, which barely load the muscle. Adopted
+      (twist at 1/4), the knees bend 111.9° at 170 as endorphin's (111.8°) but the
+      crouch falls back (0.24 m behind the heels, the guard fails) and the jump drops to
+      3.52 m (Back-Flip-To-Combo 42.3 against 28.1). Not kept until the crouch's other
+      gap (the ankles above, the contacts) is closed.
+    - **(a) The knees' force limit doesn't scale with strength as NeuroMotion's does.**
+      Under the strength-0.8 event their torque sits at 343-371 N·m from 192 to 198,
+      where the fitted quarter-preset spring would give 660-1400; under the strength-2.5
+      event at most 425 (203); landing on the floor under the strength-0.63 event,
+      300-355 from 336 to 366. Read as limit = preset (1000 N·m) × strength, the three
+      would be 800, 2500 and 630; a fixed 400 fits all three. A twist force limit of 0.4
+      × the preset, not scaled by strength: 140.6 → 141.5 (jump 3.67 m); with the
+      quarter twist, 154.5. Not kept: the knee spike is not what limits the jump while
+      the ankles push and the contacts sink.
+    - **(c) After frame 290 endorphin's flip gains angular momentum with nothing
+      touching it.** About the centre of mass, along X: endorphin -63.7 kg·m²/s at 290,
+      -66.3 at 295, -67.4 at 300, -71.7 at 330 (-44 N·m over 292-300, where lesson 47's
+      fading drive gives +80, and -17 N·m from 300 to 330, after the drive has ended);
+      NeuroMotion's stays at -59 from 297 until it lands. No body is within 0.9 m of
+      the box's edge then, so it isn't the box. The pelvis lock (0-305) holds only y
+      and z. That missing 8 kg·m²/s is the 34° the trunk is short by frame 330 (-655°,
+      endorphin -689°); its source isn't known.
+
+    Nothing in the engine changed with this lesson; the numbers above are temporary
+    environment switches scored with `reference_scores` (`NM_NUDGES=0`; lesson 48 build:
+    29 of 71 within, 140.6).
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over
