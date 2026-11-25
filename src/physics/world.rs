@@ -78,11 +78,17 @@ const WARM_START: f32 = 0.8;
 /// heavier is solved directly (see `World::crushed_groups`).
 const CRUSH_RATIO: f32 = 5.0;
 const CRUSH_SEPARATION: f32 = 0.01;
+/// A jointed group touched (closer than `CRUSH_SEPARATION`) by a keyed body moving faster
+/// than this, m/s, is solved directly and late, with its ground contacts (lesson 29).
+const RAM_SPEED: f32 = 2.0;
 /// A jointed group with a joint open wider than this, m, is solved directly that substep
 /// (lesson 17). Joints normally sit within a few millimetres. Not lower: at 1 cm it also
 /// caught Heli Leap's jumper landing at 12.5 m/s, whose ankles the ground's contacts open
 /// within a substep, and there solving the joints directly opened them a little more.
 const STRETCH_LIMIT: f32 = 0.015;
+/// A group solved directly stays so while a joint of it is still open wider than this,
+/// m (lesson 29).
+const STRETCH_RELEASE: f32 = 0.005;
 const STATIC: usize = usize::MAX;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -174,6 +180,8 @@ pub struct Joint {
     pub muscle: Option<Muscle>,
     pub enabled: bool,
     warm_point: Vec3,
+    /// Whether a group's direct solve held this joint's anchor last substep.
+    was_grouped: bool,
     warm_muscle: [f32; 3],
 }
 
@@ -209,6 +217,7 @@ impl Joint {
             muscle: None,
             enabled: true,
             warm_point: Vec3::ZERO,
+            was_grouped: false,
             warm_muscle: [0.0; 3],
         }
     }
@@ -628,6 +637,13 @@ impl World {
         }
         for body in self.bodies.iter_mut().filter(|b| b.is_dynamic()) {
             body.linear_velocity += self.gravity * h;
+            // Capped before the solve, not after it: capping a body's spin after the
+            // solve leaves its joint anchors moving apart, at the cut speed times
+            // their lever, for the whole substep (lesson 29).
+            let speed = body.angular_velocity.length();
+            if speed > MAX_ANGULAR_SPEED {
+                body.angular_velocity *= MAX_ANGULAR_SPEED / speed;
+            }
         }
         self.apply_lock_drives(h);
         let mut sb: Vec<SolverBody> = self
@@ -739,12 +755,6 @@ impl World {
         // Integrate positions with the biased velocities.
         self.write_velocities(&sb);
         for body in self.bodies.iter_mut() {
-            if body.is_dynamic() {
-                let speed = body.angular_velocity.length();
-                if speed > MAX_ANGULAR_SPEED {
-                    body.angular_velocity *= MAX_ANGULAR_SPEED / speed;
-                }
-            }
             body.position += body.linear_velocity * h;
             let w = body.angular_velocity;
             let dq = Quat::from_xyzw(w.x, w.y, w.z, 0.0) * body.rotation;
@@ -785,10 +795,32 @@ impl World {
         for c in &contacts {
             self.contact_cache.insert(c.key, c.impulse);
         }
-        for j in &joints {
-            let joint = &mut self.joints[j.joint];
-            joint.warm_point = j.point_impulse;
-            joint.warm_muscle = j
+        // Joints of groups solved directly for an open joint, a crushing or a ramming
+        // body; not those a lock ties, which are solved directly every substep anyway.
+        let mut grouped = vec![false; joints.len()];
+        let locked = |g: &&LockGroup| {
+            g.rows
+                .iter()
+                .any(|r| matches!(r.source, RowSource::Lock(..)))
+        };
+        for row in groups.iter().filter(|g| !locked(g)).flat_map(|g| &g.rows) {
+            if let RowSource::Anchor(j, _) = row.source {
+                grouped[j] = true;
+            }
+        }
+        for (j, rows) in joints.iter().enumerate() {
+            let joint = &mut self.joints[rows.joint];
+            // Not what a direct solve carried: an anchor holding a finger against the
+            // ground in the solve took 1.9 N·s a substep, and warm-starting the next
+            // substep's sequential impulses with it threw the 0.06 kg finger off at
+            // 360 rad/s, 7 cm out of its joint (lesson 29).
+            joint.warm_point = if grouped[j] {
+                Vec3::ZERO
+            } else {
+                rows.point_impulse
+            };
+            joint.was_grouped = grouped[j];
+            joint.warm_muscle = rows
                 .muscle
                 .as_ref()
                 .map_or([0.0; 3], |m| (m.frame.transpose() * m.impulse).to_array());
@@ -1247,7 +1279,14 @@ impl World {
         contact_bias_rate: f32,
         h: f32,
     ) -> Vec<LockGroup> {
-        let stretched = |j: &&JointRows| j.point_error.length() > STRETCH_LIMIT;
+        // Once solved directly, a joint stays so until it has nearly closed: let go at
+        // 1.5 cm, a shoulder jammed against chest and ground went in and out of the direct
+        // solve every few substeps, and with each change its impulses started over
+        // (lesson 29).
+        let stretched = |j: &&JointRows| {
+            let open = j.point_error.length();
+            open > STRETCH_LIMIT || (self.joints[j.joint].was_grouped && open > STRETCH_RELEASE)
+        };
         if locks.is_empty() && contacts.is_empty() && !joints.iter().any(|j| stretched(&j)) {
             return Vec::new();
         }
@@ -1287,6 +1326,11 @@ impl World {
         late_groups.retain(|g| !pinned.contains(g));
         // Groups something presses on that won't give way (lesson 15).
         locked.extend(self.crushed_groups(contacts, locks, &mut |i| group_of(i, i)));
+        // Groups a keyed body runs into: solved after the contacts, with their ground
+        // contacts in the solve (lesson 29).
+        let rammed = self.rammed_groups(contacts, &mut |i| group_of(i, i));
+        locked.extend(&rammed);
+        late_groups.extend(&rammed);
         // Groups with a joint come apart (lesson 17). A light limb whipping round
         // against its own body closes a loop of joints and contacts that four
         // iterations don't settle: the contacts, solved last, win, and the joint keeps
@@ -1356,7 +1400,7 @@ impl World {
         for (ci, c) in contacts.iter().enumerate() {
             // Carrying a load: it pushed last substep, and touches now.
             let carrying = c.impulse[0] > 0.0 && c.separation < CRUSH_SEPARATION;
-            if !carrying || (c.a == STATIC && c.b == STATIC) {
+            if c.separation >= CRUSH_SEPARATION || (c.a == STATIC && c.b == STATIC) {
                 continue;
             }
             let (ga, gb) = (group_of(c.a, c.a), group_of(c.b, c.b));
@@ -1366,7 +1410,11 @@ impl World {
                 (None, Some(b)) if fixed(c.a) => b,
                 _ => continue,
             };
-            if !late_groups.contains(&g) {
+            // A group a keyed body runs into takes its landings here too, not only the
+            // contacts that already carry a load: a light finger or toe hitting the
+            // ground at speed, left to the contact pass, takes the impulse that stops
+            // the whole limb on its own and spins off at hundreds of rad/s (lesson 29).
+            if !late_groups.contains(&g) || !(carrying || rammed.contains(&g)) {
                 continue;
             }
             let Some(g) = locked.binary_search(&g).ok() else {
@@ -1377,6 +1425,9 @@ impl World {
                 a: c.a,
                 b: c.b,
                 jacobian: [-n, -c.ra.cross(n), n, c.rb.cross(n)],
+                // Still apart (by under `CRUSH_SEPARATION`), it stops the bodies
+                // closing the gap, so they may hover that far above it while the group
+                // is solved this way.
                 bias: if c.separation < 0.0 {
                     (contact_bias_rate * c.separation).max(-MAX_PUSH_SPEED)
                 } else {
@@ -1463,6 +1514,39 @@ impl World {
             .filter(|(g, h)| held.contains(h) || mass[h] >= CRUSH_RATIO * mass[g])
             .map(|(g, _)| g)
             .collect()
+    }
+
+    /// Groups of jointed bodies a keyed body moving faster than `RAM_SPEED` touches: a
+    /// car driven by its keys into a character, or over one. Nothing it does can slow the
+    /// keyed body, so a limb caught between it and the ground, or its own body, takes
+    /// whatever the contacts demand. Solved directly after the contacts, with the
+    /// group's ground contacts as rows of the solve, the joints and the ground have the
+    /// last word, and the keyed body's own contacts give way instead (lesson 29).
+    fn rammed_groups(
+        &self,
+        contacts: &[ContactRow],
+        group_of: &mut dyn FnMut(usize) -> Option<usize>,
+    ) -> Vec<usize> {
+        let mut rammed = Vec::new();
+        for c in contacts.iter().filter(|c| c.separation < CRUSH_SEPARATION) {
+            for (mine, other) in [(c.a, c.b), (c.b, c.a)] {
+                if mine == STATIC || other == STATIC {
+                    continue;
+                }
+                let keyed = matches!(self.bodies[other].motion, Motion::Kinematic { .. });
+                if keyed
+                    && self.bodies[other].linear_velocity.length() > RAM_SPEED
+                    && self
+                        .joints
+                        .iter()
+                        .any(|j| j.enabled && (j.parent == mine || j.child == mine))
+                    && let Some(g) = group_of(mine)
+                {
+                    rammed.push(g);
+                }
+            }
+        }
+        rammed
     }
 
     /// Body pairs held together by locks, which don't collide with each other: each

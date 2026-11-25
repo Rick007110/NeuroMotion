@@ -1982,6 +1982,11 @@ pub fn cut_rope() -> Project {
 /// Car Hit: a car (collision with momentum) drives through a standing character at
 /// 15 m/s, bumper first.
 pub fn car_hit() -> Project {
+    car_hit_nudged(0.0)
+}
+
+/// Car Hit with the car's speed changed by the relative amount `nudge` (`nudges`).
+pub fn car_hit_nudged(nudge: f32) -> Project {
     let mut p = new_scene("Car Hit", 2.0);
     let body = Piece::at(
         Geometry::Box {
@@ -2031,7 +2036,11 @@ pub fn car_hit() -> Project {
         0,
         120,
         true,
-        vec![channel("body", Property::PosZ, &[(0, -6.0), (120, 24.0)])],
+        vec![channel(
+            "body",
+            Property::PosZ,
+            &[(0, -6.0), (120, -6.0 + 30.0 * (1.0 + nudge))],
+        )],
     );
     level(&mut p, car, 0, "CollisionOnlyWithInertia");
     person(&mut p, "pedestrian", Vec3::ZERO, 90.0, &[]);
@@ -2492,8 +2501,14 @@ pub fn curl_hand_back() -> Project {
 /// clavicles and forearm twists) drops from 4 m. With `behaviour`, Explosion runs
 /// throughout with the scene's settings (WritheInMidAir 2.5's).
 pub fn mid_air(like_endorphins: bool, behaviour: bool) -> Project {
+    mid_air_nudged(like_endorphins, behaviour, 0.0)
+}
+
+/// [`mid_air`] with the starting height changed by the relative amount `nudge`
+/// (`nudges`).
+pub fn mid_air_nudged(like_endorphins: bool, behaviour: bool, nudge: f32) -> Project {
     let mut p = new_scene("Writhe in mid-air", 3.5);
-    let at = Vec3::new(0.0, 4.0, 0.0);
+    let at = Vec3::new(0.0, 4.0 * (1.0 + nudge), 0.0);
     let id = if like_endorphins {
         add_person(
             &mut p,
@@ -3536,6 +3551,9 @@ mod tests {
 
     /// endorphin's Car Hit stretched a joint by 6 cm. The stand-in's character takes the
     /// hit within limits, so this guards against regressions rather than reproducing it.
+    /// The keyed car drives on and runs the pedestrian over: over 41 runs with its speed
+    /// nudged by up to ±2e-3 (`NM_SURVEY=car_hit nudge_survey`) the worst joint opens
+    /// 0.55 to 2.3 cm (1.95 to 12.7 cm, 5 runs over 5 cm, before lesson 29).
     #[test]
     fn car_hit_keeps_joints_together() {
         check(car_hit());
@@ -3984,7 +4002,7 @@ mod behaviour_tests {
     /// How far the numbers the stepping tests and `car_carry_keeps_joints_together`
     /// assert on move when the scenes are nudged (`nudges`): run it after changing
     /// the physics or a behaviour, and keep each test's bound clear of the worst.
-    /// `NM_SURVEY=car|balance|stagger` runs one part (all when unset); `NM_NUDGES` and
+    /// `NM_SURVEY=car|car_hit|explosion|balance|stagger` runs one part (all when unset); `NM_NUDGES` and
     /// `NM_NUDGE_STEP` set the nudges. `cargo test --release nudge_survey -- --ignored
     /// --nocapture`
     #[test]
@@ -4033,6 +4051,79 @@ mod behaviour_tests {
                 range(&mut after),
                 range(&mut after_body),
                 range(&mut whole),
+            );
+        }
+        if wanted("car_hit") {
+            let mut stretch = Vec::new();
+            for &nudge in &nudges {
+                let project = car_hit_nudged(nudge);
+                let (sim, elapsed) = simulate(&project);
+                let r = measure(&project, &sim, elapsed);
+                println!(
+                    "car hit {nudge:+.1e}: stretch {:.2} cm at {}, fastest {:.1} m/s at {}, lowest {:.3} m at {}",
+                    r.stretch * 100.0,
+                    r.places[1],
+                    r.fastest,
+                    r.places[2],
+                    r.lowest,
+                    r.places[0]
+                );
+                stretch.push(r.stretch * 100.0);
+            }
+            println!(
+                "car hit, max joint stretch (cm): {} (test wants < 5)",
+                range(&mut stretch)
+            );
+        }
+        if wanted("explosion") {
+            let [
+                mut high,
+                mut low,
+                mut turned,
+                mut landed,
+                mut tilt,
+                mut settled,
+                mut stretch,
+            ] = [(); 7].map(|_| Vec::new());
+            for &nudge in &nudges {
+                let project = mid_air_nudged(true, true, nudge);
+                let (sim, elapsed) = simulate(&project);
+                let r = measure(&project, &sim, elapsed);
+                let f = flight(&project, &sim);
+                let e = explosion_numbers(&f);
+                println!(
+                    "explosion {nudge:+.1e}: arms up to {:.0}° at {}, down to {:.0}° at {}; turned {:.0}°; lands at {} on {}; tilt {:.0}° at 200; settled {:.3} m/s; stretch {:.2} cm at {}",
+                    e.high,
+                    e.at_high,
+                    e.low,
+                    e.at_low,
+                    e.turned,
+                    e.landed,
+                    f.lowest[e.landed].1,
+                    f.tilt[200],
+                    e.settled,
+                    r.stretch * 100.0,
+                    r.places[1]
+                );
+                high.push(e.high);
+                low.push(e.low);
+                turned.push(e.turned);
+                landed.push(e.landed as f32);
+                tilt.push(f.tilt[200]);
+                settled.push(e.settled);
+                stretch.push(r.stretch * 100.0);
+            }
+            // Settling is asserted on in hundredths.
+            settled.iter_mut().for_each(|s| *s *= 100.0);
+            println!(
+                "explosion: arms up {} °, down {} °, turned {} °, lands at frame {}, trunk tilted {} ° at 200, bodies moving {} cm/s at the end (test wants < 10), max joint stretch {} cm (sweep wants < 5)",
+                range(&mut high),
+                range(&mut low),
+                range(&mut turned),
+                range(&mut landed),
+                range(&mut tilt),
+                range(&mut settled),
+                range(&mut stretch),
             );
         }
         if wanted("balance") {
@@ -4568,11 +4659,45 @@ mod behaviour_tests {
             .unwrap()
     }
 
+    /// What `explosion_flails_in_mid_air_like_endorphins` asserts on: the arms'
+    /// highest mean elevation before frame 30 and its frame, the lowest after it until
+    /// landing and its frame, deg; the pelvis' largest turn in the air, deg; the
+    /// landing frame; the bodies' mean speed over the last 20 frames, m/s.
+    struct ExplosionNumbers {
+        high: f32,
+        at_high: usize,
+        low: f32,
+        at_low: usize,
+        turned: f32,
+        landed: usize,
+        settled: f32,
+    }
+
+    fn explosion_numbers(f: &Flight) -> ExplosionNumbers {
+        let landed = f.lowest.iter().position(|l| l.0 < 0.1).unwrap();
+        let (high, at_high) = arm_extreme(f, 0..=30, 1.0);
+        let (low, at_low) = arm_extreme(f, 30..=landed, -1.0);
+        let turned = f.turned[..landed].iter().fold(0.0f32, |a, &b| a.max(b));
+        let settled = f.speed[190..].iter().sum::<f32>() / f.speed[190..].len() as f32;
+        ExplosionNumbers {
+            high,
+            at_high,
+            low,
+            at_low,
+            turned,
+            landed,
+            settled,
+        }
+    }
+
     /// Explosion, measured against endorphin's "Writhe in mid-air 2.5" (both
     /// characters start in a T-pose 4 m up, Amplitude and Speed 0.6, Strength 0.5):
     /// its arms go from out to the sides up to +35-38° between frames 20 and 30, down
     /// to -40 to -58° at 42-46 and are coming back up at 52; the body falls upright,
     /// lands feet first at about frame 56, goes down on its back and lies still.
+    /// Over 41 runs with the drop's height nudged by up to ±2e-3 (`NM_SURVEY=explosion
+    /// nudge_survey`) the bodies move 0.3 to 6.5 cm/s over the last 20 frames, and no
+    /// joint opens more than 1.3 cm (up to 18.6 cm/s and 15 cm before lesson 29).
     #[test]
     fn explosion_flails_in_mid_air_like_endorphins() {
         let project = mid_air(true, true);
@@ -4581,11 +4706,15 @@ mod behaviour_tests {
         println!("explosion run: {report}");
         assert!(report.ok(), "{report}");
         let f = flight(&project, &sim);
-        let landed = f.lowest.iter().position(|l| l.0 < 0.1).unwrap();
-        let (high, at_high) = arm_extreme(&f, 0..=30, 1.0);
-        let (low, at_low) = arm_extreme(&f, 30..=landed, -1.0);
-        let turned = f.turned[..landed].iter().fold(0.0f32, |a, &b| a.max(b));
-        let settled = f.speed[190..].iter().sum::<f32>() / f.speed[190..].len() as f32;
+        let ExplosionNumbers {
+            high,
+            at_high,
+            low,
+            at_low,
+            turned,
+            landed,
+            settled,
+        } = explosion_numbers(&f);
         println!(
             "explosion: arms up to {high:.0}° at frame {at_high}, down to {low:.0}° at \
              {at_low}; pelvis turned {turned:.0}° in the air; lands at frame {landed} on \

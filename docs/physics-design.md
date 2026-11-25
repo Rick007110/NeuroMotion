@@ -25,12 +25,14 @@ target is the same model, the same parameters, and the same behaviour.
 
 Each tick (1/rate s) runs 4 substeps. Each substep:
 
-1. Apply gravity to dynamic bodies.
+1. Apply gravity to dynamic bodies, and cap their spin at 100 rad/s (before the
+   solve, so the solve leaves the joints consistent, lesson 29).
 2. Detect contacts at the current pose, with a 2 cm speculative margin so fast bodies
    don't tunnel. Bodies held together by a lock don't collide with each other.
 3. Warm-start joint, muscle, lock and contact impulses from the previous substep
    (joint anchors from four fifths of it; nothing for bodies that just switched
-   between keyed and simulated).
+   between keyed and simulated, nor for anchors the direct solve of an open joint,
+   a crushing or a ramming body held, lesson 29).
 4. Iterate:
    - joint anchor points (3-row block);
    - twist and swing limits (one-sided rows; springs in the soft zone);
@@ -39,12 +41,14 @@ Each tick (1/rate s) runs 4 substeps. Each substep:
      faster than that strength could stop it, lesson 20);
    - bodies that locks tie together, with the joints between them, solved directly as
      one system (lesson 12), and the same for characters something much heavier
-     presses on (lesson 15) or with a joint open more than 1.5 cm (lesson 17);
+     presses on (lesson 15) or with a joint open more than 1.5 cm, until it closes to
+     0.5 cm (lessons 17 and 29);
    - contact normals, as *soft* constraints (frequency and damping ratio), and
      friction;
    - groups with a lock that nothing pins (not held to the world or a keyed body),
      solved directly again, now with the ground and scenery contacts that carry their
-     load as one-sided rows (lesson 25).
+     load as one-sided rows (lesson 25); and characters a keyed body moving faster
+     than 2 m/s runs into, with every ground contact within 1 cm (lesson 29).
 5. Integrate positions.
 6. Relax: one pass without position bias, so error correction doesn't add energy.
    Lock axes still at their strength after step 4 are left as they are (lesson 20).
@@ -283,8 +287,8 @@ Car Hit, the last sample scene failing the sweep, added one more.
     gives the same numbers. Car carry takes about 110 ms instead of 75 for its 2 s
     (the character is direct-solved for most of the scene); scenes without such a
     contact don't pay for it.
-    Keyed bodies don't trigger it. Counting a keyed body moving faster than 2 m/s
-    as heavy helped the old Car Hit stand-in, whose car is keyed (3.0 to 1.5 cm), but
+    Keyed bodies didn't trigger it (they do since lesson 29, solved later). Counting a
+    keyed body moving faster than 2 m/s as heavy helped the old Car Hit stand-in, whose car is keyed (3.0 to 1.5 cm), but
     nudged Balcony and Tackle (0.50 to 0.55 cm, 0.59 to 0.65 cm). Counting slow ones
     too (moving floors) helped Turntable (0.9 to 0.2 cm) but made it and Rotating
     Floor two to three times slower. Solving every character directly all the time
@@ -1048,6 +1052,70 @@ The first behaviour that reads its event's settings, Explosion, taught one more.
     0.05, z -0.27 m (endorphin about 96, -0.3 to -0.44 m). It flies 0.2 m lower than
     endorphin's and lands about 7 frames early; not yet looked into.
 
+29. **What a direct solve carried mustn't warm-start sequential impulses, and a
+    character a keyed body runs into is solved after the contacts.** On CI (Linux) PR
+    #33 failed two stand-ins that passed here: Car Hit stretched a wrist 5.8 cm (1 cm
+    here), and the mid-air Explosion was still moving at 0.19 m/s at the end (0.06
+    here). Both are Linux, but the maths library rounds `sin` and the like by what the
+    CPU offers (lesson 30), and both scenes were chaotic enough to turn a last-bit
+    difference into a different outcome.
+    `nudge_survey` (now with `car_hit` and `explosion` parts: the car's speed, the
+    drop's height, by up to ±2e-3 in 41 runs) showed how much: Car Hit's worst joint
+    1.95 to 12.7 cm, failing the sweep's 5 cm in 5 runs; the Explosion 0.76 to 15.2 cm
+    (4 runs over 5 cm) and 0.1 to 18.6 cm/s at the end (1 over the test's 10).
+    Tracing the solver substep by substep found four causes, all of them light bodies
+    (a 0.06 kg finger, a 1.2 kg neck) whose joints came apart within a substep or two:
+    - **Warm starts from a direct solve.** A finger lying on the ground with the hand
+      pressing on it is solved directly once its joint opens 1.5 cm (lesson 17); the
+      solve holds it with 1.9 N·s a substep against the ground's contact. When the
+      joint closed below 1.5 cm, the next substep's sequential impulses were
+      warm-started with that impulse, without the contact that balanced it: the
+      finger was thrown off at 360 rad/s and 7 cm out of its joint. Anchors a direct
+      solve held (for an open joint, a crushing or a ramming body; not lock groups,
+      which are solved directly every substep anyway) now start the next substep from
+      nothing.
+    - **In and out of the direct solve.** Without that warm start, a shoulder jammed
+      between chest, neck and ground, hovering around 1.5 cm, went in and out of the
+      direct solve every few substeps, starting over each time: the Explosion's
+      character rocked on its back at up to 26 cm/s instead of lying still. A group
+      solved directly now stays so until all its joints are back within 0.5 cm.
+    - **The spin cap broke the joints.** Bodies spin at most 100 rad/s; the cap was
+      applied after the solve, to each body on its own, so a forearm and hand rolling
+      along the ground at 240 rad/s together had their anchors moving apart at the cut
+      speed times the lever, 2 cm a substep. It is now applied before the solve.
+    - **A keyed car running a character over.** Car Hit's car is keyed (collision with
+      momentum) and drives on at 15 m/s, catching the pedestrian a second time as they
+      slide along the road and pushing them under its bumper. Nothing can slow a keyed
+      body, so a thigh between bumper and road took 390 N·s a substep from each, and
+      Coulomb friction grips in proportion (lesson 26; with the old 100 N cap per
+      contact the same 41 runs gave 1.4 to 2.7 cm). Lesson 15 doesn't count keyed bodies; counting them as
+      heavy (solved directly before the contacts) made it worse (1.9 to 10.5 cm).
+      Characters a keyed body moving faster than 2 m/s touches are now solved
+      directly after the contacts, like lesson 25's held props, with their ground
+      contacts within 1 cm as rows of the solve: the joints and the ground have the
+      last word and the bumper gives way. A landing finger then takes its share of
+      the limb's impulse through the solve, not all of it alone. (A row still 0-1 cm
+      apart stops the bodies closing the gap, so they can hover that much while it
+      lasts.)
+    Each alone wasn't enough: without the warm-start rule Car Hit still reached
+    3.9 cm and the Explosion 5.0 cm; without the keyed rule Car Hit 7.6 cm; without
+    the spin cap moved, Car Hit 4.1 cm and the Explosion 4.6 cm; without the hysteresis, the Explosion moved at
+    up to 26 cm/s at the end. Things that didn't help: solving open-joint groups after
+    the contacts too (ankles opened 3.6 cm landing), treating any hard landing like a
+    ramming body (5.6 to 6.5 cm), keeping the warm start of the sequential part only (4.5 cm),
+    and leaving a lying Explosion character damped but slack (it slid about at up to
+    2 m/s).
+    Over the same 41 runs: Car Hit 0.55 to 2.32 cm; the Explosion 0.55 to 1.27 cm and
+    0.3 to 6.5 cm/s at the end, every run passing. The other surveys: Car carry up to
+    the stop 0.30 to 0.88 cm for the body (0.33 to 0.42 before), after the stop 0.07 to
+    0.80 (0.10 to 0.45), whole scene 1.10 to 1.25 (0.80 to 1.02); Balance unchanged;
+    Stagger's fewest steps after one push 5 to 8 (4 to 8), feet 2.0 to 3.9 times as far
+    as Balance's (2.2 to 4.5). The endorphin sweep stays 16 of 16 clean; Arrows'
+    worst joint went from 1.27 to 0.40 cm and Multi Martial's from 1.90 to 0.54, the
+    others moved by under 0.4 cm. The release tests take 11.5 s instead of 10.6 (one
+    thread), the sweep the same 12.3 s; Car carry, solved directly for longer, about
+    1.4 times as long.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over
@@ -1071,7 +1139,7 @@ set-up (ground, rigs, events, constraint targets and settings).
 Each failure also gets a stand-in built in code (`src/physics/scenes.rs`) with the
 same pattern, so it can be worked on without endorphin's files.
 
-Last run, over each scene's whole range, with lessons 1-27 and
+Last run, over each scene's whole range, with lessons 1-29 and
 imported behaviours actually running (until the behaviour names were matched,
 `docs/behaviours.md`, none of them ran in these scenes); 16 scenes, Bridge Escape is
 skipped for size:
@@ -1081,11 +1149,11 @@ skipped for size:
 | Clean | All 16: Arrows, Balcony, Bendy Stick, Car Crash, Car Hit, Catch Rope, Catch Run, Gymnast Rings, Heli Leap, Multi Martial, Rotating Floor, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
 | Failing | None |
 
-Max joint stretch per scene over its whole range: Arrows 0.47 cm, Balcony 1.65,
-Bendy Stick 0.61, Car Crash 1.26, Car Hit 2.94, Catch Rope 0.80, Catch Run 1.41,
-Gymnast Rings 0.20, Heli Leap 0.29, Multi Martial 1.74, Rotating Floor 0.56, Stagger
-Walk 0.46, Sword Play 0.46, Tackle 0.66, Trapeze 1.09, Walk With Gun 0.18 (the whole
-sweep takes about 20 s). The largest lock drifts are Car Hit's 38 cm (the car falling
+Max joint stretch per scene over its whole range: Arrows 0.40 cm, Balcony 0.75,
+Bendy Stick 0.61, Car Crash 0.34, Car Hit 0.80, Catch Rope 0.47, Catch Run 1.41,
+Gymnast Rings 0.39, Heli Leap 0.29, Multi Martial 0.54, Rotating Floor 0.87, Stagger
+Walk 0.30, Sword Play 0.63, Tackle 0.51, Trapeze 0.69, Walk With Gun 0.06 (the whole
+sweep takes about 12 s on four cores). The largest lock drifts are Car Hit's 38 cm (the car falling
 behind its carrier at frame 5, lesson 20) and Car Crash's 29 cm; Walk With Gun's hands'
 join drifts 0.7 cm (14.6 before lesson 25) and its lowest body is 1.4 cm
 above the ground (2.5 cm in it before). `NM_SCENES=Rope,Gun` limits the sweep to scenes
@@ -1137,7 +1205,8 @@ What each stand-in reproduces:
 | Legacy pose | A pose stored as muscle targets (endorphin's `dp.nma` format; a hand-written one) imported and held as an active pose from frame 10 by the placeholder, hung by the hips ([endorphin-formats.md](endorphin-formats.md#muscle-target-poses)) | didn't import | knees 57°, elbows 45°, hips 28° at frame 150 (targets 57°, 46°, 29°) |
 | Head on neck | A head shape that may collide with its parent, inside the neck at rest (lesson 19) | turned 44° against the neck in 1 s | 2.6° |
 | Curl hand-back | Car Hit's hand-back: a character with clavicles curls up on the ground (BodyFoetal), then a 0.75 s transition, overlapping the curl's end, blends it back onto its standing animation (lesson 18) | 16.6 cm (knee) mid-transition | 0.09 cm |
-| Mid-air | endorphin's "Writhe in mid-air": a character with clavicles and forearm twists, resting in a T-pose, dropped from 4 m running Explosion with the 2.5 scene's settings (lesson 28) | falls with its arms out, lands limp | arms +44° at frame 24 and -56° at 50 (endorphin +35-38° at 20-30, -40 to -58° at 42-46), upright in the air, feet first at 54, still on its back |
+| Car hit | A keyed car (collision with momentum) drives through a standing placeholder at 15 m/s, throws them along the road, catches them again and pushes them under its bumper; Coulomb friction (lesson 29) | 1.95 to 12.7 cm over 41 nudged runs (5 over the sweep's 5 cm) | 0.55 to 2.32 cm |
+| Mid-air | endorphin's "Writhe in mid-air": a character with clavicles and forearm twists, resting in a T-pose, dropped from 4 m running Explosion with the 2.5 scene's settings (lesson 28) | falls with its arms out, lands limp | arms +44° at frame 24 and -56° at 50 (endorphin +35-38° at 20-30, -40 to -58° at 42-46), upright in the air, feet first at 54, still on its back; over 41 runs with the height nudged, worst joint 0.55 to 1.27 cm and 0.3 to 6.5 cm/s at the end (0.76 to 15.2 cm and up to 18.6 cm/s before lesson 29) |
 | Tilting floor | Rotating Floor's end: no ground; a long collision-only slab with a wall at its low end tilts 20°, carrying a character 1.9 m below y = 0 | fails the sweep (lowest -1.9 m) | rides it (nothing under the slab) |
 | Roof edge | Heli Leap's jumper: no ground; a character runs off a roof whose top is at y = 0 and falls past the building's side | fails the sweep (lowest -10.6 m) | falls 10.6 m beside the building |
 | Cut rope | Catch Rope: a force on the environment's track names a rope's end; the environment's roof is massless; the rope's last link is cut at 1 s | roof drifts 1.98 m in 2 s, rope end not pushed; the cut link counts as 0.83 m stretch | roof still, end swings 0.14 m; cut link not counted |
@@ -1160,8 +1229,7 @@ hasn't been re-run against endorphin's scene since.
   flat things at six rim points, the lowest rim point and the point nearest them.
 - An exact solve for joint anchors where no lock holds the chain, nothing heavy
   presses on it and no joint has opened 1.5 cm yet (lessons 12, 15 and 17 cover
-  those). Keyed bodies pressing on a character don't count as heavy yet: lesson 15
-  says what that cost. Joints, limits and contacts are still solved one after
+  those, and lesson 29 a keyed body running into it). Joints, limits and contacts are still solved one after
   another, contacts last, so a joint can open up to the 1.5 cm before the direct
   solve steps in, and a hard landing opens ankles by 2-3 cm for a substep or two.
 - A sweep measure for joints that open sideways: it compares bone lengths, which
