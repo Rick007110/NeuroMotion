@@ -1195,7 +1195,13 @@ fn set_muscles(
             };
             for &(p, ramp) in poses.iter().filter(|(p, _)| p.named[by]) {
                 let pose = p.pose[jd.joint];
-                let held = gains_of(pose_set, &jd.muscle, p.strength);
+                let mut held = gains_of(pose_set, &jd.muscle, p.strength);
+                // endorphin's swing muscles hold a pose at a sixteenth of what its preset
+                // says, its twist muscles (the knees' and elbows' only axis) at all of it
+                // (lesson 46); the force limit is the preset's either way.
+                let share = project.physics.pose_swing_share;
+                held.swing.stiffness *= share;
+                held.swing.damping *= share;
                 target = target.slerp(pose, ramp);
                 gains = MuscleGains {
                     twist: blend(gains.twist, held.twist, ramp),

@@ -286,6 +286,13 @@ pub struct PhysicsSettings {
     /// What the solver's muscle spring cap counts as the mass a muscle moves.
     #[serde(default)]
     pub spring_cap: SpringCap,
+    /// The share of their preset's stiffness and damping active poses drive a joint's
+    /// swing axes with (its bend, as opposed to the twist about the bone). endorphin's
+    /// own runs bend their swing joints as if driven at a sixteenth of the preset, its
+    /// hinges (knees, elbows: twist only) at all of it, so imported scenes use 1/16
+    /// (docs/physics-design.md, lesson 46). NeuroMotion's own projects use 1.
+    #[serde(default = "full_share")]
+    pub pose_swing_share: f32,
     pub interactions: BTreeMap<String, Interaction>,
     /// `(material, material) -> interaction name`, order-insensitive.
     pub pairs: Vec<(String, String, String)>,
@@ -330,6 +337,10 @@ pub enum SpringCap {
     Limbs,
 }
 
+fn full_share() -> f32 {
+    1.0
+}
+
 /// How two materials behave when they touch.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Interaction {
@@ -361,6 +372,7 @@ impl Default for PhysicsSettings {
             }),
             contact: ContactModel::Coulomb,
             spring_cap: SpringCap::Bodies,
+            pose_swing_share: 1.0,
             interactions,
             pairs: vec![
                 ("rubber".into(), "tarmac".into(), "Grippy".into()),

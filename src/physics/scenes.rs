@@ -3122,6 +3122,58 @@ pub fn virtual_reach(vm: Option<(Gains, Gains)>, named: bool) -> Project {
     p
 }
 
+/// Back-Flip-To-Combo's crouch, the trunk's part: hung by the hips, the placeholder
+/// bends its spine and chest forward 12° each and its knees 90° from frame 10, with an
+/// active pose at strength 0.55 (as the scene's first pose) and the scene's pose preset
+/// (10 000 N·m/rad, 1000 N·m·s/rad, 1000 N·m on every muscle), active poses bending
+/// swing joints with `share` of it (lesson 46). The trunk leans forward, so the spine
+/// and chest hold its weight on their swing axes; the knees, hinges, hold the shins on
+/// their twist.
+pub fn bent_over(share: f32) -> Project {
+    let mut p = new_scene("Bent over", 3.0);
+    p.physics.spring_cap = SpringCap::Limbs;
+    p.physics.pose_swing_share = share;
+    let (skeleton, mut rig) = person_rig();
+    let preset = Gains {
+        stiffness: 10_000.0,
+        damping: 1000.0,
+        force_limit: 1000.0,
+    };
+    let set = rig
+        .muscle_sets
+        .iter_mut()
+        .find(|s| s.name == "DesiredPoseCalibration")
+        .unwrap();
+    set.muscles.clear();
+    set.fallback = MuscleGains {
+        twist: preset,
+        swing: preset,
+    };
+    let at = Vec3::new(0.0, 1.5, 0.0);
+    let id = add_person(&mut p, "poser", (skeleton, rig), at, 0.0, &[]);
+    constrain(
+        &mut p,
+        id,
+        0,
+        180,
+        "Lock",
+        &["poser.MetaBodies.hips"],
+        (STRONG, STRONG),
+    );
+    let mut pose = vec![
+        held("spine", Property::RotX, 12.0),
+        held("chest", Property::RotX, 12.0),
+    ];
+    pose.extend(["l", "r"].map(|side| held(&format!("{side}_knee"), Property::RotX, 90.0)));
+    active_pose(&mut p, id, 10, 180, &[], pose);
+    p.clips
+        .last_mut()
+        .unwrap()
+        .source
+        .insert("strength".into(), "0.55".into());
+    p
+}
+
 /// Back-Flip-To-Combo's crouch: one event names the knees and stores the ankles
 /// bent too; nothing names the ankles. Hung by the hips, the placeholder bends its knees
 /// by 60° and (stored, unnamed) its ankles by 30° from frame 10.
@@ -3324,6 +3376,8 @@ mod tests {
             "arms_out" => arms_out(SpringCap::Limbs),
             "arms_out_bodies" => arms_out(SpringCap::Bodies),
             "unnamed_ankles" => unnamed_ankles(),
+            "bent_over" => bent_over(1.0 / 16.0),
+            "bent_over_full" => bent_over(1.0),
             "mid_air" => mid_air(false, true),
             "mid_air_limp" => mid_air(false, false),
             "mid_air_t_pose" => mid_air(true, true),
@@ -4226,6 +4280,47 @@ mod tests {
             (ankle - rest).abs() > 20.0,
             "ankles turned {}°",
             ankle - rest
+        );
+    }
+
+    /// Active poses bend a swing joint with a sixteenth of the preset in imported scenes,
+    /// a twist joint (a hinge) with all of it (lesson 46). Hung by the hips, the
+    /// placeholder bends its spine and chest 12° forward each and its knees 90°: at the
+    /// preset its trunk (spine to neck) leans 18° at frame 150; at a sixteenth it sags
+    /// to 26° under its own weight, as endorphin's spine does, while the knees hold
+    /// 90° either way.
+    #[test]
+    fn a_pose_bends_swing_joints_with_a_sixteenth() {
+        let measure = |share: f32| {
+            let project = bent_over(share);
+            let sim = check(project.clone());
+            let skeleton = &project.characters[0].skeleton;
+            let at = |name: &str| {
+                sim.frame(150).unwrap()[0].as_ref().unwrap().joints
+                    [skeleton.joint_index(name).unwrap()]
+                .1
+            };
+            let trunk = at("neck") - at("spine");
+            let lean = libm::atan2f(libm::hypotf(trunk.x, trunk.z), trunk.y).to_degrees();
+            (lean, bend(&project, &sim, 150, "l_knee", "l_ankle"))
+        };
+        let (full, share) = (measure(1.0), measure(1.0 / 16.0));
+        println!(
+            "bent over: trunk leans {:.1}° / {:.1}°, knees {:.1}° / {:.1}° at the full \
+             preset / a sixteenth",
+            full.0, share.0, full.1, share.1
+        );
+        assert!(
+            share.0 > full.0 + 4.0,
+            "trunk {}° against {}°",
+            share.0,
+            full.0
+        );
+        assert!(
+            (full.1 - share.1).abs() < 1.0,
+            "knees {}° against {}°",
+            share.1,
+            full.1
         );
     }
 

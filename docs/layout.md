@@ -104,6 +104,10 @@ in the project simulates, with units in the fields:
   is capped for: NeuroMotion's own projects use the two bodies (Balance and Stagger
   are tuned for it), imported scenes the whole limb, as endorphin's muscles behave
   (physics-design.md, lesson 27).
+- *Pose bend strength*: the share of their preset's stiffness and damping active poses
+  bend a joint's swing axes with (the twist about the bone always gets all of it). 1
+  for NeuroMotion's own projects; imported scenes 1/16 (0.0625), as endorphin's own
+  runs bend (physics-design.md, lesson 46).
 - *Ground*, read-only.
 - *Material interactions*, folded: one entry each with restitution, friction, maximum
   adhesion (N) and softness. Interactions can be added, and removed unless a pair uses
