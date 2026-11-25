@@ -1765,7 +1765,8 @@ impl World {
 
     /// The shape pairs (i < j, in increasing order) whose bounding spheres may be within
     /// reach of each other and of which at least one is moved by the solver: a sweep
-    /// and prune along the axis the shapes spread furthest on. It only drops pairs the
+    /// and prune of the spheres' boxes along the axis the moved shapes spread furthest
+    /// on, skipping shapes of one body. It only drops pairs the
     /// bounding-sphere test in `find_contacts` would drop too, and hands the rest on in
     /// the order the plain all-pairs loop met them, so contacts and their solve order
     /// are bit for bit what that loop gave; only faster (the large scenes have 100-260
@@ -1776,51 +1777,82 @@ impl World {
             .iter()
             .map(|s| s.body.is_some_and(|b| self.bodies[b].is_dynamic()))
             .collect();
-        let shapes = || (0..placed.len()).filter(|&i| placed[i].is_some());
-        let centre = |i: usize| placed[i].map_or(Vec3::ZERO, |p| p.position);
-        let (low, high) = shapes().fold(
-            (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
-            |(lo, hi), i| (lo.min(centre(i)), hi.max(centre(i))),
-        );
-        let spread = high - low;
-        let axis = if spread.x >= spread.y && spread.x >= spread.z {
-            Vec3::X
-        } else if spread.y >= spread.z {
-            Vec3::Y
-        } else {
-            Vec3::Z
-        };
-        // Each shape's extent along the axis, padded by a whole margin on both sides
+        // Each shape's bounding sphere as a box, padded by a whole margin on every side
         // (twice what the sphere test allows) so float rounding in the bounds can never
-        // drop a pair the exact test keeps. A shape whose position isn't finite pairs
-        // with everything, as in the all-pairs loop.
-        let mut swept = Vec::new();
+        // drop a pair the exact test keeps. A shape whose box isn't finite pairs with
+        // everything, as in the all-pairs loop.
+        struct Bounds {
+            lo: Vec3,
+            hi: Vec3,
+            shape: usize,
+            body: Option<usize>,
+            moved: bool,
+        }
+        let mut boxes = Vec::new();
         let mut wild = Vec::new();
-        for i in shapes() {
-            let (at, reach) = (centre(i).dot(axis), radius[i] + MARGIN);
-            if at.is_finite() && reach.is_finite() {
-                swept.push((at - reach, at + reach, i));
+        for (i, p) in placed.iter().enumerate() {
+            let Some(p) = p else { continue };
+            let reach = Vec3::splat(radius[i] + MARGIN);
+            let (lo, hi) = (p.position - reach, p.position + reach);
+            if lo.is_finite() && hi.is_finite() {
+                boxes.push(Bounds {
+                    lo,
+                    hi,
+                    shape: i,
+                    body: self.shapes[i].body,
+                    moved: moved[i],
+                });
             } else {
                 wild.push(i);
             }
         }
-        swept.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.2.cmp(&b.2)));
+        // The axis the moved shapes' centres spread furthest on (big scenery, a floor
+        // say, would otherwise pick its own longest side, along which the characters
+        // may all overlap).
+        let (low, high) = boxes.iter().filter(|b| b.moved).fold(
+            (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
+            |(low, high), b| {
+                let centre = (b.lo + b.hi) * 0.5;
+                (low.min(centre), high.max(centre))
+            },
+        );
+        let spread = high - low;
+        let axis = if spread.x >= spread.y && spread.x >= spread.z {
+            0
+        } else if spread.y >= spread.z {
+            1
+        } else {
+            2
+        };
+        boxes.sort_unstable_by(|a, b| {
+            a.lo[axis]
+                .total_cmp(&b.lo[axis])
+                .then(a.shape.cmp(&b.shape))
+        });
         let mut pairs = Vec::new();
-        for (k, &(_, end, i)) in swept.iter().enumerate() {
-            for &(start, _, j) in &swept[k + 1..] {
-                if start > end {
+        for (k, a) in boxes.iter().enumerate() {
+            for b in &boxes[k + 1..] {
+                if b.lo[axis] > a.hi[axis] {
                     break;
                 }
+                // Shapes of one body never collide; `find_contacts` skips them too.
+                if b.lo.cmple(a.hi).all()
+                    && a.lo.cmple(b.hi).all()
+                    && (a.moved || b.moved)
+                    && (a.body.is_none() || a.body != b.body)
+                {
+                    pairs.push((a.shape.min(b.shape), a.shape.max(b.shape)));
+                }
+            }
+        }
+        for &i in &wild {
+            for j in (0..placed.len()).filter(|&j| j != i && placed[j].is_some()) {
                 if moved[i] || moved[j] {
                     pairs.push((i.min(j), i.max(j)));
                 }
             }
         }
-        for &i in &wild {
-            for j in shapes().filter(|&j| j != i && (moved[i] || moved[j])) {
-                pairs.push((i.min(j), i.max(j)));
-            }
-        }
+        // The all-pairs loop's order (two shapes that both aren't finite met twice).
         pairs.sort_unstable();
         pairs.dedup();
         pairs
