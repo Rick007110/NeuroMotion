@@ -189,6 +189,9 @@ pub struct Joint {
     /// Whether a group's direct solve held this joint's anchor last substep.
     was_grouped: bool,
     warm_muscle: [f32; 3],
+    /// Limit rows (by `AngularRow::id`, a bit each) there were last substep, and those
+    /// of them that pushed at its end.
+    warm_limits: [u8; 2],
 }
 
 impl Joint {
@@ -225,6 +228,7 @@ impl Joint {
             warm_point: Vec3::ZERO,
             was_grouped: false,
             warm_muscle: [0.0; 3],
+            warm_limits: [0; 2],
         }
     }
 
@@ -359,6 +363,9 @@ fn soft(hertz: f32, damping_ratio: f32, h: f32) -> Softness {
 /// One angular row: a one-sided limit (rigid) or a spring (soft limit zone / muscle).
 #[derive(Clone, Copy)]
 struct AngularRow {
+    /// Which of a joint's limit rows this is (twist stops, twist springs, swing stop,
+    /// swing spring), to carry over from one substep to the next.
+    id: u8,
     axis: Vec3,
     /// Inverse of the row's effective inverse mass (plus softness for springs).
     mass: f32,
@@ -391,6 +398,8 @@ struct JointRows {
     limb_schur: Option<Mat3>,
     limits: Vec<AngularRow>,
     muscle: Option<MuscleBlock>,
+    /// Limit rows there were last substep and those that pushed (`Joint::warm_limits`).
+    warm_limits: [u8; 2],
     /// Solved with the rest of its jointed group as one system (`limb::Articulation`),
     /// not by sequential impulses.
     direct: bool,
@@ -492,23 +501,34 @@ enum RowSource {
 /// round against its own body), is solved the same way, joints only.
 struct LockGroup {
     rows: Vec<GroupRow>,
-    /// The rows' effective mass matrix J M⁻¹ Jᵀ (lower triangle, row-major).
-    k: Vec<f64>,
+    /// The rows' effective mass matrix J M⁻¹ Jᵀ: its diagonal, and per row its entries
+    /// left of the diagonal at `k_pattern`. Stored sparse: only rows sharing a body meet,
+    /// and a dense matrix to build and clear each substep cost more than the solve.
+    k_diagonal: Vec<f64>,
+    k: Vec<Vec<f64>>,
     /// Columns left of the diagonal where each row of `k` isn't zero (rows sharing a
     /// moving body), ascending.
     k_pattern: Vec<Vec<usize>>,
     /// Where each row of the Cholesky factor isn't zero left of the diagonal. Joints
     /// come leaf first, so a skeleton factors without fill-in and only locks add any.
     pattern: Vec<Vec<usize>>,
-    /// Cholesky factors (lower triangle, row-major) over the rows still solved, of `k`
-    /// regularised for the velocity solve and for position correction.
-    velocity_factor: Vec<f64>,
-    push_factor: Vec<f64>,
+    /// Cholesky factors over the rows still solved, of `k` regularised for the velocity
+    /// solve and for position correction.
+    velocity_factor: Factor,
+    push_factor: Factor,
     /// Lock axes left out of the direct solve because they reached their strength:
     /// they stay at it this substep, and the per-lock pass still sees them.
     out: Vec<bool>,
     /// Solved after the contacts, not before them (lesson 25).
     late: bool,
+}
+
+/// A sparse Cholesky factor of a lock group: per row, its values at the group's
+/// `pattern`, and its diagonal.
+#[derive(Default)]
+struct Factor {
+    values: Vec<Vec<f64>>,
+    diagonal: Vec<f64>,
 }
 
 struct ContactRow {
@@ -786,7 +806,7 @@ impl World {
         };
         // Direct solves of the groups, then the contacts, then the direct solves of the
         // groups whose locks close a loop: those have the last word (lesson 25).
-        for _ in 0..ITERATIONS {
+        for it in 0..ITERATIONS {
             solve_drives(&mut sb, &mut drives);
             self.solve_joints(&mut sb, &mut joints, joint_soft, h, true);
             self.iterate(
@@ -801,6 +821,7 @@ impl World {
                 contact_soft,
                 h,
                 true,
+                it == 0,
             );
         }
         // A lock axis still at its strength after position correction can't keep up: it
@@ -841,6 +862,7 @@ impl World {
                 contact_soft,
                 h,
                 false,
+                false,
             );
         }
         apply_restitution(&mut sb, &mut contacts);
@@ -876,6 +898,9 @@ impl World {
                 rows.point_impulse
             };
             joint.was_grouped = grouped[j];
+            joint.warm_limits = rows.limits.iter().fold([0, 0], |[seen, pushed], l| {
+                [seen | 1 << l.id, pushed | u8::from(l.impulse > 0.0) << l.id]
+            });
             joint.warm_muscle = rows
                 .muscle
                 .as_ref()
@@ -887,12 +912,14 @@ impl World {
         }
     }
 
-    /// One iteration after the joints' sequential impulses: the articulations, the
-    /// locks, the direct solves of the groups, then the contacts, then the
-    /// articulations again, so the joints and muscles of a character have the last
-    /// word over its contacts (lesson N), and last the direct solves of the groups whose
-    /// locks close a loop (lesson 25). Groups solved before the contacts are solved
-    /// again after the articulations, so the locks hold too.
+    /// One iteration after the joints' sequential impulses: the locks, the direct solves
+    /// of the groups, the contacts, then the articulations, so a character's joints and
+    /// muscles have the last word over its contacts (lesson N), then the groups solved
+    /// before the contacts again, so their locks hold too, and last the direct solves of
+    /// the groups whose locks close a loop (lesson 25). The first iteration also solves
+    /// the articulations before the locks, so the locks and contacts start from joints
+    /// that hold (without it Rotating Floor's dancer ended up under the floor; solving
+    /// them there every iteration changed nothing but the time).
     #[allow(clippy::too_many_arguments)]
     fn iterate(
         &self,
@@ -907,9 +934,12 @@ impl World {
         contact_soft: Softness,
         h: f32,
         use_bias: bool,
+        first: bool,
     ) {
-        for a in articulations.iter_mut() {
-            a.solve(sb, joints, use_bias);
+        if first {
+            for a in articulations.iter_mut() {
+                a.solve(sb, joints, use_bias);
+            }
         }
         solve_locks(sb, locks, lock_bias_rate);
         solve_groups(sb, groups, joints, locks, contacts, held, false, use_bias);
@@ -975,6 +1005,7 @@ impl World {
             {
                 joint.warm_point = Vec3::ZERO;
                 joint.warm_muscle = [0.0; 3];
+                joint.warm_limits = [0; 2];
             }
         }
         self.was_dynamic = dynamic;
@@ -1068,6 +1099,7 @@ impl World {
                 limb_schur,
                 limits: Vec::new(),
                 muscle: None,
+                warm_limits: joint.warm_limits,
                 direct: false,
             };
             self.prepare_limits(joint, h, &mut rows);
@@ -1086,7 +1118,8 @@ impl World {
 
         let schur = rows.angular_schur;
         let coupled_inv_mass = |axis: Vec3| axis.dot(schur * axis);
-        let rigid = |axis: Vec3, value: f32| AngularRow {
+        let rigid = |id: u8, axis: Vec3, value: f32| AngularRow {
+            id,
             axis,
             mass: inverse(coupled_inv_mass(axis)),
             value,
@@ -1096,7 +1129,7 @@ impl World {
             upper: f32::INFINITY,
             impulse: 0.0,
         };
-        let spring = |axis: Vec3, error: f32| -> Option<AngularRow> {
+        let spring = |id: u8, axis: Vec3, error: f32| -> Option<AngularRow> {
             let (k, c) = cap_spring(
                 joint.soft_stiffness,
                 joint.soft_damping,
@@ -1106,6 +1139,7 @@ impl World {
                 let denom = c + h * k;
                 let gamma = 1.0 / (h * denom);
                 AngularRow {
+                    id,
                     axis,
                     mass: inverse(coupled_inv_mass(axis) + gamma),
                     value: (h * k / denom) / h * error,
@@ -1121,18 +1155,20 @@ impl World {
         // Twist: stops at both ends, soft springs between the soft and hard ranges.
         let (hard, soft_l) = (joint.hard, joint.soft);
         if twist < hard.twist_min + ANGULAR_MARGIN {
-            rows.limits.push(rigid(twist_axis, twist - hard.twist_min));
+            rows.limits
+                .push(rigid(0, twist_axis, twist - hard.twist_min));
         }
         if twist > hard.twist_max - ANGULAR_MARGIN {
-            rows.limits.push(rigid(-twist_axis, hard.twist_max - twist));
+            rows.limits
+                .push(rigid(1, -twist_axis, hard.twist_max - twist));
         }
         if twist < soft_l.twist_min {
             rows.limits
-                .extend(spring(twist_axis, twist - soft_l.twist_min));
+                .extend(spring(2, twist_axis, twist - soft_l.twist_min));
         }
         if twist > soft_l.twist_max {
             rows.limits
-                .extend(spring(-twist_axis, soft_l.twist_max - twist));
+                .extend(spring(3, -twist_axis, soft_l.twist_max - twist));
         }
 
         // Swing: elliptical cone in the primary frame's YZ plane.
@@ -1149,11 +1185,11 @@ impl World {
             let n = glam::Vec2::new(s.x / (y * y), s.y / (z * z)).normalize_or_zero();
             let outward = (primary * Vec3::new(0.0, n.x, n.y)).normalize_or_zero();
             if radius > hard_r - ANGULAR_MARGIN {
-                rows.limits.push(rigid(-outward, hard_r - radius));
+                rows.limits.push(rigid(4, -outward, hard_r - radius));
             }
             let (soft_r, ..) = boundary(&soft_l);
             if radius > soft_r {
-                rows.limits.extend(spring(-outward, soft_r - radius));
+                rows.limits.extend(spring(5, -outward, soft_r - radius));
             }
         }
     }
@@ -2182,7 +2218,8 @@ impl LockGroup {
                 on_body.entry(body).or_default().push(i);
             }
         }
-        let mut k = vec![0.0f64; n * n];
+        let mut k = vec![Vec::new(); n];
+        let mut k_diagonal = vec![0.0f64; n];
         let mut k_pattern = vec![Vec::new(); n];
         for (i, r) in rows.iter().enumerate() {
             let mut near: Vec<usize> = [r.a, r.b]
@@ -2193,10 +2230,11 @@ impl LockGroup {
                 .collect();
             near.sort_unstable();
             near.dedup();
-            for &j in &near {
-                k[i * n + j] = entry(r, &rows[j], &responses[j]);
-            }
-            k[i * n + i] = entry(r, r, &responses[i]);
+            k[i] = near
+                .iter()
+                .map(|&j| entry(r, &rows[j], &responses[j]))
+                .collect();
+            k_diagonal[i] = entry(r, r, &responses[i]);
             k_pattern[i] = near;
         }
         // Lock axes that ended the last substep at their strength most likely stay there.
@@ -2209,11 +2247,12 @@ impl LockGroup {
             .collect();
         let mut group = LockGroup {
             rows,
+            k_diagonal,
             k,
             k_pattern,
             pattern: Vec::new(),
-            velocity_factor: Vec::new(),
-            push_factor: Vec::new(),
+            velocity_factor: Factor::default(),
+            push_factor: Factor::default(),
             out,
             late: false,
         };
@@ -2259,36 +2298,47 @@ impl LockGroup {
         self.push_factor = self.cholesky(GROUP_PUSH_SOFTNESS);
     }
 
-    fn cholesky(&self, softness: f64) -> Vec<f64> {
+    fn cholesky(&self, softness: f64) -> Factor {
         let n = self.rows.len();
-        let k = &self.k;
-        let mut l = vec![0.0f64; n * n];
+        let mut values = vec![Vec::new(); n];
+        let mut diagonal = vec![0.0f64; n];
+        // Row i of the factor so far, by column; zero where it is.
+        let mut work = vec![0.0f64; n];
         for i in 0..n {
             if self.out[i] {
-                l[i * n + i] = 1.0;
+                diagonal[i] = 1.0;
                 continue;
             }
-            let mut pivot = k[i * n + i] * (1.0 + softness);
-            for &j in &self.pattern[i] {
-                let mut sum = k[i * n + j];
-                for &p in &self.pattern[j] {
-                    sum -= l[i * n + p] * l[j * n + p];
+            for (&j, &v) in self.k_pattern[i].iter().zip(&self.k[i]) {
+                if !self.out[j] {
+                    work[j] = v;
                 }
-                let v = sum / l[j * n + j];
-                l[i * n + j] = v;
+            }
+            let mut pivot = self.k_diagonal[i] * (1.0 + softness);
+            for &j in &self.pattern[i] {
+                let mut sum = work[j];
+                for (&p, &l) in self.pattern[j].iter().zip(&values[j]) {
+                    sum -= work[p] * l;
+                }
+                let v = sum / diagonal[j];
+                work[j] = v;
                 pivot -= v * v;
             }
             // At least `softness` × the diagonal in exact arithmetic.
-            l[i * n + i] = pivot.max(softness * k[i * n + i]).sqrt();
+            diagonal[i] = pivot.max(softness * self.k_diagonal[i]).sqrt();
+            values[i] = self.pattern[i].iter().map(|&j| work[j]).collect();
+            for &j in &self.pattern[i] {
+                work[j] = 0.0;
+            }
         }
-        l
+        Factor { values, diagonal }
     }
 
     /// Impulses that make `velocity_scale` × every solved row's relative velocity plus
     /// `bias_scale` × its bias zero, with factor `l`.
     fn solve(
         &self,
-        l: &[f64],
+        l: &Factor,
         sb: &[SolverBody],
         velocity_scale: f64,
         bias_scale: f64,
@@ -2311,13 +2361,17 @@ impl LockGroup {
             })
             .collect();
         for i in 0..n {
-            let sum: f64 = self.pattern[i].iter().map(|&p| l[i * n + p] * x[p]).sum();
-            x[i] = (x[i] - sum) / l[i * n + i];
+            let sum: f64 = l.values[i]
+                .iter()
+                .zip(&self.pattern[i])
+                .map(|(&l, &p)| l * x[p])
+                .sum();
+            x[i] = (x[i] - sum) / l.diagonal[i];
         }
         for i in (0..n).rev() {
-            x[i] /= l[i * n + i];
-            for &p in &self.pattern[i] {
-                x[p] -= l[i * n + p] * x[i];
+            x[i] /= l.diagonal[i];
+            for (&p, &l) in self.pattern[i].iter().zip(&l.values[i]) {
+                x[p] -= l * x[i];
             }
         }
         for (x, &out) in x.iter_mut().zip(&self.out) {

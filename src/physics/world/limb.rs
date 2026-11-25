@@ -26,6 +26,8 @@ use super::{JointRows, MAX_PUSH_SPEED, STATIC, SolverBody};
 
 /// Most rounds of switching rows onto and off their bounds, per pass.
 const PIVOTS: usize = 8;
+/// Rows off the factor's guess beyond which it is factored again.
+const REFACTOR: usize = 6;
 /// Further rounds that only put rows past their bounds onto them.
 const SETTLE: usize = 4;
 const NONE: usize = usize::MAX;
@@ -57,6 +59,9 @@ struct Row {
     bias: [f32; 2],
     /// Where the row sits in the solution vector, if it is in the factor.
     slot: Option<usize>,
+    /// Where each of its moving bodies' velocity changes sit in the solution vector, and
+    /// its Jacobian there.
+    parts: [(usize, [f64; 6]); 2],
 }
 
 impl Row {
@@ -92,6 +97,8 @@ struct Node {
     /// D⁻¹ (n × n) and W = D⁻¹ H(this, parent) (n × parent's n), row-major.
     dinv: Vec<f64>,
     w: Vec<f64>,
+    /// Wᵀ, for the forward pass.
+    wt: Vec<f64>,
 }
 
 /// One jointed group's rows and their factor.
@@ -107,6 +114,9 @@ pub(super) struct Articulation {
     columns: Vec<Option<Vec<f64>>>,
     /// Per row: the accumulated impulse it is held at, if it sits at a bound.
     at: Vec<Option<f64>>,
+    /// The tree, root first: (a joint?, body, parent node), and each joint node's rows.
+    order: Vec<(bool, usize, usize)>,
+    row_range: Vec<(usize, usize)>,
 }
 
 impl Articulation {
@@ -234,42 +244,77 @@ impl Articulation {
             next += 1;
         }
 
-        // Rows of the joints in the tree, and the nodes with their slots.
+        // Rows of the joints in the tree; those out of the factor start at the bound
+        // they sit at.
         let mut rows = Vec::new();
         let mut row_range = vec![(0, 0); order.len()];
-        let mut nodes: Vec<Node> = Vec::with_capacity(order.len());
+        for (k, &(joint, _, _)) in order.iter().enumerate() {
+            if let Some(ji) = joint {
+                let start = rows.len();
+                push_rows(&mut rows, sb, &joints[ji], ji, bias_rate, h);
+                joints[ji].direct = true;
+                row_range[k] = (start, rows.len());
+            }
+        }
+        let at = rows
+            .iter()
+            .map(|r| {
+                r.slot.is_none().then(|| {
+                    let lambda = Self::accumulated(r, joints) as f64;
+                    if r.near_upper(lambda) {
+                        r.upper as f64
+                    } else {
+                        r.lower as f64
+                    }
+                })
+            })
+            .collect();
+        let mut articulation = Articulation {
+            at,
+            columns: Vec::new(),
+            rows,
+            order: order.iter().map(|&(j, b, p)| (j.is_some(), b, p)).collect(),
+            row_range,
+            nodes: Vec::new(),
+            body_node: Vec::new(),
+            size: 0,
+        };
+        articulation.factor(sb)?;
+        Some(articulation)
+    }
+
+    /// Factors the system with the rows not at a bound.
+    fn factor(&mut self, sb: &[SolverBody]) -> Option<()> {
+        let mut nodes: Vec<Node> = Vec::with_capacity(self.order.len());
         let mut body_node = Vec::new();
         let mut size = 0;
-        for (k, &(joint, body, parent)) in order.iter().enumerate() {
-            let n = match joint {
-                Some(ji) => {
-                    let start = rows.len();
-                    push_rows(&mut rows, sb, &joints[ji], ji, bias_rate, h);
-                    joints[ji].direct = true;
-                    row_range[k] = (start, rows.len());
-                    let mut n = 0;
-                    for r in rows[start..].iter_mut().filter(|r| r.slot.is_some()) {
-                        r.slot = Some(size + n);
-                        n += 1;
-                    }
-                    n
+        for (k, &(joint, body, parent)) in self.order.iter().enumerate() {
+            let n = if joint {
+                let (s, e) = self.row_range[k];
+                let mut n = 0;
+                for (r, at) in self.rows[s..e].iter_mut().zip(&self.at[s..e]) {
+                    r.slot = at.is_none().then_some(size + n);
+                    n += usize::from(at.is_none());
                 }
-                None => {
-                    body_node.push((body, k));
-                    6
-                }
+                n
+            } else {
+                body_node.push((body, k));
+                6
             };
             nodes.push(Node {
-                body: joint.is_none().then_some(body),
+                body: (!joint).then_some(body),
                 n,
                 at: size,
                 parent,
                 dinv: Vec::new(),
                 w: Vec::new(),
+                wt: Vec::new(),
             });
             size += n;
         }
         body_node.sort_unstable();
+        let rows = &self.rows;
+        let row_range = &self.row_range;
 
         // H(joint's rows in the factor, body), n × 6.
         let block = |range: (usize, usize), body: usize| -> Vec<f64> {
@@ -315,10 +360,11 @@ impl Articulation {
         // Leaf first: D = H(node, node) − Σ over children H(node, child) D⁻¹ H(child, node).
         for k in (0..nodes.len()).rev() {
             let n = nodes[k].n;
+            // A body's block is positive definite, a joint's negative definite.
             let dinv = if n == 0 {
                 Vec::new()
             } else {
-                invert(&d[k], n)?
+                invert_definite(&d[k], n, nodes[k].body.is_none())?
             };
             let p = nodes[k].parent;
             if p != NONE {
@@ -330,106 +376,115 @@ impl Articulation {
                 };
                 let w = multiply(&dinv, &up, n, n, np);
                 for i in 0..np {
-                    for j in 0..np {
+                    for j in 0..=i {
                         let mut s = 0.0;
                         for t in 0..n {
                             s += up[t * np + i] * w[t * np + j];
                         }
                         d[p][i * np + j] -= s;
+                        if j != i {
+                            d[p][j * np + i] -= s;
+                        }
                     }
                 }
+                nodes[k].wt = transpose(&w, n, np);
                 nodes[k].w = w;
             }
             nodes[k].dinv = dinv;
         }
-        // Rows out of the factor start at the bound they sit at.
-        let at = rows
-            .iter()
-            .map(|r| {
-                r.slot.is_none().then(|| {
-                    let lambda = Self::accumulated(r, joints) as f64;
-                    if r.near_upper(lambda) {
-                        r.upper as f64
-                    } else {
-                        r.lower as f64
+        for r in &mut self.rows {
+            for (k, body) in [r.a, r.b].into_iter().enumerate() {
+                let node = body_node
+                    .binary_search_by_key(&body, |&(b, _)| b)
+                    .ok()
+                    .map(|i| body_node[i].1);
+                r.parts[k] = match (node, r.on(body)) {
+                    (Some(node), Some([lin, ang])) => {
+                        let mut j = [0.0; 6];
+                        for (j, v) in j
+                            .iter_mut()
+                            .zip(lin.to_array().into_iter().chain(ang.to_array()))
+                        {
+                            *j = v as f64;
+                        }
+                        (nodes[node].at, j)
                     }
-                })
-            })
-            .collect();
-        Some(Articulation {
-            at,
-            columns: (0..rows.len()).map(|_| None).collect(),
-            rows,
-            nodes,
-            body_node,
-            size,
-        })
+                    _ => (NONE, [0.0; 6]),
+                };
+            }
+        }
+        self.columns = (0..self.rows.len()).map(|_| None).collect();
+        self.nodes = nodes;
+        self.body_node = body_node;
+        self.size = size;
+        Some(())
+    }
+
+    /// The solution with every row in the factor free and every other at its bound.
+    fn free(&self, wanted: &[f64]) -> Vec<f64> {
+        let mut free = vec![0.0f64; self.size];
+        for (r, &w) in self.rows.iter().zip(wanted) {
+            if let Some(slot) = r.slot {
+                free[slot] = w;
+            }
+        }
+        self.solve_system(&mut free);
+        free
     }
 
     /// Solves the factored system for right-hand side `x`, in place.
     fn solve_system(&self, x: &mut [f64]) {
-        for node in self.nodes.iter().rev() {
-            if node.parent == NONE {
-                continue;
-            }
-            let p = &self.nodes[node.parent];
-            for j in 0..p.n {
-                let mut s = 0.0;
-                for i in 0..node.n {
-                    s += node.w[i * p.n + j] * x[node.at + i];
-                }
-                x[p.at + j] -= s;
-            }
-        }
+        let dot = |a: &[f64], b: &[f64]| a.iter().zip(b).map(|(a, b)| a * b).sum::<f64>();
         let mut z = [0.0f64; 16];
-        for node in &self.nodes {
-            let n = node.n;
-            let z = if n <= 16 {
-                z[..n].copy_from_slice(&x[node.at..node.at + n]);
-                &z[..n]
-            } else {
-                unreachable!("a joint has at most 3 anchor, 3 muscle and a few limit rows")
-            };
-            for i in 0..n {
-                let mut s = 0.0;
-                for (j, z) in z.iter().enumerate() {
-                    s += node.dinv[i * n + j] * z;
-                }
-                x[node.at + i] = s;
-            }
-        }
-        for node in &self.nodes {
-            if node.parent == NONE {
+        // Forward: each node's part, less what its children pass up.
+        for node in self.nodes.iter().rev() {
+            if node.parent == NONE || node.n == 0 {
                 continue;
             }
             let p = &self.nodes[node.parent];
-            for i in 0..node.n {
-                let mut s = 0.0;
-                for j in 0..p.n {
-                    s += node.w[i * p.n + j] * x[p.at + j];
-                }
-                x[node.at + i] -= s;
+            z[..node.n].copy_from_slice(&x[node.at..node.at + node.n]);
+            for (x, wt) in x[p.at..p.at + p.n]
+                .iter_mut()
+                .zip(node.wt.chunks_exact(node.n))
+            {
+                *x -= dot(wt, &z[..node.n]);
             }
         }
-    }
-
-    fn node_of(&self, body: usize) -> Option<usize> {
-        self.body_node
-            .binary_search_by_key(&body, |&(b, _)| b)
-            .ok()
-            .map(|i| self.body_node[i].1)
+        for node in self.nodes.iter().filter(|n| n.n > 0) {
+            let n = node.n;
+            z[..n].copy_from_slice(&x[node.at..node.at + n]);
+            for (x, d) in x[node.at..node.at + n]
+                .iter_mut()
+                .zip(node.dinv.chunks_exact(n))
+            {
+                *x = dot(d, &z[..n]);
+            }
+        }
+        // Backward: each node's part, less what its parent's solution takes.
+        for node in &self.nodes {
+            if node.parent == NONE || node.n == 0 {
+                continue;
+            }
+            let p = &self.nodes[node.parent];
+            if p.n == 0 {
+                continue;
+            }
+            z[..p.n].copy_from_slice(&x[p.at..p.at + p.n]);
+            for (x, w) in x[node.at..node.at + node.n]
+                .iter_mut()
+                .zip(node.w.chunks_exact(p.n))
+            {
+                *x -= dot(w, &z[..p.n]);
+            }
+        }
     }
 
     /// The row's velocity change in solution `y`: its Jacobian times its bodies' Δv.
     fn velocity_in(&self, r: &Row, y: &[f64]) -> f64 {
         let mut v = 0.0;
-        for body in [r.a, r.b] {
-            let (Some(node), Some([lin, ang])) = (self.node_of(body), r.on(body)) else {
-                continue;
-            };
-            let at = self.nodes[node].at;
-            for (c, j) in lin.to_array().into_iter().chain(ang.to_array()).enumerate() {
-                v += j as f64 * y[at + c];
+        for (at, j) in r.parts.iter().filter(|p| p.0 != NONE) {
+            for (j, y) in j.iter().zip(&y[*at..*at + 6]) {
+                v += j * y;
             }
         }
         v
@@ -444,15 +499,8 @@ impl Articulation {
             match r.slot {
                 Some(slot) => e[slot] = 1.0,
                 None => {
-                    for body in [r.a, r.b] {
-                        let (Some(node), Some([lin, ang])) = (self.node_of(body), r.on(body))
-                        else {
-                            continue;
-                        };
-                        let at = self.nodes[node].at;
-                        for (c, j) in lin.to_array().into_iter().chain(ang.to_array()).enumerate() {
-                            e[at + c] = j as f64;
-                        }
+                    for (at, j) in r.parts.iter().filter(|p| p.0 != NONE) {
+                        e[*at..*at + 6].copy_from_slice(j);
                     }
                 }
             }
@@ -505,13 +553,8 @@ impl Articulation {
                 -((v + r.bias[pass]) as f64 + r.gamma as f64 * lambda)
             })
             .collect();
-        let mut free = vec![0.0f64; self.size];
-        for (r, &w) in self.rows.iter().zip(&wanted) {
-            if let Some(slot) = r.slot {
-                free[slot] = w;
-            }
-        }
-        self.solve_system(&mut free);
+        let mut free = self.free(&wanted);
+        let mut refactored = 0;
 
         // Which bounded rows sit at a bound is the last pass's answer (at first, the
         // guess the factor was built on). Each round solves with it, then switches every
@@ -538,7 +581,7 @@ impl Articulation {
                 }
             }
             u = self.adjust(&changed, &free, &so_far, &wanted);
-            y.copy_from_slice(&free);
+            y.clone_from(&free);
             for (&(c, _), &uk) in changed.iter().zip(&u) {
                 for (y, col) in y.iter_mut().zip(self.column(c)) {
                     *y += col * uk;
@@ -586,6 +629,18 @@ impl Articulation {
                 }
             } else if let Some(&(i, at)) = wrong.last() {
                 self.at[i] = at;
+            }
+            // Many rows off the guess (a body coming off or onto its stops this
+            // substep): factoring again is cheaper than carrying them all.
+            let off = self
+                .rows
+                .iter()
+                .zip(&self.at)
+                .filter(|(r, at)| r.slot.is_some() == at.is_some())
+                .count();
+            if off > REFACTOR && refactored < 2 && self.factor(sb).is_some() {
+                refactored += 1;
+                free = self.free(&wanted);
             }
         }
 
@@ -690,6 +745,7 @@ fn push_rows(
             upper: f32::INFINITY,
             bias: [push[axis], 0.0],
             slot: Some(0),
+            parts: [(NONE, [0.0; 6]); 2],
         });
     }
     if let Some(m) = &j.muscle {
@@ -713,6 +769,7 @@ fn push_rows(
                 upper: m.bound[k],
                 bias: [bias, bias],
                 slot: (warm.abs() < m.bound[k] * (1.0 - 1e-6)).then_some(0),
+                parts: [(NONE, [0.0; 6]); 2],
             });
         }
     }
@@ -738,8 +795,14 @@ fn push_rows(
         } else {
             [(bias_rate * l.value).max(-MAX_PUSH_SPEED * 4.0), 0.0]
         };
-        // In the factor if the joint's own motion pushes into it, as it would on its own.
-        let active = l.axis.dot(spin(b) - spin(a)) + bias[0] < 0.0;
+        // In the factor if it pushed at the end of last substep; a new one if the
+        // joint's own motion pushes into it.
+        let [seen, pushed] = j.warm_limits.map(|bits| bits & 1 << l.id != 0);
+        let active = if seen {
+            pushed
+        } else {
+            l.axis.dot(spin(b) - spin(a)) + bias[0] < 0.0
+        };
         rows.push(Row {
             joint: ji,
             source: Source::Limit(li),
@@ -751,6 +814,7 @@ fn push_rows(
             upper: l.upper,
             bias,
             slot: active.then_some(0),
+            parts: [(NONE, [0.0; 6]); 2],
         });
     }
 }
@@ -761,6 +825,9 @@ fn multiply(a: &[f64], b: &[f64], n: usize, k: usize, m: usize) -> Vec<f64> {
     for i in 0..n {
         for t in 0..k {
             let x = a[i * k + t];
+            if x == 0.0 {
+                continue;
+            }
             for j in 0..m {
                 c[i * m + j] += x * b[t * m + j];
             }
@@ -780,41 +847,53 @@ fn transpose(a: &[f64], n: usize, m: usize) -> Vec<f64> {
     t
 }
 
-/// Inverse of an n × n matrix (row-major) by Gauss-Jordan elimination with partial
-/// pivoting; `None` if it is singular.
-fn invert(a: &[f64], n: usize) -> Option<Vec<f64>> {
-    let mut m = a.to_vec();
+/// Inverse of a symmetric definite n × n matrix (row-major; negative definite if
+/// `negative`) by Cholesky factorisation; `None` if it is singular.
+fn invert_definite(a: &[f64], n: usize, negative: bool) -> Option<Vec<f64>> {
+    let sign = if negative { -1.0 } else { 1.0 };
+    let scale = (0..n)
+        .map(|i| (sign * a[i * n + i]).abs())
+        .fold(0.0, f64::max);
+    // L Lᵀ = sign × a.
+    let mut l = vec![0.0f64; n * n];
+    for i in 0..n {
+        for j in 0..=i {
+            let mut s = sign * a[i * n + j];
+            for k in 0..j {
+                s -= l[i * n + k] * l[j * n + k];
+            }
+            if i == j {
+                if s <= 1e-14 * scale {
+                    return None;
+                }
+                l[i * n + i] = s.sqrt();
+            } else {
+                l[i * n + j] = s / l[j * n + j];
+            }
+        }
+    }
+    // L⁻¹, lower triangular.
+    let mut li = vec![0.0f64; n * n];
+    for i in 0..n {
+        li[i * n + i] = 1.0 / l[i * n + i];
+        for j in 0..i {
+            let mut s = 0.0;
+            for k in j..i {
+                s -= l[i * n + k] * li[k * n + j];
+            }
+            li[i * n + j] = s / l[i * n + i];
+        }
+    }
+    // a⁻¹ = sign × L⁻ᵀ L⁻¹.
     let mut inv = vec![0.0f64; n * n];
     for i in 0..n {
-        inv[i * n + i] = 1.0;
-    }
-    let scale = (0..n).map(|i| a[i * n + i].abs()).fold(0.0, f64::max);
-    for col in 0..n {
-        let pivot =
-            (col..n).max_by(|&x, &y| m[x * n + col].abs().total_cmp(&m[y * n + col].abs()))?;
-        if m[pivot * n + col].abs() <= 1e-14 * scale {
-            return None;
-        }
-        if pivot != col {
-            for k in 0..n {
-                m.swap(col * n + k, pivot * n + k);
-                inv.swap(col * n + k, pivot * n + k);
+        for j in 0..=i {
+            let mut s = 0.0;
+            for k in i..n {
+                s += li[k * n + i] * li[k * n + j];
             }
-        }
-        let p = 1.0 / m[col * n + col];
-        for k in 0..n {
-            m[col * n + k] *= p;
-            inv[col * n + k] *= p;
-        }
-        for r in 0..n {
-            let f = m[r * n + col];
-            if r == col || f == 0.0 {
-                continue;
-            }
-            for k in 0..n {
-                m[r * n + k] -= f * m[col * n + k];
-                inv[r * n + k] -= f * inv[col * n + k];
-            }
+            inv[i * n + j] = sign * s;
+            inv[j * n + i] = sign * s;
         }
     }
     Some(inv)
