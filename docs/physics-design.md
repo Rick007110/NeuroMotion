@@ -38,6 +38,9 @@ Each tick (1/rate s) runs 4 substeps. Each substep:
    - joint anchor points (3-row block);
    - twist and swing limits (one-sided rows; springs in the soft zone);
    - muscles;
+   - in imported scenes (`SpringCap::Limbs`), each character's joints, muscles and
+     limits instead, solved as one system (lesson 38), here in the first iteration
+     only;
    - locks (one 6-row block each, each row capped at its strength, closing a gap no
      faster than that strength could stop it, lesson 20);
    - bodies that locks tie together, with the joints between them, solved directly as
@@ -46,6 +49,8 @@ Each tick (1/rate s) runs 4 substeps. Each substep:
      0.5 cm (lessons 17 and 29);
    - contact normals, as *soft* constraints (frequency and damping ratio), and
      friction;
+   - in imported scenes, each character's joints, muscles and limits as one system
+     again, then the groups solved before the contacts again (lesson 38);
    - groups with a lock that nothing pins (not held to the world or a keyed body),
      solved directly again, now with the ground and scenery contacts that carry their
      load as one-sided rows (lesson 25); and characters a keyed body moving faster
@@ -1599,6 +1604,135 @@ Making cylinders exact (#14) taught one more.
     Narrow phase is about 0.3 µs a pair and the contacts' set-up 0.1 µs; allocations
     per substep (a few vectors of one entry per body or shape) didn't show.
 
+38. **A character's muscles are solved with the limb they move, so they can be as stiff
+    as the limb needs.** (Number to be assigned at integration.) Lessons 4, 9 and 27
+    cap a muscle's stiffness because sequential impulses solve it with its joint's two
+    bodies only: on a 0.06 kg finger or a 0.4 kg clavicle a spring tuned for the whole
+    limb rings far faster than the solver can follow, and the joint tears. Imported
+    scenes could count the whole limb only up to 5 Hz (lesson 27). Lesson 34 found that
+    cap the largest lever left: raising it lifted Car Hit's flight towards endorphin's
+    (1.66 m at 10 Hz, 1.70 at 20, 1.74 at 30; endorphin 1.81 m), and with it Stagger
+    Walk's character can step on its light pelvis and three-body feet, but above 5 Hz
+    Multi Martial's fingers came 6-28 cm out of their joints (16 iterations or 8
+    substeps didn't help) and Car Hit's knee 5.8 cm.
+
+    Now, in scenes with whole-limb muscles, every jointed group with a muscle (a
+    character) is solved as one system each iteration (`world/limb.rs`): its joints'
+    anchors, its muscles' drive axes and its limits, with the bodies' velocity changes
+    as unknowns too, `[M Jᵀ; J −Γ] [Δv; −Δλ] = [0; r]`. A muscle there is an implicit
+    spring (Γ its softness, as before) on the whole articulated body, so a stiff one
+    makes a stiff limb, not a light body thrown about. Bodies and joints form a tree;
+    factored leaf first in blocks (6 for a body, a joint's 3-12 rows) it has no fill-in
+    and costs time linear in the bodies (Baraff 1996). A joint that would close a loop
+    stays with sequential impulses, as do jointed groups without a muscle (ropes).
+    Force limits and one-sided stops are bounds on a row's accumulated impulse. Which
+    rows sit at a bound is guessed from the last substep (a muscle at its force limit,
+    a stop that pushed); the factor leaves those out, and rows the guess got wrong are
+    switched within the pass through the factor's own response to them (block
+    principal pivoting, falling back to one row at a time so it always ends, and
+    factoring again when more than six rows are off). If the switching runs out of
+    rounds, only rows past their bounds keep switching, onto them: clamping one row
+    alone left the joints around it to take up the difference, and once in Catch Rope
+    that opened a forearm 11 cm in one substep.
+
+    The order matters as much as the solve:
+    - Solved where the muscles were (before the locks and contacts), the contacts,
+      solved last one body at a time, pushed stiff light limbs apart again: with the
+      whole-limb cap at 5 Hz Car Hit's foot opened 5.3 cm, Trapeze's fingers 7.7 cm.
+    - Solved again after the contacts, the joints hold (Car Hit 0.33 cm), but the locks,
+      solved before it, drifted: Gymnast Rings, Catch Rope, Heli Leap and Walk With Gun
+      0.2-0.7 m. So the groups solved before the contacts are solved again after it, as
+      the free lock groups already were (lesson 25): they hold anchors and locks exactly
+      and only bend the muscles.
+    - Solving it only after the contacts left Rotating Floor's dancer under its floor;
+      before the locks in the first iteration is enough, and in every iteration changed
+      nothing but the time.
+    With no cap at all, light bodies the solve leaves to locks and contacts came apart
+    (Gymnast Rings 2 m, Sword Play 8 cm): those are still solved one by one after it.
+    At 30 Hz on the whole limb (the two-body cap's figure, lesson 4) all 17 sample
+    scenes stay clean (at 20, 25, 28, 32, 35 and 40 Hz too), so `MAX_LIMB_HERTZ` is 30
+    instead of 5.
+
+    | Sample scene, whole range | Max joint stretch before | after | Lock drift before | after |
+    |---|---|---|---|---|
+    | Arrows | 0.55 cm | 0.19 cm | 0 | 0 |
+    | Balcony | 1.07 | 0.45 | 0.1 cm | 0 |
+    | Bendy Stick | 0.61 | 0.12 | 0.8 cm | 0 |
+    | Bridge Escape | 0.93 | 0.86 | 7.0 m | 5.6 m |
+    | Car Crash | 0.66 | 0.12 | 29 cm | 33 cm |
+    | Car Hit | 0.80 | 0.34 | 38 cm | 38 cm |
+    | Catch Rope | 0.76 | 0.78 | 0 | 3.8 cm |
+    | Catch Run | 1.41 | 1.41 | 0 | 0.2 cm |
+    | Gymnast Rings | 1.15 | 0.15 | 3.1 cm | 56 cm |
+    | Heli Leap | 0.29 | 0.29 | 0.8 cm | 0.3 cm |
+    | Multi Martial | 1.86 | 0.66 | 0 | 0 |
+    | Rotating Floor | 0.53 | 0.14 | 0.1 cm | 0 |
+    | Stagger Walk | 0.29 | 0.22 | 0 | 0 |
+    | Sword Play | 0.46 | 0.46 | 0.7 cm | 0.2 cm |
+    | Tackle | 0.87 | 0.14 | 0.9 cm | 0 |
+    | Trapeze | 0.91 | 0.49 | 0 | 0.1 cm |
+    | Walk With Gun | 0.06 | 0.11 | 0.3 cm | 0.4 cm |
+
+    Gymnast Rings' 56 cm is a ring against its 500 N lock to the world (position
+    strengths 0, 500, 500): the gymnast's stiffer arms swing the rings harder than such
+    a lock holds, as the scene sets it; not compared with endorphin. Heli Leap's lowest
+    body went from 0.69 m below the roof's top to its level, Rotating Floor's from 4.74
+    to 4.64 m below y = 0 (no ground in either, lesson 23).
+
+    Against endorphin (`reference_scores`), 18 of 36 measurements are within its
+    uncertainty, against 14; every guard holds, also over `NM_NUDGES=2`:
+    - **Car Hit** (5 to 8 of 15): the pedestrian flies to 1.73 m at frame 67 (1.62 m at
+      65 before; endorphin 1.81 m at 68); its centre of mass is 1.57 m up at frame 78 and
+      1.13 m at 88 (1.38 and 0.84 before; endorphin 1.62 and 1.26), and it first touches
+      the ground at 94 (89; endorphin 96). Still upside down from 62 (endorphin 76), and
+      it lands at x +0.15 m at frame 96 (+0.07 before; endorphin -0.34 m).
+    - **Back-Flip-To-Combo** (2 to 3 of 9): it leaves the box top at 213 (241 before;
+      endorphin 212) and reaches the floor at 281 (293; endorphin 276). It still doesn't
+      spring up: it goes back over the edge of the box, its head 1.74 m lower at 248
+      than at 192 (1.34 before; endorphin's rises 0.65 m). Its crouch, 0.49 m deep by
+      192 (0.27 before; endorphin 0.10), is lesson 33's slow fall backwards, now faster
+      with stiffer legs.
+    - **Stagger Walk** (2 of 4, as before): its character steps back and stays up. The
+      top of its neck is 0.02-0.08 m lower at frame 108 than at 0 over five nudged runs
+      (endorphin 0.12 m; before 0.14 m unnudged and 0.02-0.51 m nudged, the pelvis down
+      to 0.37 m by frame 140 as it fell, now 0.92 m). Its feet go 0.53-0.59 m back by
+      frame 36 (endorphin 0.46) in seven steps up to the walk at frame 145 (four before,
+      as it sank; endorphin about five), but by frame 96 only 0.31-0.56 m back and
+      0.15-0.51 m along +x (endorphin 0.88 m back, 0.51 m along -x).
+    - Look and Reach and the mid-air Explosion move by a frame or a degree.
+
+    `a_stiff_arm_punches_without_coming_apart` (`world/limb.rs`) stands in for Multi
+    Martial's punch: a 0.4 kg clavicle, 2.2 kg upper arm, 1.3 kg forearm, 0.5 kg hand
+    and 0.06 kg fingers on a keyed chest, every muscle at 3000 N·m/rad; at 0.2 s the
+    clavicle's target jumps 0.6 rad and the elbow's 1.2. With whole-limb muscles the
+    clavicle is 0.070 rad short of its target 0.1 s later and no joint opens more than
+    1.1 mm; before (sequential impulses, 5 Hz on the limb) 0.085 rad and 6.4 mm, and
+    with that cap at 30 Hz 0.165 rad and 9.3 mm (it rings). Capped for its two bodies
+    (NeuroMotion's own projects) the clavicle lags 0.61 rad. It isn't chaotic: no
+    contacts, nothing near a limit.
+
+    NeuroMotion's own projects keep the two-body cap and sequential impulses
+    (`SpringCap::Bodies`): every stand-in built on them, `nudge_survey`, Balance's and
+    Stagger's push tests and `simulations_are_bit_identical_everywhere` give the same
+    numbers as before. Lock groups now store their matrix and its two factors by row,
+    at their sparsity pattern, instead of as dense n × n matrices (lesson 37's next
+    saving), bit for bit the same results.
+
+    Speed: imported scenes with characters pay for the solve. Alone on one core: Car
+    Hit 0.12 to 0.25 s for its 201 frames, Stagger Walk 0.12 to 0.29 s, Multi Martial
+    0.6 to 1.1 s, Catch Rope 2 to 4 s, Balcony 3 to 5 s for its 5.1 s, Bridge Escape 3
+    to 6 s for its 10.5 s, Gymnast Rings 2 to 7 s for its 10 s (its two cables are
+    characters with muscles too, and its limbs keep coming off and onto their stops);
+    the sweep 17 to 37 s on four cores, the release tests 13.3 to 15.1 s on one thread.
+    Every scene still simulates faster than real time on one core. Profiled (callgrind,
+    Stagger Walk), the time goes to the solves (20 %), the factor (15 %) and the
+    switching (15 %).
+
+    Still open: locks and contacts aren't in a character's system, so the cap can't go
+    yet (above); the guess of which stops push is wrong about half the time when a limb
+    rests against one, which costs time; the reference baselines in `reference.rs` are
+    still the old build's.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over
@@ -1628,9 +1762,10 @@ the Look and Reach and Explosion behaviour scenes) and scores how close NeuroMot
 numbers are; the measurements, the scores and what is still estimated from recordings
 are in [reference-measurements.md](reference-measurements.md). On the build with
 lessons up to 36, 14 of 36 measurements are within endorphin's uncertainty (15 with
-lessons up to 28: lessons 29-31 moved Stagger Walk's knife-edge steps).
+lessons up to 28: lessons 29-31 moved Stagger Walk's knife-edge steps); with lesson 38,
+18.
 
-Last run, over each scene's whole range, with lessons 1-36 and
+Last run, over each scene's whole range, with lessons 1-38 and
 imported behaviours actually running (until the behaviour names were matched,
 `docs/behaviours.md`, none of them ran in these scenes); all 17 scenes (Bridge Escape
 was skipped for size until lesson 37 showed it wasn't slow):
@@ -1640,11 +1775,16 @@ was skipped for size until lesson 37 showed it wasn't slow):
 | Clean | All 17: Arrows, Balcony, Bendy Stick, Bridge Escape, Car Crash, Car Hit, Catch Rope, Catch Run, Gymnast Rings, Heli Leap, Multi Martial, Rotating Floor, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
 | Failing | None |
 
-Max joint stretch per scene over its whole range: Arrows 0.55 cm, Balcony 1.07,
+Max joint stretch per scene over its whole range, with lesson 38: Arrows 0.19 cm,
+Balcony 0.45, Bendy Stick 0.12, Bridge Escape 0.86, Car Crash 0.12, Car Hit 0.34,
+Catch Rope 0.78, Catch Run 1.41, Gymnast Rings 0.15, Heli Leap 0.29, Multi Martial
+0.66, Rotating Floor 0.14, Stagger Walk 0.22, Sword Play 0.46, Tackle 0.14, Trapeze
+0.49, Walk With Gun 0.11; the whole sweep takes about 37 s on four cores. Before
+lesson 38: Arrows 0.55 cm, Balcony 1.07,
 Bendy Stick 0.61, Bridge Escape 0.93, Car Crash 0.66, Car Hit 0.80, Catch Rope 0.76, Catch Run 1.41,
 Gymnast Rings 1.15, Heli Leap 0.29, Multi Martial 1.86, Rotating Floor 0.53, Stagger
 Walk 0.29, Sword Play 0.46, Tackle 0.87, Trapeze 0.91, Walk With Gun 0.06 (the whole
-sweep takes about 16 s on four cores, Bridge Escape's 10.5 s range 3 s of it; exact cylinders, lesson 36, moved all but Bendy
+sweep took about 16 s on four cores, Bridge Escape's 10.5 s range 3 s of it; exact cylinders, lesson 36, moved all but Bendy
 Stick, Car Hit and Catch Run a little, virtual muscles, lesson 35, Balcony, Car Crash,
 Gymnast Rings, Heli Leap and Trapeze). The largest lock drifts are Car Hit's 38 cm (the
 car falling behind its carrier at frame 5, lesson 20) and Car Crash's 29 cm; Walk With
@@ -1728,7 +1868,10 @@ hasn't been re-run against endorphin's scene since.
 - Cylinders (lesson 36) rest a cap on six points of its rim, not on the whole circle,
   and a log resting on a free plate creeps (1.3 mm in 3 s). A rim point exactly on
   the edge of what it rests on counts as on it for 1 mm past the edge.
-- An exact solve for joint anchors where no lock holds the chain, nothing heavy
+- Locks and contacts in a character's own system (lesson 38), so its muscles need no
+  cap at all.
+- In NeuroMotion's own projects (imported scenes solve each character whole, lesson
+  38), an exact solve for joint anchors where no lock holds the chain, nothing heavy
   presses on it and no joint has opened 1.5 cm yet (lessons 12, 15 and 17 cover
   those, and lesson 29 a keyed body running into it). Joints, limits and contacts are still solved one after
   another, contacts last, so a joint can open up to the 1.5 cm before the direct

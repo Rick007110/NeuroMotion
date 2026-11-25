@@ -325,7 +325,8 @@ pub enum SpringCap {
     Bodies,
     /// The whole limb hanging from the joint against the rest of the body, as endorphin's
     /// muscles behave: a clavicle holds the arm up, a knee in a crouch the body above
-    /// it. Imported scenes use it (lesson 27).
+    /// it. Imported scenes use it (lesson 27). Each character is then solved as one
+    /// system, so the cap can be as high as the two-body one (lesson 38).
     Limbs,
 }
 

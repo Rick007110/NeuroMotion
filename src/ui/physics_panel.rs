@@ -53,7 +53,8 @@ fn spring_cap_hint(cap: SpringCap) -> &'static str {
         }
         SpringCap::Limbs => {
             "A muscle's stiffness is capped for the whole limb it moves, as in endorphin: \
-             a shoulder can hold the arm up. Imported scenes use this."
+             a shoulder can hold the arm up. Each character is solved as a whole, so its \
+             muscles can be stiff; this takes longer. Imported scenes use this."
         }
     }
 }
