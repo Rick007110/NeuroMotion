@@ -27,7 +27,7 @@ each other, and [what's next](#next-up). Each open item is, or will become, a Gi
 | Viewport | shaded 3D, several views | 🟡 bodies and bones drawn flat, one view |
 | Editing in the viewport | posing, picking bodies | ⬜ |
 | Re-simulating | press Simulate | ✅ automatic, in the background |
-| Same results as endorphin | – | 🟡 six scenes compared frame by frame with endorphin's own runs (exported as FBX); Car Hit close, Back-Flip-To-Combo now flips |
+| Same results as endorphin | – | 🟡 eight scenes compared frame by frame with endorphin's own runs (exported as FBX); Car Hit close, Back-Flip-To-Combo now flips |
 
 ## Milestone 1: Physics that matches endorphin
 
@@ -39,13 +39,19 @@ NeuroMotion, and we need numbers to prove it.
   poses, active animations, constraints (lock and join, including negative
   "drive" strengths)
 - ✅ Scenery props, characters placed in the world, the scene's own keys
-- ✅ All 17 sample scenes clean: the real Car Hit's clavicle came apart in its
+- ✅ Sample scenes clean, 17 of 17: the real Car Hit's clavicle came apart in its
   transition back to animation, which shortened the bones it drew; transitions now
   blend each bone in its own pose's frame (lesson 18,
   [#7](https://github.com/Rick007110/NeuroMotion/issues/7)). Lessons 15 and 17 fixed
   the car's hit and the arm whipping round after it stops
   ([#23](https://github.com/Rick007110/NeuroMotion/issues/23)) in the Car carry
-  stand-in. Bridge Escape, skipped for size until the large-scenes item, is clean too
+  stand-in. Bridge Escape, skipped for size until the large-scenes item, was clean by
+  luck: its 28 t truck cab, tumbling on its wheels, gained speed from its ground
+  contact, and one run in five failed (flying off at 47.7 m/s, or buried 17 cm). The
+  cause was the truck's hitch: at a large swing, its twist and swing stops pushed
+  along axes that weren't their gradients and fought each other through the cab's
+  one wheel on the ground. They now push along the true gradients (lesson 45), and
+  Bridge Escape is clean in 9 of 9 runs with gravity nudged by up to ±4e-4
 - ✅ Heavy bodies pressing on a character, friction only where surfaces touch, and
   characters with a joint come apart solved directly (lessons 15, 16 and 17)
 - ✅ Car Hit measured against a recording of endorphin's: a lock that falls behind
@@ -53,12 +59,11 @@ NeuroMotion, and we need numbers to prove it.
   / 100 (lessons 20 and 21). NeuroMotion's own projects use it too now; projects
   saved before keep force-capped friction
 - 🟡 Free fall and thrown bodies follow g·t²/2 to the integrator's 1 cm a second;
-  nothing damps a fast body (lesson 32). Car Hit's pedestrian flies to 1.73 m where
-  endorphin's own run, exported as FBX, reaches 1.79 m (the recording read 1.81 m):
-  the gap is the launch, not the flight. The car throws NeuroMotion's pedestrian back
-  along the road and sideways, because its left foot is pushed along by the
-  windscreen's lower end where endorphin's is thrown up along it, and it goes into
-  physics a frame after endorphin's (lesson 40)
+  nothing damps a fast body (lesson 32). A level switch now acts on the step into its
+  frame, as endorphin's does (lesson 42), and Car Hit's pedestrian flies to 1.83 m
+  where endorphin's own run, exported as FBX, reaches 1.79 m (1.73 m before). The car
+  still carries it along the road and sideways: its left foot sticks to the
+  windscreen's face where endorphin's slides up it (lesson 44)
 - ✅ A force pushes the bodies it names, a massless body never moves, and a
   transition ends exactly on the animation (lessons 22-24); scenes run as long as
   endorphin runs them, and the sweep checks each scene's whole range
@@ -77,11 +82,11 @@ NeuroMotion, and we need numbers to prove it.
   starts 3-8 frames later; nothing in the files explains either yet (lesson 41)
 - ✅ **Reference measurements**: scenes measured in endorphin (frames, positions,
   angles) and scored against NeuroMotion by a test, `reference_scores`, so "behaves
-  like endorphin" is checked, not eyeballed. 59 measurements in six scenes: Car Hit,
-  Back-Flip-To-Combo, Tackle, Stagger Walk and the Look and Reach and Explosion
-  behaviour scenes; 21 are within endorphin's uncertainty, 10 of them guarded against
-  regressions, and the known gaps print their error so progress shows
-  ([details](docs/reference-measurements.md)). 57 are read from endorphin's own runs
+  like endorphin" is checked, not eyeballed. 68 measurements in eight scenes: Car Hit,
+  Back-Flip-To-Combo, Tackle, Stagger Walk, Trapeze, Balcony and the Look and Reach
+  and Explosion behaviour scenes; 21 are within endorphin's uncertainty, 10 of them
+  guarded against regressions, and the known gaps print their error so progress shows
+  ([details](docs/reference-measurements.md)). 66 are read from endorphin's own runs
   exported as FBX (every joint at every frame, lesson 40; `tools/fbx_motion.py`
   reads an export), which corrected several recording-based rows; two still come from
   a recording. Anyone with endorphin can add rows, using the *Reference measurement*
@@ -94,15 +99,6 @@ NeuroMotion, and we need numbers to prove it.
 - ✅ **Sever events**: cut a joint or switch its muscle off
   ([#13](https://github.com/Rick007110/NeuroMotion/issues/13)); endorphin's own setting
   names for them still need checking against a real scene
-- 🟡 **Virtual muscles**: the chest-to-hand and pelvis-to-heel springs endorphin uses for
-  reaching and planting. Imported into the rig (not the skeleton or exported motion)
-  and simulated as force-limited springs pulling the hand or heel to where the active
-  poses that name them put it (docs/physics-design.md, lesson 35); the sweep stays 16 of
-  16 clean, five scenes move a little. Still open: active animations don't drive them
-  yet (doing so tipped Multi Martial's Stagger landing over), and endorphin's own gains
-  (1 in every preset field) make them weak, more brake than pull; how endorphin scales
-  them isn't known. None of the scenes with endorphin measurements uses them, the six
-  exported as FBX included (lesson 41), so nothing measured says yet
 - ✅ **Exact cylinders** ([#14](https://github.com/Rick007110/NeuroMotion/issues/14)):
   flat caps and a sharp rim against every shape, resting still on a cap or a side
   (lesson 36). A cap rests on six rim points, not the whole circle
@@ -143,6 +139,17 @@ scenes then run something sensible.
 - ✅ **Balance and Stagger on Coulomb friction**, so NeuroMotion's own projects use
   endorphin's friction too (lessons 21 and 26): Balance's swing foot
   now clears the ground, and Stagger shuffles and steps short
+- 🟡 **Virtual muscles**: the chest-to-hand and pelvis-to-heel springs endorphin uses for
+  reaching and planting. Imported into the rig (not the skeleton or exported motion)
+  and simulated as force-limited springs pulling the hand or heel to where the active
+  poses that name them put it (docs/physics-design.md, lesson 35); the sweep stays 16 of
+  16 clean, five scenes move a little. Still open: active animations don't drive them
+  yet (doing so tipped Multi Martial's Stagger landing over), and endorphin's own gains
+  (1 in every preset field) make them weak, more brake than pull; how endorphin scales
+  them isn't known. endorphin's own runs of Trapeze and Balcony, whose poses name them,
+  don't settle it either (lesson 43): Trapeze's acrobat is elsewhere by the time its
+  poses drive them (it needs JumpDive), and Balcony's export is a character no such
+  pose drives. Moved here from Milestone 1: settling their gains needs JumpDive first
 - ✅ **Inventory**: the behaviour names and settings that endorphin scenes use,
   gathered from scenes (not from the protected `.nmb` files), to plan the rest:
   [docs/behaviour-inventory.md](docs/behaviour-inventory.md)

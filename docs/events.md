@@ -28,9 +28,9 @@ step.
 
 | Event | What it does | Settings |
 |---|---|---|
-| **Simulation** | At its first frame, switches the character's simulation level. It stays there until the next simulation or transition event. | *Switch to*: Animated, Collision only, Collision with momentum, Simulated. *Momentum kept* (0–1): how much of the animation's velocity carries into physics. |
-| **Force** | A one-frame push at its first frame: a sudden change of velocity on one body (or every body). Only acts while the character is simulated. | *Strength* (m/s), *Heading* (degrees about the up axis: 0° = +Z, the way NeuroMotion's characters face at rest; 90° = +X; 180° = −Z), *Elevation* (degrees above horizontal), *Body*. New forces push the heaviest body (usually the torso) backwards at 3 m/s. |
-| **Transition** | Blends from the simulation back to the animation over the clip, then switches level. The blend weight goes from 0 at the first frame to 1 at the last, so the drawn pose is the animation from the last frame on (the simulated bodies switch one frame later). | *Then*: the level at the end (Animated by default). |
+| **Simulation** | At its first frame, switches the character's simulation level: on the step into that frame, so the frame already shows it, as in endorphin's own runs (physics-design.md, lesson 42). It stays there until the next simulation or transition event. | *Switch to*: Animated, Collision only, Collision with momentum, Simulated. *Momentum kept* (0–1): how much of the animation's velocity carries into physics. |
+| **Force** | A one-frame push at its first frame: a sudden change of velocity on one body (or every body), on the step from that frame to the next (endorphin's shows a frame later too). Only acts while the character is simulated. | *Strength* (m/s), *Heading* (degrees about the up axis: 0° = +Z, the way NeuroMotion's characters face at rest; 90° = +X; 180° = −Z), *Elevation* (degrees above horizontal), *Body*. New forces push the heaviest body (usually the torso) backwards at 3 m/s. |
+| **Transition** | Blends from the simulation back to the animation over the clip, then switches level. The blend weight goes from 0 at the first frame to 1 at the last, so the drawn pose is the animation from the last frame on (the simulated bodies switch on the step into it). | *Then*: the level at the end (Animated by default). |
 | **Active pose** | While simulated, the character's muscles pull towards a pose. Overlapping active poses each drive their own joints (an imported one only the joints it names); where two drive the same joint, the one that started last wins once it has eased in. A joint no running pose names follows the poses that name its nearest ancestor, at the angle they store for it: an imported event driving the thighs and calves also bends the feet as its pose has them. | *Strength* (multiplies muscle strength: stiffness, damping and force limit), *Ease in* (seconds to move the muscles over, linearly, from what they were doing: the target as well as the strength, as endorphin does), and the pose itself: captured from what the viewport shows at the playhead when the event is added; **Capture pose at playhead** re-records it. |
 | **Constraint** | From its first frame to its last, holds bodies: each where it was when the clip started, or all of them to the last body listed. | *Type*: Lock in place, Lock position only, Lock orientation only, Join bodies together. *Position* / *Rotation strength*: the most force (N) or torque (N·m) the hold may use along each axis (the world's for a lock, the anchor's for a join); a hold that can't keep up pulls with all of it (physics-design.md, lessons 5 and 20); 0 leaves an axis free, and a negative value drives instead (lesson 13). *Bodies*: any body of any character. |
 
@@ -66,7 +66,7 @@ Settings an event carries that the controls don't cover (imported from endorphin
 listed read-only under **Other imported settings**.
 
 A typical knock-down: a Simulation event (Simulated) and a Force event on the same
-frame, then optionally a Transition a second or two later to get back to the keys.
+frame (the push comes a step after the character goes limp, as in endorphin), then optionally a Transition a second or two later to get back to the keys.
 
 ## How they're stored
 

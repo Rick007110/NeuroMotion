@@ -106,7 +106,7 @@ Some tests are `#[ignore]`d because they need something not in the repository:
 
 | Test | Needs | Run with |
 |---|---|---|
-| `imports_every_bundled_file`, `sample_scenes_simulate_stably` | a local endorphin 2.5.2 install (`ENDORPHIN_DIR` if not in the default location); `NM_SCENES=Car,Rope` sweeps only scenes whose names contain one of those | `cargo test --release -- --ignored` |
+| `imports_every_bundled_file`, `sample_scenes_simulate_stably` | a local endorphin 2.5.2 install (`ENDORPHIN_DIR` if not in the default location); `NM_SCENES=Car,Rope` sweeps only scenes whose names contain one of those; `NM_GRAVITY_NUDGES=1e-4,-1e-4` also runs each scene with gravity scaled by 1 + each, since a chaotic scene can pass by luck | `cargo test --release -- --ignored` |
 | `behaviour_inventory` | a local endorphin 2.5.2 install (`ENDORPHIN_DIR`); prints which behaviours and event types the scenes use, with their settings ([docs/behaviour-inventory.md](docs/behaviour-inventory.md)) | `cargo test --release behaviour_inventory -- --ignored --nocapture` |
 | `export_samples` | Blender, to check the written files | see [docs/export.md](docs/export.md#checking-exports-in-blender) |
 | `trace_stand_in` | nothing; prints a frame-by-frame trace of a physics test scene or an `.ens` file | `NM_TRACE=<name or path> cargo test --release trace_stand_in -- --ignored --nocapture` |

@@ -150,25 +150,30 @@ repository.
 
 ## What is covered
 
-Run on lock strengths read in kilograms-force (physics-design.md, lesson 41),
-2026-11-25, with `NM_NUDGES=2`:
+Run with a level switch acting on the step into its frame (physics-design.md, lesson
+42), 2026-11-25, with `NM_NUDGES=2`:
 
 | Scene | Rows | Within | Guards | Mean error (× uncertainty) |
 |---|---|---|---|---|
-| Car Hit | 20 | 10 | 5 | 1.9 |
+| Car Hit | 20 | 9 | 5 | 1.7 |
 | Back-Flip-To-Combo (#6, the user's own scene) | 18 | 2 | 1 | 2.7 |
-| Tackle (the tackled character) | 9 | 3 | 0 | 2.3 |
+| Tackle (the tackled character) | 9 | 4 | 0 | 1.9 |
 | Hands reach and look at 2.5 (Look and Reach) | 3 | 2 | 1 | 1.4 |
 | Writhe in mid-air 2.5 (Explosion) | 5 | 3 | 3 | 1.2 |
 | Stagger Walk | 4 | 1 | 0 | 3.0 |
-| In all | 59 | 21 | 10 | |
+| Trapeze (lesson 43) | 6 | 0 | 0 | 4.0 |
+| Balcony (character01, lesson 43) | 3 | 0 | 0 | 4.0 |
+| In all | 68 | 21 | 10 | |
 
-57 rows come from endorphin's own runs exported as FBX (lesson 40); character02's two
+66 rows come from endorphin's own runs exported as FBX (lessons 40 and 43); character02's two
 rows in Hands reach and look at still come from a recording (the export holds
 character01 only). The rows used to be 36, all from recordings (18 within on the build
 with lessons up to 39); the exports showed several of them were misread (lesson 40),
-among them a Stagger Walk guard. With locks read in newtons the same 59 rows score 21
-within too, with Back-Flip-To-Combo 1 of 18 (3.2) and Tackle 4 of 9 (1.5). Ways of
+among them a Stagger Walk guard. With locks read in newtons the first 59 rows scored 21
+within too, with Back-Flip-To-Combo 1 of 18 (3.2) and Tackle 4 of 9 (1.5); before
+lesson 42, Car Hit 10 of 20 (1.9) and Tackle 3 of 9 (2.3). Summed over the six first
+scenes, each row's error in uncertainties (up to 4) went from 129.7 to 123.2 with
+lesson 42. Ways of
 reading endorphin's numbers scored on the recordings are in lessons 34 and 39. The
 baselines are this run's values; every guard holds over `NM_NUDGES=2`, where every
 row's nudged range is within a frame, 0.1° or 2 cm except Stagger Walk's feet (0.15 to
@@ -177,11 +182,11 @@ Back-Flip-To-Combo's combo (0.53 to 0.99 m).
 
 The known gaps, with their errors on that run:
 
-- **Car Hit**: the car launches the pedestrian back along the road and sideways
-  (centre of mass x +0.07 m at frame 68, z -0.26 m; endorphin -0.07, -0.06), because
-  its left foot is pushed along the road by the windscreen's lower end where
-  endorphin's is thrown up along it (lesson 40); it flies 6 cm lower (1.73 m at 67,
-  endorphin 1.79 m at 68) and folds 21° less at the hips.
+- **Car Hit**: the car carries the pedestrian along the road and sideways (centre of
+  mass x +0.20 m at frame 68, z -0.21 m; endorphin -0.07, -0.06), because its left
+  foot sticks to the windscreen's face where endorphin's slides up it (lesson 44); it
+  flies 4 cm higher (1.83 m at 70, endorphin 1.79 m at 68; 1.73 m before lesson 42)
+  and folds 20° less at the hips.
 - **Back-Flip-To-Combo**: it now crouches as endorphin's does (its centre of mass
   3.19 m up and 0.155 m behind the heels at frame 192, endorphin 3.16 m and 0.164 m)
   and springs up off the box, but to 3.54 m at frame 224 where endorphin's reaches
@@ -189,21 +194,32 @@ The known gaps, with their errors on that run:
   past the box top at 270 (296) and reaches the floor at 314 (330). It leans back
   1.5° more by frame 100, bends its trunk and hips 9-16° less in the crouch, and its
   combo jump reaches 0.56 m where endorphin's reaches 1.67 m.
-- **Tackle**: the tackled runner goes down later and slower (centre of mass 0.82 m at
-  frame 55, endorphin 0.70; head 0.69 m over it at 60, 0.46) and ends up 0.53 m
-  further along z.
+- **Tackle**: the tackled runner goes down later and slower (centre of mass 0.83 m at
+  frame 55, endorphin 0.70; head 0.70 m over it at 60, 0.46) and ends up 0.28 m
+  further along z (0.53 m before lesson 42). The tackler runs endorphin's Tackle
+  behaviour, which NeuroMotion doesn't have.
 - **Look and Reach**: character01's arms reach the box at frame 17 (endorphin 14);
   character02's far arm points at the box by frame 29, where endorphin's waits and
   gets there at about 55 (recording).
 - **Explosion**: the arms are highest at frame 16 (endorphin 28) and lowest at 42 (47).
 - **Stagger Walk**: the feet go 0.59 m back by frame 36 (endorphin 0.26 m) and by 96
   only 0.56 m back and 0.38 m along +x (endorphin 1.03 m back, 0.58 m along -x).
+  endorphin's steps one foot at a time, five steps from frame 12; NeuroMotion's
+  shuffles both feet from the first frame (lesson 44).
+- **Trapeze**: endorphin's acrobat jumps off the platform (JumpDive, which NeuroMotion
+  doesn't have), swings on the bar and lands at 341; NeuroMotion's stays on the
+  platform, then falls off it at 369.
+- **Balcony**: endorphin's character01 goes over the railing and is on the ground at
+  frame 96; NeuroMotion's falls on the balcony (its Arms Windmill isn't a behaviour
+  NeuroMotion has). The export's first frames don't line up with NeuroMotion's
+  (lesson 43), so its rows are changes with wide uncertainties.
 
 ## What is still estimated
 
 - Character02 in Hands reach and look at: two rows from the recording (frames read by
   eye with endorphin's frame counter).
-- The exports hold one character each: Tackle's tackler and Look and Reach's
-  character02 aren't measured from them.
+- The exports hold one character each: Tackle's tackler, Look and Reach's character02
+  and Balcony's seated characters (the only ones there whose poses drive virtual
+  muscles) aren't measured from them.
 - Stagger Walk's turn and steps, and the hands' positions in Look and Reach, aren't
   rows yet; the other sample scenes and behaviour scenes haven't been measured.

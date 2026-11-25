@@ -1362,6 +1362,197 @@ pub fn cylinder_pile() -> Project {
 }
 
 // ---------------------------------------------------------------------------------
+// Heavy jointed bodies (docs/physics-design.md, lesson 45)
+
+/// Bridge Escape's truck: a 28 t cab on four cylinder wheels joined to an 80 t trailer
+/// through a hitch that yaws 90° each way, pitches 15° and barely twists (2.5°), as
+/// the scene's is. It starts jackknifed by `yaw` degrees and rolled `roll` degrees onto
+/// the cab's wheels, `height` m up, and falls onto a floor box, the cab landing on
+/// the rims of one side's wheels while the hitch sits on its twist stop and its swing
+/// cone at once. Whole-character solve and Coulomb friction, as imported scenes have.
+pub fn truck(yaw: f32, roll: f32, height: f32) -> Project {
+    let mut p = new_scene("Truck", 3.0);
+    p.physics.spring_cap = SpringCap::Limbs;
+    let floor = Geometry::Box {
+        size: [30.0, 0.5, 30.0],
+    };
+    add_prop(
+        &mut p,
+        "floor",
+        CharacterKind::Environment,
+        scenery(&[(floor, Quat::IDENTITY, Vec3::new(0.0, 0.25, 0.0))]),
+        SimLevel::CollisionOnly,
+    );
+    let skeleton = SkeletonRef {
+        name: "Truck".into(),
+        source: None,
+        joints: vec![
+            Joint::new("trailer", None, [0.0, 0.0, 0.0]),
+            Joint::new("cab", Some(0), [0.1, 0.0, 0.0]),
+        ],
+    };
+    let shape = |geometry, rotation: Quat, position: Vec3| ShapeDef {
+        geometry,
+        frame: Frame {
+            rotation: rotation.to_array(),
+            position: position.to_array(),
+        },
+        material: "default".into(),
+        collides_with_parent: false,
+        collides_with_siblings: false,
+        collides_with_ancestors: false,
+    };
+    // Wheels turn about the truck's width (Z), a cylinder's axis.
+    let wheel = |x: f32, y: f32, z: f32| {
+        shape(
+            Geometry::Cylinder {
+                radius: 0.5,
+                length: 0.3,
+            },
+            Quat::IDENTITY,
+            Vec3::new(x, y, z),
+        )
+    };
+    let body = |name: &str, joint, centre: Vec3, mass: f32, inertia: f32, shapes| BodyDef {
+        name: name.into(),
+        joint,
+        frame: Frame {
+            rotation: Quat::IDENTITY.to_array(),
+            position: centre.to_array(),
+        },
+        mass,
+        inertia: [inertia; 3],
+        shapes,
+    };
+    // The scene's own masses and (spherical) inertias.
+    let trailer = body(
+        "trailer",
+        0,
+        Vec3::new(-5.0, 0.0, 0.0),
+        80_096.0,
+        481_600.0,
+        vec![
+            shape(
+                Geometry::Box {
+                    size: [10.0, 2.0, 2.4],
+                },
+                Quat::IDENTITY,
+                Vec3::ZERO,
+            ),
+            wheel(-3.5, -1.0, 1.05),
+            wheel(-3.5, -1.0, -1.05),
+            wheel(-2.3, -1.0, 1.05),
+            wheel(-2.3, -1.0, -1.05),
+        ],
+    );
+    let cab = body(
+        "cab",
+        1,
+        Vec3::new(1.5, 0.0, 0.0),
+        27_938.0,
+        14_680.0,
+        vec![
+            shape(
+                Geometry::Box {
+                    size: [2.6, 1.6, 2.4],
+                },
+                Quat::IDENTITY,
+                Vec3::new(0.0, 0.2, 0.0),
+            ),
+            wheel(0.8, -0.6, 1.05),
+            wheel(0.8, -0.6, -1.05),
+            wheel(-0.8, -0.6, 1.05),
+            wheel(-0.8, -0.6, -1.05),
+        ],
+    );
+    let hard = Limits {
+        twist_min: -0.0436,
+        twist_max: 0.0436,
+        swing1: std::f32::consts::FRAC_PI_2,
+        swing2: 0.2618,
+    };
+    let weak = Gains {
+        stiffness: 100.0,
+        damping: 10.0,
+        force_limit: 10.0,
+    };
+    let rig = PhysicsRig {
+        bodies: vec![trailer, cab],
+        joints: vec![JointDef {
+            name: "hitch".into(),
+            joint: 1,
+            body: 1,
+            parent_body: 0,
+            primary: Quat::IDENTITY.to_array(),
+            secondary: Quat::IDENTITY.to_array(),
+            hard,
+            soft: hard,
+            soft_stiffness: 0.0,
+            soft_damping: 0.0,
+            muscle: "hitch".into(),
+        }],
+        muscle_sets: vec![MuscleSet {
+            name: "Default".into(),
+            muscles: Default::default(),
+            fallback: MuscleGains {
+                twist: weak,
+                swing: weak,
+            },
+            linear: Default::default(),
+        }],
+        isotropic_inertia: true,
+        virtual_muscles: Vec::new(),
+    };
+    let id = add_prop(
+        &mut p,
+        "truck",
+        CharacterKind::Character,
+        (skeleton, rig),
+        SimLevel::Simulated,
+    );
+    let duration = p.settings.range.len();
+    motion(
+        &mut p,
+        id,
+        "Start pose",
+        0,
+        duration,
+        false,
+        vec![
+            held("trailer", Property::PosY, height),
+            held("trailer", Property::RotX, roll),
+            held("cab", Property::RotY, yaw),
+        ],
+    );
+    p
+}
+
+/// The truck's energy, kinetic and potential, at each frame from 1 to the second last,
+/// J; velocities from the frames either side.
+pub fn truck_energy(project: &Project, sim: &Simulation) -> Vec<f32> {
+    let rig = project.characters[1].physics.as_ref().unwrap();
+    let dt = 1.0 / project.settings.fps;
+    let g = -project.physics.gravity[1];
+    let at = |f: i32| sim.frame(f).unwrap()[1].as_ref().unwrap().bodies.clone();
+    (1..project.settings.range.end)
+        .map(|f| {
+            let (before, now, after) = (at(f - 1), at(f), at(f + 1));
+            rig.bodies
+                .iter()
+                .enumerate()
+                .map(|(i, body)| {
+                    let v = (after[i].1 - before[i].1) / (2.0 * dt);
+                    let w = (after[i].0 * before[i].0.inverse()).to_scaled_axis() / (2.0 * dt);
+                    0.5 * body.mass * v.length_squared()
+                        + 0.5 * body.inertia[0] * w.length_squared()
+                        + body.mass * g * now[i].1.y
+                })
+                .sum()
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------------
 // Behaviour scenes
 
 fn behave(project: &mut Project, character: CharacterId, start: i32, end: i32, name: &str) {
@@ -3119,6 +3310,7 @@ mod tests {
             "turntable" => turntable(),
             "cylinders" => cylinders(),
             "cylinder_pile" => cylinder_pile(),
+            "truck" => truck(88.0, 50.0, 4.0),
             "tilting_floor" => tilting_floor(),
             "roof_edge" => roof_edge(),
             "cut_rope" => cut_rope(),
@@ -3535,6 +3727,34 @@ mod tests {
             ("top", groove),
         ] {
             rests(&project, &sim, name, height, false);
+        }
+    }
+
+    /// Bridge Escape's truck lands jackknifed, its hitch on its twist stop and its swing
+    /// cone 1.5 rad round at once, the cab on one side's wheel rims: no contact or stop
+    /// may give it energy. With the stops' rows along the child's X axis and the cone's
+    /// normal (lesson 45) it gained 382 to 638 kJ of its 4.55 MJ as it landed (frames 38
+    /// to 40), in every one of the 9 runs with the drop height nudged; now 0.2 kJ at
+    /// most, the frame-difference velocities' own error.
+    #[test]
+    fn landing_truck_gains_no_energy() {
+        for nudge in nudges() {
+            let project = truck(88.0, 50.0, 4.0 * (1.0 + nudge));
+            let sim = check(project.clone());
+            let energy = truck_energy(&project, &sim);
+            // From frame 10: the start pose's first frames differ from the motion.
+            let mut lowest = f32::MAX;
+            let mut gain = 0.0f32;
+            for &e in &energy[10..] {
+                lowest = lowest.min(e);
+                gain = gain.max(e - lowest);
+            }
+            println!("nudge {nudge:+e}: gained {:.1} kJ", gain / 1e3);
+            assert!(
+                gain < 50e3,
+                "nudge {nudge}: the truck gained {:.0} kJ after landing",
+                gain / 1e3
+            );
         }
     }
 
@@ -4112,12 +4332,12 @@ mod tests {
     #[test]
     fn simulations_are_bit_identical_everywhere() {
         let scenes = [
-            ("car hit", car_hit(), 0x13fe_6b43_2574_a7a3u64),
-            ("explosion", mid_air(true, true), 0x946d_7389_3aab_f2fd),
+            ("car hit", car_hit(), 0x3e09_4739_0095_097fu64),
+            ("explosion", mid_air(true, true), 0xd188_3c5d_18c7_4bc1),
             (
                 "stagger",
                 pushed(Some("Stagger"), 2.8, Vec3::Z),
-                0xe2ab_f4f1_7094_e2cc,
+                0x97e6_8a46_7e06_2a46,
             ),
         ];
         let mut wrong = Vec::new();
@@ -5393,25 +5613,41 @@ mod endorphin_scenes {
                 continue;
             }
             // The whole range: a scene can go wrong long after its first seconds.
-            let project = crate::io::endorphin::import_scene(&path).unwrap().project;
-            let report = sweep(&project);
-            let ok = report.ok();
-            println!(
-                "{} {name:<16} {:>4} frames in {:>6.0?}  {report}",
-                if ok { "ok  " } else { "FAIL" },
-                project.settings.range.len() + 1,
-                report.elapsed
-            );
-            // What to look at: where the worst values happened and the set-up behind them.
-            let constrained = project
-                .clips
-                .iter()
-                .any(|c| matches!(&c.kind, ClipKind::Event { event } if event == "Constraint"));
-            if !ok || constrained || report.drift >= 0.05 || report.buried > 0.0 {
-                print!("{}{}", report.places(), describe(&project));
-            }
-            if !ok {
-                failures.push(name);
+            let imported = crate::io::endorphin::import_scene(&path).unwrap().project;
+            // `NM_GRAVITY_NUDGES=1e-4,-2e-4` also runs each scene with gravity scaled by
+            // 1 + each of these: chaotic scenes can pass by luck (lesson 45).
+            let gravity_nudges: Vec<f32> = std::env::var("NM_GRAVITY_NUDGES")
+                .map(|s| s.split(',').filter_map(|n| n.trim().parse().ok()).collect())
+                .unwrap_or_default();
+            for nudge in std::iter::once(0.0).chain(gravity_nudges) {
+                let mut project = imported.clone();
+                for g in &mut project.physics.gravity {
+                    *g *= 1.0 + nudge;
+                }
+                let report = sweep(&project);
+                let ok = report.ok();
+                let name = if nudge == 0.0 {
+                    name.clone()
+                } else {
+                    format!("{name} (g {nudge:+e})")
+                };
+                println!(
+                    "{} {name:<16} {:>4} frames in {:>6.0?}  {report}",
+                    if ok { "ok  " } else { "FAIL" },
+                    project.settings.range.len() + 1,
+                    report.elapsed
+                );
+                // What to look at: where the worst values happened and the set-up behind them.
+                let constrained = project
+                    .clips
+                    .iter()
+                    .any(|c| matches!(&c.kind, ClipKind::Event { event } if event == "Constraint"));
+                if !ok || constrained || report.drift >= 0.05 || report.buried > 0.0 {
+                    print!("{}{}", report.places(), describe(&project));
+                }
+                if !ok {
+                    failures.push(name);
+                }
             }
         }
         assert!(failures.is_empty(), "{failures:?}");

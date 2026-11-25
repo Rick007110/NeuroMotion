@@ -24,8 +24,13 @@ use glam::Vec3;
 
 use super::{JointRows, MAX_PUSH_SPEED, STATIC, SolverBody};
 
-/// Most rounds of switching rows onto and off their bounds, per pass.
-const PIVOTS: usize = 8;
+/// Most rounds of switching rows onto and off their bounds, per pass. A pass that runs
+/// out ends with its rows clamped, not solved, and the next pass starts from that
+/// guess: at 8, a kick in Multi Martial left a hand's muscles flipping between their
+/// limits from pass to pass, and the hand spun at 1,870 rad/s for a substep (lesson
+/// 45). Most passes settle in 0-3 rounds; over their whole ranges the 17 sample scenes
+/// have 323 passes that need more than 8 and 13 that need more than 24.
+const PIVOTS: usize = 24;
 /// Rows off the factor's guess beyond which it is factored again.
 const REFACTOR: usize = 6;
 /// Further rounds that only put rows past their bounds onto them.

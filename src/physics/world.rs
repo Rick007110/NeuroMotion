@@ -70,6 +70,9 @@ fn cap_spring(stiffness: f32, damping: f32, max_stiffness: f32) -> (f32, f32) {
     (max_stiffness, damping * scale)
 }
 const MAX_ANGULAR_SPEED: f32 = 100.0;
+/// Swing (rad) past which a joint's stops take their gradients as at this swing: the
+/// swing-twist split degenerates towards π (lesson 45).
+const MAX_SWING_GRADIENT: f32 = 2.5;
 /// Regularisation of a lock group's velocity solve and of its position correction, as a
 /// share of each row's own effective mass (see `LockGroup::factorize`).
 const GROUP_SOFTNESS: f64 = 1e-4;
@@ -1114,7 +1117,32 @@ impl World {
         let primary = self.bodies[a].rotation * joint.limit_parent;
         let secondary = self.bodies[b].rotation * joint.limit_child;
         let (twist, swing) = swing_twist(primary.inverse() * secondary);
-        let twist_axis = secondary * Vec3::X;
+        // The rows are the gradients of the twist angle and of the cone's margin with
+        // respect to the bodies' relative angular velocity, worked out from the swing-twist
+        // split itself (lesson 45). The child's own X axis and the cone's normal in the
+        // parent's YZ plane are those gradients only while the swing is small: at Bridge
+        // Escape's truck hitch, swung 1.5 rad, they were 128-143° apart, so a twist stop
+        // and a swing stop reached together pushed against each other with millions of
+        // N·m·s, and the truck's cab, held to the ground by one wheel, was driven into it.
+        //
+        // In the primary frame, with the swing θ about the unit axis `along` (in YZ) and
+        // `across` = X × `along`: turning about `along` changes only the swing angle;
+        // turning about `across` + tan(θ/2) X changes only the swing's direction, by θ /
+        // sin θ per radian; turning about the child's X changes only the twist. So the
+        // twist's gradient is X - tan(θ/2) `across` (1 along the child's X, 0 along the
+        // other two). Past `MAX_SWING_GRADIENT` the split degenerates (twist is
+        // undefined at π), so the gradients are taken as there.
+        let s = glam::Vec2::new(swing.y, swing.z);
+        let radius = s.length();
+        let dir = if radius > 1e-6 {
+            s / radius
+        } else {
+            glam::Vec2::X
+        };
+        let along = Vec3::new(0.0, dir.x, dir.y);
+        let across = Vec3::X.cross(along);
+        let bounded = radius.min(MAX_SWING_GRADIENT);
+        let twist_axis = primary * (Vec3::X - across * libm::tanf(0.5 * bounded));
 
         let schur = rows.angular_schur;
         let coupled_inv_mass = |axis: Vec3| axis.dot(schur * axis);
@@ -1171,25 +1199,30 @@ impl World {
                 .extend(spring(3, -twist_axis, soft_l.twist_max - twist));
         }
 
-        // Swing: elliptical cone in the primary frame's YZ plane.
-        let s = glam::Vec2::new(swing.y, swing.z);
-        let radius = s.length();
+        // Swing: elliptical cone in the primary frame's YZ plane. The margin is the
+        // boundary's radius in the swing's direction, r(dir), less the swing θ; it falls by
+        // 1 per radian turned about `along`, and changes with the direction by r³ (dir ×
+        // its ellipse's normal) / θ per radian it turns.
         if radius > 1e-6 {
-            let dir = s / radius;
+            // The direction turns about the twist-free axis perpendicular to `along`.
+            let (sin, cos) = (libm::sinf(radius), libm::cosf(radius));
+            let turn = across * cos + Vec3::X * sin;
             let boundary = |l: &Limits| {
                 let (y, z) = (l.swing1.max(1e-3), l.swing2.max(1e-3));
                 let (u, v) = (dir.x / y, dir.y / z);
-                (1.0 / (u * u + v * v).sqrt(), y, z)
+                let r = 1.0 / (u * u + v * v).sqrt();
+                // The ellipse's normal (unnormalised) across the swing's direction.
+                let normal_across = dir.x / (y * y) * -dir.y + dir.y / (z * z) * dir.x;
+                let steer = r * r * r * normal_across / libm::sinf(bounded).max(1e-3);
+                (r, primary * -(along + turn * steer))
             };
-            let (hard_r, y, z) = boundary(&hard);
-            let n = glam::Vec2::new(s.x / (y * y), s.y / (z * z)).normalize_or_zero();
-            let outward = (primary * Vec3::new(0.0, n.x, n.y)).normalize_or_zero();
+            let (hard_r, hard_axis) = boundary(&hard);
             if radius > hard_r - ANGULAR_MARGIN {
-                rows.limits.push(rigid(4, -outward, hard_r - radius));
+                rows.limits.push(rigid(4, hard_axis, hard_r - radius));
             }
-            let (soft_r, ..) = boundary(&soft_l);
+            let (soft_r, soft_axis) = boundary(&soft_l);
             if radius > soft_r {
-                rows.limits.extend(spring(5, -outward, soft_r - radius));
+                rows.limits.extend(spring(5, soft_axis, soft_r - radius));
             }
         }
     }
@@ -3130,6 +3163,106 @@ mod tests {
         run(&mut w, 2.0);
         let (_, swing) = swing_twist(w.bodies[b].rotation);
         assert!(swing.length() < 0.36, "swung {}", swing.length());
+    }
+
+    /// A stop row's axis is the gradient of what it holds: turning the child by ε about
+    /// any axis changes the twist, or the cone's margin, by ε times the row's axis along
+    /// it, however far the joint has swung (lesson 45). Bridge Escape's hitch: twist
+    /// ±2.5°, swing 90° one way and 15° the other, swung 0.3 to 1.5 rad.
+    #[test]
+    fn stop_rows_are_the_gradients_of_twist_and_cone() {
+        let mut w = world();
+        let a = ball(&mut w, Vec3::ZERO, 0.5, 100.0);
+        let b = ball(&mut w, Vec3::new(1.0, 0.0, 0.0), 0.5, 100.0);
+        let limits = Limits {
+            twist_min: -0.0436,
+            twist_max: 0.0436,
+            swing1: std::f32::consts::FRAC_PI_2,
+            swing2: 0.2618,
+        };
+        w.joints.push(Joint::new(
+            a,
+            b,
+            Vec3::ZERO,
+            Vec3::new(-1.0, 0.0, 0.0),
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+            limits,
+            limits,
+            0.0,
+            0.0,
+        ));
+        // The twist and the cone's margin of a child turned by `q`.
+        let measure = |q: Quat| {
+            let (twist, swing) = swing_twist(q);
+            let s = glam::Vec2::new(swing.y, swing.z);
+            let dir = s / s.length();
+            let (u, v) = (dir.x / limits.swing1, dir.y / limits.swing2);
+            (twist, 1.0 / (u * u + v * v).sqrt() - s.length())
+        };
+        let mut worst: f32 = 0.0;
+        for (angle, toward) in [(0.3f32, 0.2f32), (0.8, -0.5), (1.2, 1.0), (1.5, -1.3)] {
+            // Just inside the cone's edge, at most `angle` round, in the direction
+            // `toward`; at the twist stop.
+            let dir = glam::Vec2::new(libm::cosf(toward), libm::sinf(toward) * 0.2).normalize();
+            let (u, v) = (dir.x / limits.swing1, dir.y / limits.swing2);
+            let edge = (1.0 / (u * u + v * v).sqrt()).min(angle);
+            let swing = Quat::from_scaled_axis(Vec3::new(0.0, dir.x, dir.y) * (edge - 0.01));
+            let q = swing * Quat::from_rotation_x(0.04);
+            w.bodies[b].rotation = q;
+            let sb: Vec<SolverBody> = w
+                .bodies
+                .iter()
+                .map(|body| SolverBody {
+                    v: Vec3::ZERO,
+                    w: Vec3::ZERO,
+                    inv_mass: body.inv_mass,
+                    inv_i: body.inv_inertia_world(),
+                    carry: 1.0,
+                })
+                .collect();
+            let rows = w.prepare_joints(&sb, 1.0 / 480.0, &[false, false]);
+            let stops: Vec<&AngularRow> = rows[0]
+                .limits
+                .iter()
+                .filter(|l| l.id == 1 || l.id == 4)
+                .collect();
+            let (twist0, margin0) = measure(q);
+            let eps = 1e-3;
+            for omega in [
+                Vec3::X,
+                Vec3::Y,
+                Vec3::Z,
+                Vec3::new(0.3, -0.7, 0.6).normalize(),
+            ] {
+                let (twist1, margin1) = measure(Quat::from_scaled_axis(omega * eps) * q);
+                for l in &stops {
+                    let change = if l.id == 1 {
+                        -(twist1 - twist0) / eps
+                    } else {
+                        (margin1 - margin0) / eps
+                    };
+                    let off = (l.axis.dot(omega) - change).abs() / l.axis.length().max(1.0);
+                    worst = worst.max(off);
+                    assert!(
+                        off < 0.05,
+                        "swung {} rad: row {} predicts {} for a turn about {omega}, the joint \
+                         moves {change}",
+                        edge - 0.01,
+                        l.id,
+                        l.axis.dot(omega)
+                    );
+                }
+            }
+            if edge >= angle {
+                assert_eq!(stops.len(), 1, "only the twist stop");
+            } else {
+                assert_eq!(stops.len(), 2, "both stops");
+            }
+        }
+        println!("worst gradient error {worst}");
     }
 
     #[test]

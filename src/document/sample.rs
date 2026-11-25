@@ -468,8 +468,10 @@ fn endorphin_style_presets() -> Vec<MuscleSet> {
     ]
 }
 
-/// A short physics demo: the character idles, goes into simulation at frame 45 and is
-/// shoved in the chest, then falls under gravity with its default (soft) muscles.
+/// A short physics demo: the character idles, is shoved in the chest at frame 45 as it
+/// goes into simulation, then falls under gravity with its default (soft) muscles. A
+/// force at frame N acts on the step from N to N + 1 and a switch at N on the step into
+/// N, so the switch is at 46 for both to act on the same step.
 pub fn physics_demo_project() -> Project {
     let mut project = placeholder_project();
     project.settings.name = "Physics demo".to_owned();
@@ -492,7 +494,7 @@ pub fn physics_demo_project() -> Project {
         enabled: true,
     };
     let simulate = project.add_clip(
-        event("Go limp", events, 45, 1),
+        event("Go limp", events, 46, 1),
         ClipKind::Event {
             event: "Simulation".into(),
         },

@@ -223,7 +223,7 @@ pub const SCENES: &[Scene] = &[
                 1.790,
                 0.03,
                 false,
-                1.725,
+                1.83,
             ),
             fbx(
                 "flight: frame it is highest",
@@ -232,7 +232,7 @@ pub const SCENES: &[Scene] = &[
                 68.0,
                 2.0,
                 false,
-                67.0,
+                70.0,
             ),
             fbx(
                 "flight: centre of mass x, frame 68",
@@ -241,7 +241,7 @@ pub const SCENES: &[Scene] = &[
                 -0.073,
                 0.05,
                 false,
-                0.074,
+                0.20,
             ),
             fbx(
                 "flight: centre of mass x, frame 78",
@@ -250,7 +250,7 @@ pub const SCENES: &[Scene] = &[
                 -0.114,
                 0.05,
                 false,
-                0.112,
+                0.31,
             ),
             fbx(
                 "flight: centre of mass x, frame 88",
@@ -259,7 +259,7 @@ pub const SCENES: &[Scene] = &[
                 -0.155,
                 0.05,
                 false,
-                0.149,
+                0.42,
             ),
             fbx(
                 "flight: centre of mass z, frame 68",
@@ -268,7 +268,7 @@ pub const SCENES: &[Scene] = &[
                 -0.056,
                 0.05,
                 false,
-                -0.261,
+                -0.21,
             ),
             fbx(
                 "flight: centre of mass height, frame 78",
@@ -277,7 +277,7 @@ pub const SCENES: &[Scene] = &[
                 1.667,
                 0.05,
                 false,
-                1.559,
+                1.74,
             ),
             fbx(
                 "flight: centre of mass height, frame 88",
@@ -286,7 +286,7 @@ pub const SCENES: &[Scene] = &[
                 1.270,
                 0.05,
                 false,
-                1.122,
+                1.37,
             ),
             fbx(
                 "flight: left knee bend, frame 60",
@@ -295,7 +295,7 @@ pub const SCENES: &[Scene] = &[
                 61.1,
                 4.0,
                 false,
-                58.1,
+                59.2,
             ),
             fbx(
                 "flight: right knee bend, frame 60",
@@ -304,7 +304,7 @@ pub const SCENES: &[Scene] = &[
                 32.6,
                 4.0,
                 false,
-                34.6,
+                32.1,
             ),
             fbx(
                 "flight: trunk to left thigh bend, frame 70",
@@ -313,7 +313,7 @@ pub const SCENES: &[Scene] = &[
                 96.5,
                 4.0,
                 false,
-                75.4,
+                76.4,
             ),
             fbx(
                 "upside down (head under the centre of mass) from",
@@ -326,7 +326,7 @@ pub const SCENES: &[Scene] = &[
                 60.0,
                 2.0,
                 false,
-                62.0,
+                63.0,
             ),
             fbx(
                 "upside down until",
@@ -352,7 +352,7 @@ pub const SCENES: &[Scene] = &[
                 96.0,
                 2.0,
                 false,
-                94.0,
+                96.0,
             ),
             fbx(
                 "landed: centre of mass x, frame 96",
@@ -361,7 +361,7 @@ pub const SCENES: &[Scene] = &[
                 -0.358,
                 0.05,
                 false,
-                -0.073,
+                0.20,
             ),
             fbx(
                 "landed: centre of mass z, frame 96",
@@ -370,7 +370,7 @@ pub const SCENES: &[Scene] = &[
                 0.063,
                 0.05,
                 false,
-                -0.326,
+                -0.26,
             ),
             fbx(
                 "back on its feet: centre of mass x, frame 190",
@@ -579,7 +579,7 @@ pub const SCENES: &[Scene] = &[
                 0.698,
                 0.03,
                 false,
-                0.819,
+                0.83,
             ),
             fbx(
                 "hit: centre of mass height, frame 65",
@@ -597,7 +597,7 @@ pub const SCENES: &[Scene] = &[
                 0.464,
                 0.05,
                 false,
-                0.692,
+                0.70,
             ),
             fbx(
                 "down: centre of mass lowest, frames 60-100",
@@ -615,7 +615,7 @@ pub const SCENES: &[Scene] = &[
                 76.0,
                 3.0,
                 false,
-                77.0,
+                76.0,
             ),
             fbx(
                 "down: head under the centre of mass from",
@@ -628,7 +628,7 @@ pub const SCENES: &[Scene] = &[
                 75.0,
                 2.0,
                 false,
-                77.0,
+                76.0,
             ),
             fbx(
                 "carried: centre of mass z, frame 70",
@@ -637,7 +637,7 @@ pub const SCENES: &[Scene] = &[
                 1.514,
                 0.05,
                 false,
-                1.613,
+                1.58,
             ),
             fbx(
                 "lying: centre of mass x, frame 100",
@@ -646,7 +646,7 @@ pub const SCENES: &[Scene] = &[
                 0.785,
                 0.1,
                 false,
-                0.661,
+                0.75,
             ),
             fbx(
                 "lying: centre of mass z, frame 100",
@@ -655,7 +655,7 @@ pub const SCENES: &[Scene] = &[
                 1.650,
                 0.1,
                 false,
-                2.183,
+                1.93,
             ),
         ],
     },
@@ -815,6 +815,123 @@ pub const SCENES: &[Scene] = &[
                 uncertainty: 0.03,
                 guard: false,
                 baseline: -0.042,
+                source: FBX,
+            },
+        ],
+    },
+    Scene {
+        file: "Sample Scenes/Trapeze.ens",
+        measured: "endorphin's own run, exported as FBX (lesson 43)",
+        rows: &[
+            // endorphin's acrobat jumps off the platform (JumpDive, frames 50-108, a
+            // behaviour NeuroMotion doesn't have yet), catches the bar, swings across
+            // and lands on the far side, where Balance holds it up.
+            Row {
+                what: "jump: centre of mass along z, frames 0 to 160",
+                signal: Signal::Coord(Point::Com("character01"), Axis::Z),
+                measure: Measure::Change(0, 160),
+                endorphin: 4.126,
+                uncertainty: 0.3,
+                guard: false,
+                baseline: 0.15,
+                source: FBX,
+            },
+            Row {
+                what: "swing: centre of mass lowest, frames 150-260",
+                signal: Signal::Coord(Point::Com("character01"), Axis::Y),
+                measure: Measure::Min(150, 260),
+                endorphin: 2.392,
+                uncertainty: 0.1,
+                guard: false,
+                baseline: 4.37,
+                source: FBX,
+            },
+            Row {
+                what: "swing: centre of mass z, frame 300",
+                signal: Signal::Coord(Point::Com("character01"), Axis::Z),
+                measure: Measure::At(300),
+                endorphin: 4.472,
+                uncertainty: 0.2,
+                guard: false,
+                baseline: -9.03,
+                source: FBX,
+            },
+            Row {
+                what: "lands (a body centre under 15 cm)",
+                signal: Signal::Lowest("character01"),
+                measure: Measure::FirstBelow {
+                    from: 300,
+                    to: 600,
+                    below: 0.15,
+                },
+                endorphin: 341.0,
+                uncertainty: 3.0,
+                guard: false,
+                baseline: 369.0,
+                source: FBX,
+            },
+            Row {
+                what: "standing: centre of mass height, frame 400",
+                signal: Signal::Coord(Point::Com("character01"), Axis::Y),
+                measure: Measure::At(400),
+                endorphin: 0.736,
+                uncertainty: 0.05,
+                guard: false,
+                baseline: 0.48,
+                source: FBX,
+            },
+            Row {
+                what: "standing: centre of mass height, frame 600",
+                signal: Signal::Coord(Point::Com("character01"), Axis::Y),
+                measure: Measure::At(600),
+                endorphin: 0.732,
+                uncertainty: 0.05,
+                guard: false,
+                baseline: 0.20,
+                source: FBX,
+            },
+        ],
+    },
+    Scene {
+        file: "Sample Scenes/Balcony.ens",
+        measured: "endorphin's own run of character01, exported as FBX (lesson 43)",
+        rows: &[
+            // endorphin's character01 goes over the railing and falls to the ground.
+            // The export's first key is 0.26 m further along -z than NeuroMotion's
+            // frame 0 and holds 309 keys for the scene's 303 frames, so frames are
+            // read with a few frames' uncertainty and positions as changes.
+            Row {
+                what: "falls: first on the ground (a body centre under 15 cm)",
+                signal: Signal::Lowest("character01"),
+                measure: Measure::FirstBelow {
+                    from: 0,
+                    to: 302,
+                    below: 0.15,
+                },
+                endorphin: 96.0,
+                uncertainty: 5.0,
+                guard: false,
+                baseline: f32::NAN, // never on the ground: it stays on the balcony
+                source: FBX,
+            },
+            Row {
+                what: "lying: centre of mass height, frame 200",
+                signal: Signal::Coord(Point::Com("character01"), Axis::Y),
+                measure: Measure::At(200),
+                endorphin: 0.132,
+                uncertainty: 0.05,
+                guard: false,
+                baseline: 3.15,
+                source: FBX,
+            },
+            Row {
+                what: "lying: centre of mass along z, frames 0 to 200",
+                signal: Signal::Coord(Point::Com("character01"), Axis::Z),
+                measure: Measure::Change(0, 200),
+                endorphin: -3.756,
+                uncertainty: 0.3,
+                guard: false,
+                baseline: -1.16,
                 source: FBX,
             },
         ],

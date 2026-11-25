@@ -193,10 +193,22 @@ pub fn joint_curves(skeleton: &SkeletonRef, motion: &Motion) -> Vec<JointCurves>
                     })
                     .collect(),
             );
+            // A joint that keeps its translation is placed from where its parent is
+            // exported, not from where it really is: a spine stretched 0.9 mm and left
+            // out moved a head written relative to the real neck 1.6 mm off.
+            let translation = moves.then(|| match parent {
+                Some(p) => motion
+                    .frames
+                    .iter()
+                    .enumerate()
+                    .map(|(f, world)| world[p].0.inverse() * (world[i].1 - placed[p][f]))
+                    .collect(),
+                None => positions,
+            });
             JointCurves {
                 order,
                 rotation,
-                translation: moves.then_some(positions),
+                translation,
             }
         })
         .collect()

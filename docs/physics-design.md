@@ -36,7 +36,8 @@ Each tick (1/rate s) runs 4 substeps. Each substep:
    a crushing or a ramming body held, lesson 29).
 4. Iterate:
    - joint anchor points (3-row block);
-   - twist and swing limits (one-sided rows; springs in the soft zone);
+   - twist and swing limits (one-sided rows along the exact gradients of the twist
+     and the cone's margin, lesson 45; springs in the soft zone);
    - muscles;
    - in imported scenes (`SpringCap::Limbs`), each character's joints, muscles and
      limits instead, solved as one system (lesson 38), here in the first iteration
@@ -1976,6 +1977,245 @@ recordings. That gave two more lessons.
     `simulations_are_bit_identical_everywhere`, `nudge_survey` and the push tests don't
     change); an imported scene saved before keeps the newtons it was imported with.
 
+42. **A level switch at frame N acts on the step into N; a force at N on the step out of
+    it.** endorphin's own runs, exported as FBX (lesson 40), show a character switched
+    to physics at frame N already off its animation at N: Car Hit's pedestrian (its
+    event at 48) is 1-3 cm off it at 48, Tackle's runner (40) 1-3 cm at 40, the same
+    joints the same way NeuroMotion's move in their first simulated step (the right fingers -1.9 / +2.4 / +0.7 cm in
+    endorphin's, -0.6 / +3.1 / +0.6 in NeuroMotion's). NeuroMotion switched on the step
+    out of N, so its frame N was still the animation and every simulated frame came a
+    step late. `step_frame` now takes the level and momentum for the step from f from
+    frame f + 1; the bodies carry the animation's velocity from the step into the
+    switch frame, as before.
+
+    The other events were checked the same way, and stay as they were:
+    - **Forces.** Stagger Walk pushes its character at frames 0 and 51 (6 m/s); its
+      upper spine's velocity jumps at frame 52 in endorphin's export (from -0.78 to
+      +0.26 m/s along z), as in NeuroMotion's: an impulse at N acts on the step out of
+      N. Shifted with the levels, `balance_steps_with_toes_facing_any_way` failed
+      (head 1.40 m, bound 1.45): on the old code that stand-in falls when its push is
+      at frame 58 or 59 instead of 60 (1.26 and 1.40 m), a knife edge of its own.
+    - **Locks.** Started on the step into their frame with the level, Car Crash's
+      hand-over from one lock to the next at frame 63 overlapped a step and the car
+      was held 44 cm from where the second lock caught it; started and ended a step
+      earlier, nothing overlaps, but the gun drop stand-in, whose join ends on the
+      scene's last frame, lets go a frame early (a hand 2.1 cm off its prop in a
+      nudged run), and the error barely moves (121.2 against 123.2). Unchanged.
+    - **Spans** (active poses, behaviours, a muscle switched off): read for the step
+      into each frame, the six scenes' error rose from 121.2 to 134.0. Unchanged.
+
+    The demo project's switch moves from 45 to 46, so its shove at 45 acts on the same
+    step as before and the demo is the same motion bit for bit. Its old timing, a step
+    limp before the shove, gave a 1.33 mm transient at one elbow as the body lands flat
+    at frame 72 (shoves at 42-50 give 0.04-0.6 mm), and showed an exporter bug: a joint
+    that keeps its translation was written relative to its real parent, not to where
+    the parent is exported, so a spine stretched 0.9 mm and left out moved the head
+    1.6 mm (fixed; `src/io/motion.rs`).
+
+    `reference_scores`, the six scenes (rows within / error sum, each row up to 4
+    uncertainties): 21 / 129.7 → 21 / 123.2. Car Hit 10 / 37.8 → 9 / 34.8: it flies to
+    1.83 m (endorphin 1.79, 1.73 before), 1.74 and 1.37 m high at 78 and 88 (1.67,
+    1.27; 1.56, 1.12 before), first on the ground at 96 (96; 94), but further along
+    the road the wrong way (centre of mass x 0.20 / 0.31 / 0.42 m at 68 / 78 / 88,
+    endorphin -0.07 / -0.11 / -0.16, lesson 44). Tackle 3 / 20.5 → 4 / 17.0: lying at
+    x 0.75, z 1.93 m at frame 100 (0.79, 1.65; 0.66, 2.18 before). Lesson 40's
+    reading, moving all animation a frame later, raised Car Hit's flight to 1.94 m
+    because it moved the car's hit too.
+
+    The sample sweep is 16 of 17 clean: **Bridge Escape fails**, and the failure is
+    the scene's own chaos. Its 108 t truck is a 28 t cab and an 80 t trailer joined
+    through two 22 kg links (`FBXImport04`); after its lock lets go at 169 it
+    tumbles, and from frame 358 the cab, resting on its wheels' rims and on the floor
+    box at once, gains speed every substep: its ground contact's warm-started impulse
+    grows (82 to 450 kN·s in eight substeps) while the contact opens, the solve pass
+    pulls the cab back and the relax pass restores what the warm start gave, and it
+    leaves at 47.7 m/s (the sweep's limit is 40). Restitution is not it (the same
+    with it off). The change only moved when character02 goes into physics (frame
+    134), which reaches the truck through its heel's join (149-153). On the old code
+    the same cab sinks 17 cm into the ground with gravity scaled by 1 - 1e-4 (buried,
+    failing); on the new one the nominal run fails and gravity × (1 ± 1e-4), (1 ±
+    2e-4) are clean (fastest 21-23 m/s). One in five either way: the sweep's 17 of 17
+    held by luck. Not fixed here; lesson 45 found the cause (the hitch's stops) and
+    fixed it, with a stand-in of the truck landing.
+
+    Other scenes that moved (lowest / stretch / fastest / largest lock drift): Car Hit
+    0.026 → 0.018 m / 0.34 → 0.33 cm / 12.5 → 12.8 m/s / 12.5 → 0.6 cm (the car's
+    join to its carrier), Heli Leap 0.29 → 0.37 cm / 13.5 → 12.2 m/s, Multi Martial
+    0.002 → -0.008 m / 0.66 → 0.57 cm / 21.6 → 22.8 m/s, Tackle 0.22 → 0.13 cm / 9.1
+    → 9.8 m/s. Stand-ins, `simulations_are_bit_identical_everywhere`, `nudge_survey`
+    and the push tests don't change: none switches level mid-scene.
+
+43. **Trapeze's and Balcony's exports can't settle the virtual muscles' gains; their
+    rows measure behaviours NeuroMotion doesn't have.** A user exported endorphin's own runs of the two sample scenes
+    whose whole-body active poses name the virtual muscles (lesson 35). Each holds
+    character01 only.
+
+    - **Trapeze.** The poses naming the virtual muscles are 325-341 and 341-352
+      (strength 3; the 133-265 and 270-288 poses name two and six joints). By then
+      the runs have nothing in common: endorphin's acrobat jumps off the platform at
+      about frame 100 (JumpDive, 50-108, which NeuroMotion doesn't have), catches the
+      bar, swings to 4.7 m along z and lands at 341; NeuroMotion's never leaves the
+      platform. Hands relative to the upper spine and heels relative to the pelvis,
+      in their frames, are 0.24 m from endorphin's before the poses (300-324) and
+      0.19-0.21 m during them, whatever the gains: ×1 (as read), off, ×10 and ×100
+      in all three fields move the window by under 3 cm (0.208 / 0.186 m over 325-338
+      / 339-352 as read, 0.181 / 0.167 at ×100), ×1000 makes 339-352 worse (0.257).
+      Nothing to fit.
+    - **Balcony.** Its three seated characters' poses name them (0-64, 0-70, 0-73),
+      but the export is character01, which none of them drives. endorphin's
+      character01 goes over the railing at about frame 55 and is on the ground at 96;
+      NeuroMotion's falls on the balcony (its Arms Windmill, 22-96, and
+      LegsStraighten, 110-136, aren't behaviours NeuroMotion has). The export's first
+      key is 0.26 m further along -z than NeuroMotion's frame 0, with the same height
+      and side, and it has 309 keys for the scene's 303 frames; no offset of -8 to +8
+      keys lines the first frames up (best -4, 0.19 m mean). Something about how the
+      export starts, or how NeuroMotion places character01 at frame 0, is still
+      unexplained.
+    - **Locks in kilograms-force** (lesson 41) don't change either character: their
+      locks (Trapeze's feet, pelvis and hands; Balcony's are on props) are 1e5 or
+      more, rigid read either way. Read in newtons, both runs are the same to the
+      centimetre.
+
+    So the virtual muscles' gains stay as read (`DesiredPoseCalibration`, 1 in every
+    field). The nine rows (`reference_scores`, all known gaps, 0 of 9 within) are the
+    jump, the swing and the landing of Trapeze and the fall of Balcony's character01;
+    they measure JumpDive and Arms Windmill as much as the physics, and wait for
+    those behaviours.
+
+44. **Car Hit's launch is the left foot sticking to the windscreen; the car is as the
+    file has it.** Investigated, nothing changed:
+    - **The car's shapes and placement are the file's.** Its seven boxes are read as
+      written (endorphin's `Cuboid` parameters are full sizes: the scene's 100 × 3 ×
+      100 ground box sits with its top at y = 0); the windscreen is a 0.117 × 0.622 m
+      slab leaning back at 50° from the bonnet's rear end, and the car's join to its
+      carrier now drifts 0.6 cm at most (lesson 42). In the car's frame both
+      pedestrians' left toes are at the same place at frame 49 (0.05, 0.46 m against
+      0.03, 0.46).
+    - **endorphin's foot slides up the windscreen; NeuroMotion's sticks.** From 49
+      to 50 endorphin's toes move (-0.12, +0.11) m in the car's frame, along the
+      windscreen's face, and keep going (up to (-0.54, +0.85) by 54). NeuroMotion's
+      are on the same face, 1.5 cm into it, from 50 to 55 and don't move along it:
+      carried at the car's 8 m/s. Rubber feet on the car's material (it has none:
+      "default") are endorphin's Bouncy interaction, friction 100 (μ = 1) and
+      restitution 1. The face meets the foot at about tan 50° = 1.19 against μ = 1, so
+      whether it slides depends on the leg's effective mass along and across the
+      face; in endorphin's run the toes' velocity along the face dropped from about
+      9.3 to 6.0 m/s while the normal one went from -7.9 to +1.5, as if μ were about
+      0.35, and they don't bounce (restitution 1 would throw them off at 7.9 m/s).
+    - **A friction cone instead of the two-row box** (the box lets friction reach
+      μ√2 on the diagonal) doesn't free the foot: Car Hit's x at 68 stays 0.20 m, and
+      Stagger Walk's neck row falls out (error 12.0 → 15.9). Not kept.
+    - Lesson 21's μ = friction / 100 was fitted to the recording's Car Hit (its
+      pedestrian stopped dead along the road); the exports say the pedestrian goes
+      back along the road, so that fit is worth redoing, but a friction reading has to
+      hold for every scene, and Car Hit is the only one with this contact.
+
+    The other open leads, looked at against the exports:
+    - **Tackle's yaw.** The lock on the runner's pelvis holds world x only
+      (orientation strength 500, 0, 0); endorphin's pelvis turns -1.5° about the
+      vertical by frame 48, NeuroMotion's -13° (the runner's own LegsKick, 48-75,
+      isn't NeuroMotion's either). Read in the body's own frame the lock
+      would hold roll, not yaw (the pelvis body's x points along -z): no reading of
+      the axes explains it. The tackler (not in the export) runs endorphin's Tackle
+      behaviour, which NeuroMotion doesn't have; its arms are what turns the runner.
+    - **Stagger Walk.** endorphin's character waits 12 frames after the push at frame
+      0, then steps one foot at a time, five steps of 0.3-0.6 m (right at 12, left at
+      36, right at 38 and 59 after the push at 51, left at 86), turning -32° and then
+      +54°; NeuroMotion's starts shuffling both feet at once in the first frame (15
+      starts of a step in 108 frames, the left foot 0.73 m back by 36) and turns
+      +40°. That is Stagger's own stepping (`docs/behaviours.md`), not the physics.
+    - **Back-Flip-To-Combo** didn't change (it starts simulated): it still jumps to
+      3.54 m at 224 (3.745 m at 242), lands at 314 (330) and has turned -469° by 297
+      (-523°); lesson 41's spine, hip and take-off gaps stand.
+
+45. **A joint stop must push along the gradient of what it holds, or two stops fight,
+    and a contact pays for it.** Bridge Escape's 28 t truck cab, tumbling on its wheels
+    after the truck falls (lesson 42), gained speed every substep and left at 47.7 m/s.
+    Traced substep by substep (frames 357-360):
+    - The cab rests on the rim of one wheel on the ground. Its hitch to the 80 t
+      trailer (twist ±2.5°, swing 90° one way and 15° the other, as the scene has it)
+      is swung 1.52 rad, nearly on its 90° stop, and twisted just past its 2.5°: both
+      stops are active.
+    - The twist row pushed about the child's X axis and the cone row along the
+      ellipse's normal in the parent's YZ plane. Those are the gradients only while the
+      swing is small. At 1.5 rad the two rows' axes were 128-143° apart (the true
+      gradients are close to perpendicular there), so each stop's correction undid the
+      other's: 1.8 and 2.0 million N·m·s on them in one substep, and the position
+      correction turned the cab into the ground.
+    - The ground contact, solved before the whole-character solve that has the last
+      word (lesson 38), was pushed through; it pushed harder every substep (82 to 450
+      kN·s in eight) while the wheel sank 5 to 38 mm, and the relax pass left it
+      pushing on a point that was opening. Warm-started, that impulse alone spun the
+      cab at 35 rad/s. The truck's energy went 6.1, 7.0, 9.2, 13.2, 20.5 MJ in five
+      substeps. Restitution had no part (the same with it off).
+
+    Releasing a contact's impulse where its point opens at the end of the substep
+    (so a contact can never push on an opening point) didn't help: the nominal run
+    still flew off (46.9 m/s), and two of four nudged runs sank the cab 12-17 cm into
+    the ground, the failure the old code had with gravity × (1 - 1e-4). The stops were
+    the cause, the contact only where it showed.
+
+    The rows are now the exact gradients from the swing-twist split (`prepare_limits`).
+    In the parent's limit frame, with the swing θ about the unit axis *a* in its YZ
+    plane and *b* = X × *a*: turning about *a* changes only the swing angle; turning
+    about *b* + tan(θ/2) X changes only the swing's direction, by θ / sin θ per
+    radian; turning about the child's X changes only the twist. So the twist's
+    gradient is X − tan(θ/2) *b*, and the cone margin's, r(dir) − θ, is −(*a* + r³
+    (n × dir) / sin θ · *c*), with *c* = cos θ *b* + sin θ X the twist-free direction
+    across the swing and n the ellipse's unnormalised normal. Both are taken as at
+    2.5 rad past it (twist is undefined at π). The rows are no longer unit length: the
+    cone's is 4 at the hitch, where a small turn of the swing's direction runs into
+    the narrow 15°. `stop_rows_are_the_gradients_of_twist_and_cone` checks them against
+    finite differences of the measured twist and margin at swings of 0.3 to 1.5 rad
+    (worst error 0.2 %); the old rows were off by a factor of 2 already at 0.29 rad.
+    The swing row alone, with the old twist row, also cleared the nominal run, but
+    left the cab's centre 15-19 cm inside scenery in two of seven nudged runs (not
+    looked into further); with both rows, none of nine.
+
+    Stand-in `truck` (`landing_truck_gains_no_energy`): the truck, jackknifed 88° and
+    rolled 50°, dropped 4 m onto a floor box, the cab on four cylinder wheels; whole-
+    character solve and Coulomb friction, as imported scenes have. It lands (frames
+    38-40) with the hitch on both stops at 1.5 rad. Over 9 runs with the drop height
+    nudged by up to ±4e-4 it gained 382 to 638 kJ of its 4.55 MJ as it landed; now 0.2
+    kJ at most, the frame-difference velocities' own error.
+
+    The new gradients made Multi Martial's largest stretch 0.57 → 2.10 cm: a kick on
+    character03 at frame 165.5 needed 11 rounds of block pivoting in the
+    whole-character solve, past its cap of 8. A pass that runs out ends with its rows
+    clamped, not solved, and the next starts from that guess, so the wrist's and
+    elbow's muscles flipped between their force limits from pass to pass and the
+    0.5 kg hand spun at 1,870 rad/s for a substep. That is lesson 38's machinery, not
+    the gradients (the old code runs out of rounds there too, 23 times in the scene,
+    just not that badly), and the cap is only a cost bound: it is now 24. Over the 17
+    scenes' whole ranges 323 passes needed more than 8 rounds (Catch Rope 154, Bridge
+    Escape 72, Balcony 22) and 13 more than 24; the sweep takes 37 s as before.
+
+    The sample sweep is 17 of 17 clean, and Bridge Escape clean in 9 of 9 runs with
+    gravity scaled by 1 + 0, ±1e-4 ... ±4e-4 (`NM_GRAVITY_NUDGES`; before: the nominal
+    run failing, one in five of the others), fastest body 24.2-25.0 m/s. One nudged run
+    has the cab's centre 16 cm inside a box of the bridge at frame 384 while it falls
+    past it, touching nothing deeper than 1 cm (the box passes between its shapes). Largest stretch
+    before → after (cm): Arrows 0.19 → 0.42, Balcony 0.45 → 0.41, Bridge Escape 0.41 →
+    0.38, Catch Rope 0.67 → 0.90, Gymnast Rings 0.55 → 0.81, Multi Martial 0.57 → 0.57,
+    Rotating Floor 0.09 → 0.16, Trapeze 0.49 → 0.41, Walk With Gun 0.11 → 0.09; the
+    others within 0.05.
+
+    `reference_scores` (`NM_NUDGES=2`): every guard holds, 21 of 68 rows within
+    endorphin's uncertainty as before, the error summed over the rows (each counted up
+    to 4 uncertainties) 159.4 → 160.5. Stagger Walk's neck row went from -0.04 to -0.06
+    m (endorphin -0.04 ± 0.03) and Tackle's lying z from 1.93 to 1.95 m, both inside
+    the range the nudged runs gave before (-0.08 to -0.02, 1.93 to 1.99).
+
+    NeuroMotion's own projects change wherever a joint reaches a stop at a large swing:
+    `simulations_are_bit_identical_everywhere` has new values. Over `nudge_survey`'s 9
+    runs each: Car carry 1.10-1.25 → 0.98-2.43 cm at the hit (a toe; the body without
+    toes and fingers 0.30-0.87 → 0.34-0.68), 0.08-0.57 → 0.01-0.58 after the stop; Car
+    Hit 0.65-2.38 → 0.85-1.86 cm; Explosion lands at frame 54 as before, settling at
+    0.45-1.51 cm/s (0.80-2.46); Balance steps and stays up after 5-8 of 8 backward
+    pushes (6-8), 10-12 of 22 sideways (9-12), 9-11 of 12 forwards (10-12); Stagger
+    takes 29-38 steps in all (26-37), its feet moving 2.21-3.48 times Balance's
+    (2.15-3.54). The pivoting cap changes none of them.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over
@@ -2015,8 +2255,8 @@ was skipped for size until lesson 37 showed it wasn't slow):
 
 | Result | Scenes |
 |---|---|
-| Clean | All 17: Arrows, Balcony, Bendy Stick, Bridge Escape, Car Crash, Car Hit, Catch Rope, Catch Run, Gymnast Rings, Heli Leap, Multi Martial, Rotating Floor, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
-| Failing | None |
+| Clean | 17: Arrows, Balcony, Bendy Stick, Bridge Escape, Car Crash, Car Hit, Catch Rope, Catch Run, Gymnast Rings, Heli Leap, Multi Martial, Rotating Floor, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
+| Failing | None since lesson 45. Bridge Escape failed from lesson 42 to 44 (its truck's cab, tumbling on its wheels, flew off at 47.7 m/s; one run in five before that too), and is clean in 9 of 9 runs with gravity nudged by up to ±4e-4 (`NM_GRAVITY_NUDGES=1e-4,-1e-4,...` runs each scene again with gravity scaled by 1 + each) |
 
 Max joint stretch per scene over its whole range, with lesson 38: Arrows 0.19 cm,
 Balcony 0.45, Bendy Stick 0.12, Bridge Escape 0.86, Car Crash 0.12, Car Hit 0.34,
@@ -2072,6 +2312,7 @@ What each stand-in reproduces:
 | Turntable | No ground; a flat cylinder spinning | floats 0.9 m above it | rests on it |
 | Cylinders | Free cylinders on the ground and on boxes: one dropped on its cap leaning 3°, a log rolled at 1 m/s, a disc dropped tilted 10°, one dropped on a box leaning 3°, logs lying on a box and on the ground; balls dropped on a pillar's cap 3 cm inside and 2 cm outside its rim (lesson 36) | the standing ones topple onto their round ends (one off its box); the inner ball rolls off the cap | all rest to the millimetre, upright or level within 0.5°, still; the log rolls straight at 0.667 m/s; the inner ball stays on the cap, the outer one is thrown off the rim |
 | Cylinder pile | Cylinders on cylinders: three discs stacked, a post on a disc, a log on a plate, a pyramid of three logs (lesson 36) | the post topples | all rest to the millimetre |
+| Truck | Bridge Escape's truck: a 28 t cab on four cylinder wheels joined to an 80 t trailer by a hitch (twist ±2.5°, swing 90° and 15°), jackknifed 88°, rolled 50° and dropped 4 m onto a floor box, landing with the hitch on both stops (lesson 45) | gains 382-638 kJ of its 4.55 MJ on landing, over 9 nudged runs | 0.2 kJ at most |
 | Hanging weight | A 20-80 kg weight on a rope locked at the top, hanging straight (lesson 10) | 0.36 m stretch, 63 m/s | 1.5 cm, 0.6 m/s |
 | Car carry | Car Hit: a 747 kg car joined (1e5) to a keyed carrier drives into a standing character with clavicles at 8 m/s, catches its arm against its ribs, carries it on the bonnet and stops dead at 1.65 s (lesson 15). The join gives way by 23 cm as the carrier stops, by design. After the stop the pedestrian slides off and the arm whips round against its own chest and neck. Coulomb friction, and the car 15 cm off the ground, as Car Hit's is (lesson 21) | 5.8 cm (shoulder) at the hit; 7.0 cm after the stop (#23) | Over 201 nudged runs, up to the stop: 0.7 cm at most for the body (shoulder included), toes and fingers 0.5-2.2 cm at the hit. After the stop: 1.1 cm at most (lessons 17 and 21) |
 | Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps, Coulomb friction (lesson 21), whole-limb muscle cap (lesson 27) | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -79° at 297, leaves the box at 319, lands behind it at 385, -279° in all. Left alone: tips forwards and falls off the front at 337, landing at 411 (changed by lessons 16 and 21 and the limb cap) |
@@ -2112,7 +2353,11 @@ hasn't been re-run against endorphin's scene since.
   and a log resting on a free plate creeps (1.3 mm in 3 s). A rim point exactly on
   the edge of what it rests on counts as on it for 1 mm past the edge.
 - Locks and contacts in a character's own system (lesson 38), so its muscles need no
-  cap at all.
+  cap at all. Contacts solved before it can still be pushed through by it: a stop
+  correcting itself drove Bridge Escape's cab into the ground (lesson 45).
+- The whole-character solve still runs out of pivoting rounds (24) in 13 passes over
+  the 17 sample scenes, and then ends with its rows clamped rather than solved
+  (lesson 45).
 - In NeuroMotion's own projects (imported scenes solve each character whole, lesson
   38), an exact solve for joint anchors where no lock holds the chain, nothing heavy
   presses on it and no joint has opened 1.5 cm yet (lessons 12, 15 and 17 cover

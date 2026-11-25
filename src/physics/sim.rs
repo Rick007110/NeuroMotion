@@ -970,12 +970,17 @@ fn step_frame(project: &Project, running: &mut Running) -> Frame {
     let ticks = (project.physics.rate / fps).round().max(1.0) as usize;
     let dt = 1.0 / fps / ticks as f32;
 
-    // Level changes and impulses happen at frame boundaries.
+    // Level changes and impulses happen at frame boundaries. A level switch at frame N
+    // acts on the step into frame N, so frame N already shows it, as in endorphin's own
+    // runs (lesson 42: Car Hit's pedestrian, switched at 48, has left its animation by
+    // 48). A force at N acts on the step out of N, as endorphin's does (Stagger Walk's
+    // push at 51 shows at 52).
+    let at = frame + 1;
     for (ci, binding) in running.bindings.iter_mut().enumerate() {
         let Some(binding) = binding else { continue };
         let character = &project.characters[ci];
         let plan = &running.plans[ci];
-        let level = level_at(plan, character.default_level, frame);
+        let level = level_at(plan, character.default_level, at);
         if level != binding.level {
             if level == SimLevel::Simulated {
                 // Hold the pose the character has as it goes limp-ish into physics.
@@ -983,7 +988,7 @@ fn step_frame(project: &Project, running: &mut Running) -> Frame {
             }
             binding.level = level;
         }
-        let motion = motion_for(level, momentum_at(plan, frame));
+        let motion = motion_for(level, momentum_at(plan, at));
         for b in 0..binding.rig.bodies.len() {
             running.world.bodies[binding.first_body + b].motion = motion;
         }
