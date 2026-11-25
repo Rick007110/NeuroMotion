@@ -21,7 +21,7 @@
 - Comparing **more scenes with endorphin, by numbers**: exports of endorphin's results instead of recordings, and more scenes
 - Active poses applied the way endorphin does (Back-Flip-To-Combo)
 - Stepping on endorphin's own characters (Stagger Walk), and stepping sideways
-- **Virtual muscles**: active poses pull the hands and heels toward the pose
+- **Virtual muscles**: active poses pull the hands and heels toward the pose (their strength waits on JumpDive)
 
 ### 📋 Planned
 - More behaviours: **JumpDive**, **Legs Kick**, **Arms Windmill** and the rest of endorphin's library

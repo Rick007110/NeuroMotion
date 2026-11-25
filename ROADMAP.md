@@ -99,17 +99,6 @@ NeuroMotion, and we need numbers to prove it.
 - ✅ **Sever events**: cut a joint or switch its muscle off
   ([#13](https://github.com/Rick007110/NeuroMotion/issues/13)); endorphin's own setting
   names for them still need checking against a real scene
-- 🟡 **Virtual muscles**: the chest-to-hand and pelvis-to-heel springs endorphin uses for
-  reaching and planting. Imported into the rig (not the skeleton or exported motion)
-  and simulated as force-limited springs pulling the hand or heel to where the active
-  poses that name them put it (docs/physics-design.md, lesson 35); the sweep stays 16 of
-  16 clean, five scenes move a little. Still open: active animations don't drive them
-  yet (doing so tipped Multi Martial's Stagger landing over), and endorphin's own gains
-  (1 in every preset field) make them weak, more brake than pull; how endorphin scales
-  them isn't known. endorphin's own runs of Trapeze and Balcony, whose poses name them,
-  don't settle it either (lesson 43): Trapeze's acrobat is elsewhere by the time its
-  poses drive them (it needs JumpDive), and Balcony's export is a character no such
-  pose drives
 - ✅ **Exact cylinders** ([#14](https://github.com/Rick007110/NeuroMotion/issues/14)):
   flat caps and a sharp rim against every shape, resting still on a cap or a side
   (lesson 36). A cap rests on six rim points, not the whole circle
@@ -150,6 +139,17 @@ scenes then run something sensible.
 - ✅ **Balance and Stagger on Coulomb friction**, so NeuroMotion's own projects use
   endorphin's friction too (lessons 21 and 26): Balance's swing foot
   now clears the ground, and Stagger shuffles and steps short
+- 🟡 **Virtual muscles**: the chest-to-hand and pelvis-to-heel springs endorphin uses for
+  reaching and planting. Imported into the rig (not the skeleton or exported motion)
+  and simulated as force-limited springs pulling the hand or heel to where the active
+  poses that name them put it (docs/physics-design.md, lesson 35); the sweep stays 16 of
+  16 clean, five scenes move a little. Still open: active animations don't drive them
+  yet (doing so tipped Multi Martial's Stagger landing over), and endorphin's own gains
+  (1 in every preset field) make them weak, more brake than pull; how endorphin scales
+  them isn't known. endorphin's own runs of Trapeze and Balcony, whose poses name them,
+  don't settle it either (lesson 43): Trapeze's acrobat is elsewhere by the time its
+  poses drive them (it needs JumpDive), and Balcony's export is a character no such
+  pose drives. Moved here from Milestone 1: settling their gains needs JumpDive first
 - ✅ **Inventory**: the behaviour names and settings that endorphin scenes use,
   gathered from scenes (not from the protected `.nmb` files), to plan the rest:
   [docs/behaviour-inventory.md](docs/behaviour-inventory.md)
