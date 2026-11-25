@@ -5386,9 +5386,6 @@ mod endorphin_scenes {
         paths.sort();
         for path in paths {
             let name = path.file_stem().unwrap().to_string_lossy().into_owned();
-            if name.contains("Large File") {
-                continue;
-            }
             // `NM_SCENES=Car,Rope` sweeps only scenes whose names contain one of these.
             if let Ok(only) = std::env::var("NM_SCENES")
                 && !only.split(',').any(|part| name.contains(part.trim()))

@@ -1543,10 +1543,66 @@ Making cylinders exact (#14) taught one more.
     11.6 cm to 0.4), Walk With Gun unchanged at 0.06 (its hands' join drifts 0.3 cm,
     lowest body 1.4 cm above the ground, as lesson 25 left them).
 
+37. **Bridge Escape was never too big; measure before assuming. The time goes into
+    the solve, then into finding contacts.** (Number to be assigned at integration.)
+    The sweep skipped Bridge Escape (Large File) from the start "for size". Its file is
+    large for its animation keys (2.2 MB); its physics is 7 characters, 68 bodies,
+    178 shapes and 628 frames, and it simulated its whole 10.5 s in 3.3 s on one
+    thread (0.31 s per simulated second, three times faster than real time). It is
+    clean and now in the sweep: largest stretch 0.93 cm, fastest body 22.8 m/s. Its
+    7 m lock drift is character02's pelvis against a 500 N lock (frames 242-469) too
+    weak to hold it, as the scene sets it.
+
+    Where the time went, timed per stage (release, one thread; the timers' own cost
+    is in these, so they add up to a little more than the plain runs):
+
+    | Scene | Shapes | Time for its range | Finding contacts | of it, narrow phase | Direct solves (`prepare_groups`) | Iterations + relax | Joints' set-up |
+    |---|---|---|---|---|---|---|---|
+    | Balcony | 260 | 4.4 s for 5.1 s | 2.44 s | 0.41 s | 0.38 s | 1.22 s | 0.22 s |
+    | Bridge Escape | 178 | 3.4 s for 10.5 s | 1.28 s | 0.54 s | 0.87 s | 0.82 s | 0.22 s |
+    | Gymnast Rings | 97 | 2.5 s for 10.0 s | 0.67 s | 0.41 s | 0.78 s | 0.74 s | 0.18 s |
+    | Catch Rope | 103 | 1.8 s for 5.4 s | 0.34 s | 0.15 s | 0.30 s | 0.93 s | 0.08 s |
+
+    Evaluating the animation, the muscles' targets, behaviours, keyed bodies and
+    recording frames (`sim.rs`) took about 2 % or less in every scene, so nothing
+    there needed changing. The rest of finding contacts was the all-pairs loop over shapes: 33,700
+    pairs a substep in Balcony, 15,700 in Bridge Escape, nearly all metres apart, with
+    a few comparisons and lookups each before the bounding-sphere test dropped them.
+    It is now a sweep and prune (`World::broad_phase`): each shape's bounding sphere
+    as a box, padded by a whole margin (twice what the sphere test allows, so float
+    rounding can't drop a pair the exact test keeps), sorted along the axis the moved
+    shapes spread furthest on; a pair goes on only if the boxes overlap on all three
+    axes, at least one shape is moved by the solver (scenery never meets scenery) and
+    the two aren't on one body. 1,700 pairs a substep reach the sphere test in
+    Balcony, 1,000 in Bridge Escape. The pairs are handed on sorted, in the order the
+    all-pairs loop met them, so the contacts and the order they are solved in are
+    unchanged: all 17 sample scenes hash bit for bit the same over their whole ranges,
+    and so do the stand-ins (`simulations_are_bit_identical_everywhere` untouched).
+    A first version compared the boxes along the sorting axis only: that still left
+    6,200 pairs a substep in Balcony (the shapes of a character all overlap along any
+    axis), and sorting them cost almost as much as it saved.
+
+    Result, whole ranges, one thread (a shared machine: runs move by about 10 %):
+    Balcony 4.5 to 2.9 s, Bridge Escape 3.3 to 3.0 s, the others within the noise
+    (Gymnast Rings 2.5, Catch Rope 1.8, Walk With Gun 0.8 s); the sweep with Bridge
+    Escape added 16 s on four cores (15 s for 16 scenes before). In the app, which
+    gives the simulation 12 ms of each displayed frame, that is, if the window redraws
+    at 60 Hz, about 75 of Balcony's frames a second (48 before, slower than it plays
+    at 60 fps) and about 150 of Bridge Escape's, so both fill their cache faster than
+    they play. (Estimated from the timings, not measured in the app.)
+
+    What isn't faster, and why: the rest is the solver. Most of it is the direct
+    solves (`prepare_groups`, `LockGroup::new`: a dense n × n matrix per group, built,
+    zeroed and factorized twice every substep, though only rows that share a body
+    meet) and the iterations, which are being reworked separately (direct solves of
+    stiff muscles with their limb); a sparse matrix there is the next large saving.
+    Narrow phase is about 0.3 µs a pair and the contacts' set-up 0.1 µs; allocations
+    per substep (a few vectors of one entry per body or shape) didn't show.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over
-its whole frame range (about 12 s in all). It checks for:
+its whole frame range (about 16 s in all). It checks for:
 
 - non-finite values;
 - simulated bodies sinking more than 10 cm below the ground (fixed scenery, and bodies
@@ -1576,19 +1632,19 @@ lessons up to 28: lessons 29-31 moved Stagger Walk's knife-edge steps).
 
 Last run, over each scene's whole range, with lessons 1-36 and
 imported behaviours actually running (until the behaviour names were matched,
-`docs/behaviours.md`, none of them ran in these scenes); 16 scenes, Bridge Escape is
-skipped for size:
+`docs/behaviours.md`, none of them ran in these scenes); all 17 scenes (Bridge Escape
+was skipped for size until lesson 37 showed it wasn't slow):
 
 | Result | Scenes |
 |---|---|
-| Clean | All 16: Arrows, Balcony, Bendy Stick, Car Crash, Car Hit, Catch Rope, Catch Run, Gymnast Rings, Heli Leap, Multi Martial, Rotating Floor, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
+| Clean | All 17: Arrows, Balcony, Bendy Stick, Bridge Escape, Car Crash, Car Hit, Catch Rope, Catch Run, Gymnast Rings, Heli Leap, Multi Martial, Rotating Floor, Stagger Walk, Sword Play, Tackle, Trapeze, Walk With Gun |
 | Failing | None |
 
 Max joint stretch per scene over its whole range: Arrows 0.55 cm, Balcony 1.07,
-Bendy Stick 0.61, Car Crash 0.66, Car Hit 0.80, Catch Rope 0.76, Catch Run 1.41,
+Bendy Stick 0.61, Bridge Escape 0.93, Car Crash 0.66, Car Hit 0.80, Catch Rope 0.76, Catch Run 1.41,
 Gymnast Rings 1.15, Heli Leap 0.29, Multi Martial 1.86, Rotating Floor 0.53, Stagger
 Walk 0.29, Sword Play 0.46, Tackle 0.87, Trapeze 0.91, Walk With Gun 0.06 (the whole
-sweep takes about 15 s on four cores; exact cylinders, lesson 36, moved all but Bendy
+sweep takes about 16 s on four cores, Bridge Escape's 10.5 s range 3 s of it; exact cylinders, lesson 36, moved all but Bendy
 Stick, Car Hit and Catch Run a little, virtual muscles, lesson 35, Balcony, Car Crash,
 Gymnast Rings, Heli Leap and Trapeze). The largest lock drifts are Car Hit's 38 cm (the
 car falling behind its carrier at frame 5, lesson 20) and Car Crash's 29 cm; Walk With
