@@ -1738,39 +1738,92 @@ impl World {
                 }
             }
         }
-        for i in 0..self.shapes.len() {
-            let Some(pi) = &placed[i] else { continue };
-            for j in (i + 1)..self.shapes.len() {
-                let Some(pj) = &placed[j] else { continue };
-                let (si, sj) = (&self.shapes[i], &self.shapes[j]);
-                if !(dynamic(si) || dynamic(sj))
-                    || si.body == sj.body
-                    || held_together(si.body, sj.body)
-                {
-                    continue;
-                }
-                let reach = radius[i] + radius[j] + MARGIN;
-                if pi.position.distance_squared(pj.position) > reach * reach
-                    || !self.may_collide(i, j)
-                {
-                    continue;
-                }
-                found.clear();
-                collide::between(pi, pj, MARGIN, &mut found);
-                for c in &found {
-                    out.push(self.contact_row(
-                        sb,
-                        h,
-                        Some(i),
-                        Some(j),
-                        si.material,
-                        sj.material,
-                        c,
-                    ));
-                }
+        for (i, j) in self.broad_phase(&placed, &radius) {
+            let (Some(pi), Some(pj)) = (&placed[i], &placed[j]) else {
+                continue;
+            };
+            let (si, sj) = (&self.shapes[i], &self.shapes[j]);
+            if !(dynamic(si) || dynamic(sj))
+                || si.body == sj.body
+                || held_together(si.body, sj.body)
+            {
+                continue;
+            }
+            let reach = radius[i] + radius[j] + MARGIN;
+            if pi.position.distance_squared(pj.position) > reach * reach || !self.may_collide(i, j)
+            {
+                continue;
+            }
+            found.clear();
+            collide::between(pi, pj, MARGIN, &mut found);
+            for c in &found {
+                out.push(self.contact_row(sb, h, Some(i), Some(j), si.material, sj.material, c));
             }
         }
         out
+    }
+
+    /// The shape pairs (i < j, in increasing order) whose bounding spheres may be within
+    /// reach of each other and of which at least one is moved by the solver: a sweep
+    /// and prune along the axis the shapes spread furthest on. It only drops pairs the
+    /// bounding-sphere test in `find_contacts` would drop too, and hands the rest on in
+    /// the order the plain all-pairs loop met them, so contacts and their solve order
+    /// are bit for bit what that loop gave; only faster (the large scenes have 100-260
+    /// shapes, 5-34 thousand pairs a substep, most of them metres apart).
+    fn broad_phase(&self, placed: &[Option<Placed>], radius: &[f32]) -> Vec<(usize, usize)> {
+        let moved: Vec<bool> = self
+            .shapes
+            .iter()
+            .map(|s| s.body.is_some_and(|b| self.bodies[b].is_dynamic()))
+            .collect();
+        let shapes = || (0..placed.len()).filter(|&i| placed[i].is_some());
+        let centre = |i: usize| placed[i].map_or(Vec3::ZERO, |p| p.position);
+        let (low, high) = shapes().fold(
+            (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
+            |(lo, hi), i| (lo.min(centre(i)), hi.max(centre(i))),
+        );
+        let spread = high - low;
+        let axis = if spread.x >= spread.y && spread.x >= spread.z {
+            Vec3::X
+        } else if spread.y >= spread.z {
+            Vec3::Y
+        } else {
+            Vec3::Z
+        };
+        // Each shape's extent along the axis, padded by a whole margin on both sides
+        // (twice what the sphere test allows) so float rounding in the bounds can never
+        // drop a pair the exact test keeps. A shape whose position isn't finite pairs
+        // with everything, as in the all-pairs loop.
+        let mut swept = Vec::new();
+        let mut wild = Vec::new();
+        for i in shapes() {
+            let (at, reach) = (centre(i).dot(axis), radius[i] + MARGIN);
+            if at.is_finite() && reach.is_finite() {
+                swept.push((at - reach, at + reach, i));
+            } else {
+                wild.push(i);
+            }
+        }
+        swept.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.2.cmp(&b.2)));
+        let mut pairs = Vec::new();
+        for (k, &(_, end, i)) in swept.iter().enumerate() {
+            for &(start, _, j) in &swept[k + 1..] {
+                if start > end {
+                    break;
+                }
+                if moved[i] || moved[j] {
+                    pairs.push((i.min(j), i.max(j)));
+                }
+            }
+        }
+        for &i in &wild {
+            for j in shapes().filter(|&j| j != i && (moved[i] || moved[j])) {
+                pairs.push((i.min(j), i.max(j)));
+            }
+        }
+        pairs.sort_unstable();
+        pairs.dedup();
+        pairs
     }
 
     /// Self-collision rules within one character, following each shape's flags.
