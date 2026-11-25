@@ -1121,9 +1121,9 @@ impl World {
         // respect to the bodies' relative angular velocity, worked out from the swing-twist
         // split itself (lesson 45). The child's own X axis and the cone's normal in the
         // parent's YZ plane are those gradients only while the swing is small: at Bridge
-        // Escape's truck hitch, swung 1.3 rad, they were 143° apart, so a twist stop and a
-        // swing stop reached together pushed against each other with millions of N·m·s,
-        // and the truck's cab, held to the ground by one wheel, was driven into it.
+        // Escape's truck hitch, swung 1.5 rad, they were 128-143° apart, so a twist stop
+        // and a swing stop reached together pushed against each other with millions of
+        // N·m·s, and the truck's cab, held to the ground by one wheel, was driven into it.
         //
         // In the primary frame, with the swing θ about the unit axis `along` (in YZ) and
         // `across` = X × `along`: turning about `along` changes only the swing angle;
