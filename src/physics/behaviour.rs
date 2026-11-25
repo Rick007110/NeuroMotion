@@ -1984,9 +1984,15 @@ fn explosion(d: &mut Drive, e: Explosion) {
     // air they are several times overdamped, and the arms then barely moved. The legs
     // keep them: damped critically, they kicked Car Hit's pedestrian off the bonnet
     // 0.45 m higher than endorphin's goes.
-    for arm in &layout.arms {
-        d.damp_for_swing(arm.upper, &[arm.upper, arm.lower, arm.end]);
-        d.damp_for_swing(arm.lower, &[arm.lower, arm.end]);
+    // Critical for everything the joint swings, forearm twist, hand and fingers
+    // included. Counting only upper arm, forearm and hand damped endorphin's arms too
+    // little: with the other changes merged (the limb cap, lesson 27, among them) Multi
+    // Martial's fingers whipped round at 21 m/s, 9.9 cm out of their joint.
+    for hand in &layout.hands {
+        let outer: Vec<usize> = [hand.lower].iter().chain(&hand.chain).copied().collect();
+        let whole: Vec<usize> = [hand.upper].iter().chain(&outer).copied().collect();
+        d.damp_for_swing(hand.upper, &whole);
+        d.damp_for_swing(hand.lower, &outer);
     }
     let angle = EXPLOSION_RATE * e.speed * d.elapsed + e.phase * TAU;
 

@@ -1034,6 +1034,12 @@ The first behaviour that reads its event's settings, Explosion, taught one more.
     legs, damped like Balance's swinging leg, kicked the pedestrian off the bonnet to a
     centre of mass of 2.2 m (endorphin 1.81 m); with the preset's damping, 1.75 m at
     frame 68, as endorphin's.
+    The arms' damping, critical, must count everything the joint swings: counted for
+    upper arm, forearm and hand only (leaving out endorphin's forearm twist and
+    fingers), the arms were damped too little once merged with the limb cap (lesson 27)
+    and the other changes: Multi Martial's fingers whipped round at 21 m/s, 9.9 cm out
+    of their joint at frame 75, and Car Hit's knee opened 5.2 cm at frame 83. Counting
+    the whole arm: 1.9 cm and 1.0 cm, and the sweep is 16 of 16 clean again.
 
 ## Status against endorphin's sample scenes
 
