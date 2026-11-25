@@ -59,11 +59,14 @@ NeuroMotion, and we need numbers to prove it.
   measured against a recording of endorphin's run with its frame counter, active poses
   now apply as endorphin's do: a joint no event names follows its limb's pose,
   endorphin's swing limits are read the right way round, and an imported character's
-  muscles count the whole limb they move. Its arms come forward, it leans and crouches
-  on the box as endorphin's does until about frame 192 (it used to fall off the back at
-  171). It doesn't flip yet: where endorphin's springs up off the box, it arches back
-  over the edge and lands behind it at 294 (endorphin: about 276, feet first), turning
-  too far
+  muscles count the whole limb they move. Its arms come forward and it crouches on the
+  box (it used to fall off the back at 171). It doesn't flip yet: its crouch is a slow
+  fall backwards (the 25 N toe locks can't hold its centre of mass, 8-40 cm behind the
+  heels, where endorphin's recovers), and its muscles follow their poses with a 0.1 s
+  lag, so where endorphin's springs up off the box it rotates back over the edge and
+  lands behind it at 294, turning too far. Half the damping and three to ten times the
+  toe locks' strength make it spring up as endorphin's does, but nothing yet explains
+  either, so neither is in (physics-design.md, lesson N)
 - ✅ **Reference measurements**: scenes measured in endorphin (frames, positions,
   angles) and scored against NeuroMotion by a test, `reference_scores`, so "behaves
   like endorphin" is checked, not eyeballed. 36 measurements in five scenes: Car Hit,
@@ -243,9 +246,10 @@ What moves NeuroMotion closest to endorphin quality now, in order:
    results instead of recordings, and more scenes (Tackle, the other sample and
    behaviour scenes).
 2. **Back-Flip-To-Combo's jump** ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)): active poses now apply as endorphin's do and
-   the character crouches as endorphin's does; what's left is the take-off (frames
-   190-220: a strength-5 spine pose and the legs' extension) and how endorphin reads
-   the negative lock strength of the flip's drive.
+   the character crouches; what's left is why endorphin's crouch stays balanced on 25 N
+   toe locks and why its legs straighten in ~8 frames where NeuroMotion's muscles take
+   0.1 s (fitting half the damping and stronger toe locks reproduces the jump, lesson
+   N), and how endorphin reads the negative lock strength of the flip's drive.
 3. **The other missing behaviours** in the inventory's order (JumpDive, Jump,
    LandCrouch; Look and Reach and Explosion are done).
 4. **Stepping on endorphin's characters** (the spring cap on light pelvises and

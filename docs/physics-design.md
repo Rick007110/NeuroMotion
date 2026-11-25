@@ -1051,6 +1051,84 @@ The first behaviour that reads its event's settings, Explosion, taught one more.
     not yet looked into. `reference_scores` now checks these numbers on every run
     ([reference-measurements.md](reference-measurements.md)).
 
+Measuring why Back-Flip-To-Combo (#6) doesn't take off gave one more, not yet a fix.
+
+N. **(Number to be assigned at integration.) Back-Flip-To-Combo can't jump because
+   its crouch is already falling backwards and its muscles follow their poses with a
+   0.1 s lag; no reading of the files found so far explains either.** Measured with
+   `dump_scene_motion`, a temporary probe of each muscle's torque and capped stiffness,
+   and the recording of endorphin's run (lesson 27's camera fit; head heights in image
+   px from the top, about 86 px a metre). Nothing in the engine changed.
+
+   - **The crouch is a slow fall.** The centre of mass is behind the heels' back edge
+     (z = -0.034 m) from frame ~40: -0.11 m at 100, -0.16 at 140, -0.26 at 168, -0.43 at
+     192, moving back at about 0.5 m/s by then. From frame 150 the feet rock back on
+     their heels (the forefoot rises 7 cm, the foot pitches 20°) and the shins go from
+     18° forward to upright. Only the 25 N / 25 N·m toe locks resist, at most about
+     2 × (25 N·m + 25 N × 0.22 m) = 61 N·m; 90 kg 8 cm behind the heels needs 70 N·m.
+     The author's own crouch (the legs' and spine's events at their stored values,
+     ankles from the legs' event, feet flat) puts the centre of mass at -0.09 m, the
+     knees over the toes and the trunk 22° forward; ours has the trunk 10° forward. In
+     the recording endorphin's lean recovers from -7° at frame 100 to -4.5° at 120 (ours
+     stays at -7.5°), so endorphin's toe locks hold more than 61 N·m. Counting a body a
+     lock holds in place as grounded for the spring cap (which keeps the toe muscle
+     stiff, 4500 N·m/rad instead of 20-45 once the toe lifts) changes nothing.
+   - **The take-off is a backwards rotation, not a jump.** From 190 the legs' event
+     (knees 59°, hips 22°) and the strength-5 spine event start, and the pose's
+     plantarflexed ankles (139°, from the legs' event, lesson 27) tip the shins back
+     with the centre of mass behind the heels: the pelvis turns -98° by frame 216 with the
+     feet still on the box, the centre of mass rises 6 cm at most (0.8 m/s), and the
+     knees, at 70° when the strength-2.5 extension starts at 202, reach 39° by 216. In
+     the recording endorphin is upright with bent knees at 204, straight-legged on its
+     toes with its back arched and arms overhead at 210-218 (the author's pose at 202
+     with crouched ankles: centre of mass 7.5 cm in front of the heels), tilted back 45°
+     at 222, horizontal and about a metre above the box top at 226, upside down at
+     ~242, highest at ~248 (head 180 px), tucked at 254, upright at box-top height just
+     behind its back edge at ~276, then it tumbles to the floor (face down by ~315).
+   - **The muscles aren't force-limited; the damping sets their speed.** Apart from
+     the first frame or two of each event, the knee and hip torques stay under 100-500
+     N·m against limits of 800-2500 N·m, and the knee and hip springs aren't capped (two
+     feet on the box).
+     DesiredPoseCalibration has damping 1000 for stiffness 10 000 at every joint, and
+     strength scales both, so each joint closes on its target exponentially with a time
+     constant of 0.1 s whatever the strength: at 50° from its target the knee turns
+     at 9 rad/s and needs nothing more. To straighten in the ~8 frames endorphin takes
+     the time constant would have to be about 0.03-0.05 s.
+
+   Experiments (each a temporary environment switch; head height at frames 204 / 216 /
+   228 / 240 / 248, then the first frame the lowest body is 10 cm below the box top and
+   the first on the floor, and the pelvis' turn by frame 297):
+
+   | Change | Head px | Off the box / floor | Turn by 297 |
+   |---|---|---|---|
+   | endorphin | 223 / 197 / 213 / 199 / 180 | (lands back at box height ~276) / ~315 | about -400° |
+   | none | 259 / 260 / 262 / 255 / 290 | 242 / 294 | -581° |
+   | strength capped at 1, or strength^0.5 | 259-261 / 263-264 / 261-264 / 254-259 / 289-294 | 241-242 / 293-295 | -559 to -599° |
+   | the strength-5 spine event left out | 245 / 248 / 258 / 280 / 290 | 246 / 295 | -479° |
+   | force limits × 10 | 258 / 261 / 261 / 253 / 286 | 243 / 295 | -575° |
+   | no spring caps at all | 230 / 256 / 229 / 267 / 286 | 244 / 299 | -995° |
+   | damping not scaled by strength, with toe locks × 10 | 234 / 236 / 236 / 229 / 271 | 252 / 297 | -595° |
+   | damping scaled by √strength | 251 / 245 / 243 / 233 / 267 | 254 / 298 | -579° |
+   | toe locks × 10 | 224 / 215 / 208 / 226 / 225 | 266 / 306 | -542° |
+   | active poses' damping × 0.5 | 285 / 300 / 286 / 354 / 371 (falls off backwards) | 193 / 272 | -504° |
+   | damping × 0.5, toe locks × 3 / × 5 / × 10 | 204-224 / 216-221 / 204-210 / 182-192 / 204-232 | 276-292 / 317-323 | -538 to -625° |
+   | damping × 0.3, toe locks × 10 | 178 / 194 / 171 / 135 / 167 (0.4 m too high) | 308 / 360 | -626° |
+   | the old swing reading (lesson 27), alone / with damping × 0.5 and toe locks × 5 | 264 / 274 / 270 / 271 / 331; 250 / 272 / 269 / 291 / 339 | 213-232 / 286-287 | -594 to -643° |
+
+   With half the damping and three to ten times the toe locks' strength the character
+   leans like endorphin's (three times: -6 / -4.5 / -5.5° at frames 96 / 112 / 120,
+   endorphin -7 / -6 / -4.5), its arms come round as endorphin's do (far hand 460-461 px
+   at 96-100, as endorphin's; 464-465 without), it springs up off the box and its head follows
+   endorphin's within about 20 px to frame 248 and it reaches the floor at 317-323. Both
+   are needed: either alone falls off backwards or barely rises. They are fits, not
+   readings of the files: nothing yet says why endorphin's muscles would be damped half
+   as much as its presets say, or why its toe locks would hold three to ten times their
+   strength, and both would change every imported scene, so neither is in the engine.
+   Still open, besides those two: the spin. Even then the pelvis turns 540-625° by frame
+   297, against endorphin's ~400°; the -100 N·m drive (246-297) adds 120-150° of it
+   (-458° with no drive at all, -392° with the fitted changes and no drive), so endorphin
+   either reads the negative strength more weakly or the take-off spins less.
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over
