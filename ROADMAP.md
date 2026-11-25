@@ -77,12 +77,17 @@ NeuroMotion, and we need numbers to prove it.
   solved whole, muscles with the limb they move, so the cap is 30 Hz instead of 5
   (lesson 38): it leaves the box at 213 (endorphin 212, 241 before) and lands at 281
   (276), but still goes back over the edge instead of springing up, and Car Hit's
-  pedestrian flies to 1.73 m (1.62 m before; endorphin 1.81 m)
+  pedestrian flies to 1.73 m (1.62 m before; endorphin 1.81 m). Re-scored on that
+  solve (lesson 39): the toe locks sit at their strength from frame 100, and three or
+  more times it holds the crouch as endorphin's (lean and crouch depth within or near
+  endorphin's), but the take-off is still a rotation, because the trunk straightens
+  twice as fast as the legs; only fitted damping springs it up, and that spins it four
+  times round. Nothing kept: no reading improves the overall score yet
 - ✅ **Reference measurements**: scenes measured in endorphin (frames, positions,
   angles) and scored against NeuroMotion by a test, `reference_scores`, so "behaves
   like endorphin" is checked, not eyeballed. 36 measurements in five scenes: Car Hit,
   Back-Flip-To-Combo, Stagger Walk and the Look and Reach and Explosion behaviour
-  scenes; 14 are within endorphin's uncertainty, 10 of them guarded against
+  scenes; 18 are within endorphin's uncertainty, 10 of them guarded against
   regressions, and the known gaps print their error so progress shows
   ([details](docs/reference-measurements.md)). Every number is still read from
   recordings of endorphin's runs (frame counter, fitted camera, silhouettes), not from
@@ -281,8 +286,13 @@ What moves NeuroMotion closest to endorphin quality now, in order:
    0.1 s (fitting half the damping and stronger toe locks reproduces the jump, lesson
    33), and how endorphin reads the negative lock strength of the flip's drive.
    Imported characters' muscles are now solved with the whole limb they move (lesson
-   38): it takes off and lands on time but still doesn't spring up. Locks and contacts
-   in the same solve would let the cap go entirely.
+   38): it takes off and lands on time but still doesn't spring up. On that solve the
+   crouch needs toe locks at least three times their strength in newtons, and the
+   take-off legs that straighten as fast as the trunk (lesson 39). Raising the limb
+   cap now keeps the joints together but moves Car Hit and Stagger Walk away from
+   endorphin, so the next step is finding how endorphin scales its muscle presets
+   (its arms sag far more than the presets allow), not putting locks and contacts
+   into the characters' solve.
 3. **The other missing behaviours** in the inventory's order (JumpDive, Jump,
    LandCrouch; Look and Reach and Explosion are done).
 4. **Stepping on endorphin's characters** (Stagger Walk steps and stays up since

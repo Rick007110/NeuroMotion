@@ -133,63 +133,57 @@ Never put endorphin's files, or images or text taken from them, in the repositor
 
 ## What is covered
 
-Run on the integrated build (Coulomb friction, active poses with the whole-limb
-cap, Look and Reach, Explosion, libm maths, virtual muscles, exact cylinders;
-physics-design.md lessons up to 36), 2026-11-25:
+Run on the integrated build (Coulomb friction, active poses, Look and Reach,
+Explosion, libm maths, virtual muscles, exact cylinders, imported characters solved
+whole with the 30 Hz whole-limb cap; physics-design.md lessons up to 38), 2026-11-25:
 
 | Scene | Rows | Within | Guards | Mean error (× uncertainty) |
 |---|---|---|---|---|
-| Car Hit | 15 | 5 | 5 | 1.9 |
-| Back-Flip-To-Combo (#6, the user's own scene) | 9 | 2 | 1 | 2.4 |
-| Hands reach and look at 2.5 (Look and Reach) | 3 | 2 | 2 | 1.2 |
+| Car Hit | 15 | 8 | 5 | 1.4 |
+| Back-Flip-To-Combo (#6, the user's own scene) | 9 | 3 | 1 | 2.0 |
+| Hands reach and look at 2.5 (Look and Reach) | 3 | 2 | 2 | 1.3 |
 | Writhe in mid-air 2.5 (Explosion) | 5 | 3 | 1 | 1.1 |
-| Stagger Walk | 4 | 2 | 1 | 0.7 |
-| In all | 36 | 14 | 10 | |
+| Stagger Walk | 4 | 2 | 1 | 1.6 |
+| In all | 36 | 18 | 10 | |
 
 The rows were first scored on the build with lessons up to 28 (15 of 36 within). Lessons
 29-31 (the direct solve's warm start, libm maths, a limp body's damping) moved some
-numbers a little and Stagger Walk's, whose standing is on a knife edge, more: its feet
-by frame 96 went 0.61 m back instead of 0.66, now just outside endorphin's 0.88 ±
-0.25 m. Virtual muscles and exact cylinders (lessons 35 and 36) don't move any row. The
-baselines are this run's values; every guard holds, also over `NM_NUDGES=2`.
+numbers a little and Stagger Walk's, whose standing is on a knife edge, more. Virtual
+muscles and exact cylinders (lessons 35 and 36) don't move any row; that build had 14
+of 36. Solving imported characters whole (lesson 38) brought it to 18 of 36. Ways of
+reading endorphin's numbers that were scored on all five scenes (lock strength units,
+damping, strength as a speed, the drive mode, the swing sizes, the limb spring cap) are
+compared in physics-design.md, lesson 34 (after Back-Flip-To-Combo's take-off, lesson
+33). The baselines are this run's values; every guard holds, also over `NM_NUDGES=2`.
 
-Over `NM_NUDGES=2` every row's nudged range is within two frames, 0.1° or 1 cm of it,
-except Stagger Walk's. Ways of reading endorphin's numbers that were scored
-on all five scenes (lock strength units, damping, strength as a speed, the drive mode,
-the swing sizes, the limb spring cap) are compared in physics-design.md, lesson 34 (after
-Back-Flip-To-Combo's take-off, lesson 33); none is in yet, so the baselines stay.
-
-Solving imported characters whole (physics-design.md, lesson 38) brings it to 18 of 36:
-Car Hit 8 of 15 (it flies to 1.73 m, touches down at 94), Back-Flip-To-Combo 3 of 9
-(leaves the box at 213, on the floor at 281), Stagger Walk 2 of 4 (it stays up in every
-nudged run, but its feet go only 0.31-0.56 m back by frame 96). The baselines below and
-in `reference.rs` are still the run before it.
+Over `NM_NUDGES=2` every row's nudged range is within a frame, 0.1° or 2 cm of it,
+except Stagger Walk's: its feet go 0.53-0.59 m back by frame 36, 0.31-0.56 m back and
+0.15-0.51 m along +x by frame 96, and the top of its neck is 0.02-0.08 m lower at frame
+108 than at 0 (it stays up in every nudged run).
 
 The known gaps, with their errors on that run:
 
-- **Car Hit**: the pedestrian flies 0.19 m lower (centre of mass 1.62 m at frame 65,
+- **Car Hit**: the pedestrian flies 0.08 m lower (centre of mass 1.73 m at frame 67,
   endorphin 1.81 m at 68), turns upside down 14 frames early (62, endorphin 76) and
-  comes down 7 frames early (89, endorphin 96), 0.41 m further along the road (x
-  +0.07 m at frame 96, endorphin -0.34 m). Its centre of mass is 0.24 m low at frame
-  78 and 0.42 m at 88, and drifts forward (+0.07 m at 78) where endorphin's goes back
-  (-0.11 m).
-- **Back-Flip-To-Combo**: it leans back 2-3° more than endorphin's in the first
-  second, holds its left arm 19° above the horizontal at frame 96 (endorphin -7°),
-  crouches 0.17 m deeper by frame 192 and, instead of springing up 0.65 m, goes over
-  the back of the box: it leaves the box top at 241 (endorphin about 212) and reaches
-  the floor at 293 (about 276).
-- **Look and Reach**: character02's far arm points at the box by frame 31; endorphin's
+  comes down at 94 (endorphin 96), 0.49 m further along the road (x +0.15 m at frame
+  96, endorphin -0.34 m). Its centre of mass is 0.13 m low at frame 88, and drifts
+  forward (+0.11 m at 78, +0.14 m at 88) where endorphin's goes back (-0.11 m).
+- **Back-Flip-To-Combo**: it leans back 2-4° more than endorphin's in the first
+  second, holds its left arm 25° above the horizontal at frame 96 (endorphin -7°),
+  crouches 0.39 m deeper by frame 192 (it is falling backwards off its heels, lesson
+  33) and, instead of springing up 0.65 m, goes back over the edge of the box, its
+  head 1.74 m lower at 248 than at 192. It leaves the box top at 213 (endorphin about
+  212) and reaches the floor at 281 (about 276), but by falling, not by flipping.
+- **Look and Reach**: character02's far arm points at the box by frame 29; endorphin's
   waits and gets there at about 55.
 - **Explosion**: the arms are highest at frame 16 (endorphin about 25) and go down to
-  -34° (endorphin -40 to -58°). The lowest arms' frame (42, endorphin 44) and the
+  -33° (endorphin -40 to -58°). The lowest arms' frame (42, endorphin 44) and the
   landing (54, endorphin 56-58) are within their uncertainty but too close to its edge
   to guard.
-- **Stagger Walk**: the feet go back about as far as endorphin's by frame 36 (0.38 m,
-  endorphin 0.46), but by 96 they have gone 0.61 m back and 0.20 m along -x where
-  endorphin's went 0.88 m back and 0.51 m along -x. Standing is on a knife edge:
-  with gravity nudged by up to 4e-4, the top of the neck is 0.02 to 0.51 m lower at
-  frame 108 than at frame 0 (it stays up in most runs and sinks or falls in others),
-  so "still standing" isn't a guard.
+- **Stagger Walk**: the feet go back a little further than endorphin's by frame 36
+  (0.59 m, endorphin 0.46), but by 96 they have gone only 0.56 m back and 0.38 m along
+  +x where endorphin's went 0.88 m back and 0.51 m along -x. Standing is on a knife
+  edge, so "still standing" isn't a guard.
 
 ## What is still estimated
 
