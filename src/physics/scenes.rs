@@ -1160,6 +1160,208 @@ fn body_pose(project: &Project, character: CharacterId, body: &str, frame: f32) 
 }
 
 // ---------------------------------------------------------------------------------
+// Cylinder scenes (docs/physics-design.md, lesson 8)
+
+/// Adds a free prop of one body and one shape, its centre at `at`, turned by
+/// `rotation` (a cylinder's axis is its local Z).
+fn solid(
+    project: &mut Project,
+    name: &str,
+    geometry: Geometry,
+    mass: f32,
+    rotation: Quat,
+    at: Vec3,
+) -> CharacterId {
+    let free = Limits {
+        twist_min: 0.0,
+        twist_max: 0.0,
+        swing1: 0.0,
+        swing2: 0.0,
+    };
+    let no_muscle = Gains {
+        stiffness: 0.0,
+        damping: 0.0,
+        force_limit: 0.0,
+    };
+    let piece = Piece::at(geometry, mass, rotation, Vec3::ZERO);
+    let (skeleton, mut rig) = prop_rig(vec![("body", None, at, piece)], free, no_muscle);
+    // Its own inertia, not a sphere's, so a log rolls like one.
+    rig.isotropic_inertia = false;
+    add_prop(
+        project,
+        name,
+        CharacterKind::Prop,
+        (skeleton, rig),
+        SimLevel::Simulated,
+    )
+}
+
+/// Turns a cylinder's axis (local Z) upright.
+fn upright() -> Quat {
+    Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)
+}
+
+/// Turns a cylinder's axis (local Z) along X, lying on its side.
+fn along_x() -> Quat {
+    Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)
+}
+
+/// Single cylinders on the ground, on boxes and under a falling ball, 2 m apart along
+/// X: one dropped 3 cm onto its cap leaning 3°, a log on its side rolled along +Z, a
+/// disc dropped from 0.3 m tilted 10°, one dropped onto a box leaning 3°, one lying on
+/// a box and one on the ground, and two balls dropped on a pillar's cap, one just
+/// inside its rim and one just outside.
+pub fn cylinders() -> Project {
+    let mut p = new_scene("Cylinders", 3.0);
+    p.physics.contact = ContactModel::Coulomb;
+    let cylinder = |radius, length| Geometry::Cylinder { radius, length };
+    let block = Geometry::Box {
+        size: [1.0, 0.5, 1.0],
+    };
+    let pillar = cylinder(0.2, 1.0);
+    add_prop(
+        &mut p,
+        "scenery",
+        CharacterKind::Environment,
+        scenery(&[
+            (block, Quat::IDENTITY, Vec3::new(6.0, 0.25, 0.0)),
+            (block, Quat::IDENTITY, Vec3::new(8.0, 0.25, 0.0)),
+            (pillar, upright(), Vec3::new(10.0, 0.5, 0.0)),
+        ]),
+        SimLevel::CollisionOnly,
+    );
+    // Short enough that the old capsule stand-in for it (round ends) would not stand.
+    solid(
+        &mut p,
+        "standing",
+        cylinder(0.15, 0.5),
+        20.0,
+        Quat::from_rotation_z(0.05) * upright(),
+        Vec3::new(0.0, 0.28, 0.0),
+    );
+    let log = solid(
+        &mut p,
+        "log",
+        cylinder(0.1, 0.8),
+        15.0,
+        along_x(),
+        Vec3::new(2.0, 0.1, 0.0),
+    );
+    push(&mut p, log, 0, "log.MetaBodies.body", Vec3::Z);
+    solid(
+        &mut p,
+        "disc",
+        cylinder(0.3, 0.04),
+        5.0,
+        Quat::from_rotation_z(0.17) * upright(),
+        Vec3::new(4.0, 0.3, 0.0),
+    );
+    solid(
+        &mut p,
+        "on box",
+        cylinder(0.15, 0.4),
+        15.0,
+        Quat::from_rotation_x(0.05) * upright(),
+        Vec3::new(6.0, 0.72, 0.0),
+    );
+    solid(
+        &mut p,
+        "across box",
+        cylinder(0.1, 0.6),
+        10.0,
+        along_x(),
+        Vec3::new(8.0, 0.62, 0.0),
+    );
+    solid(
+        &mut p,
+        "lying",
+        cylinder(0.1, 0.8),
+        15.0,
+        along_x(),
+        Vec3::new(12.0, 0.11, 0.0),
+    );
+    let ball = Geometry::Sphere { radius: 0.05 };
+    solid(
+        &mut p,
+        "ball inside",
+        ball,
+        1.0,
+        Quat::IDENTITY,
+        Vec3::new(10.17, 1.2, 0.0),
+    );
+    solid(
+        &mut p,
+        "ball outside",
+        ball,
+        1.0,
+        Quat::IDENTITY,
+        Vec3::new(10.0, 1.2, 0.22),
+    );
+    p
+}
+
+/// Cylinders resting on cylinders: three discs stacked, a post standing on a disc, a
+/// log lying on a plate, and a pyramid of three logs. All start 5 mm to 1 cm
+/// apart and fall into place. Also the cylinder-heavy scene timed per step.
+pub fn cylinder_pile() -> Project {
+    let mut p = new_scene("Cylinder pile", 3.0);
+    p.physics.contact = ContactModel::Coulomb;
+    let cylinder = |radius, length| Geometry::Cylinder { radius, length };
+    let disc = cylinder(0.3, 0.06);
+    for (name, y) in [("disc0", 0.035), ("disc1", 0.105), ("disc2", 0.175)] {
+        solid(&mut p, name, disc, 4.0, upright(), Vec3::new(0.0, y, 0.0));
+    }
+    solid(
+        &mut p,
+        "base",
+        cylinder(0.4, 0.06),
+        6.0,
+        upright(),
+        Vec3::new(2.0, 0.035, 0.0),
+    );
+    solid(
+        &mut p,
+        "post",
+        cylinder(0.12, 0.6),
+        10.0,
+        upright(),
+        Vec3::new(2.0, 0.37, 0.0),
+    );
+    // A log lying on a plate, and a pyramid of three logs, the top one wedged in the
+    // groove between the two under it.
+    solid(
+        &mut p,
+        "plate",
+        cylinder(0.5, 0.06),
+        8.0,
+        upright(),
+        Vec3::new(4.0, 0.035, 0.0),
+    );
+    let log = cylinder(0.1, 0.8);
+    solid(
+        &mut p,
+        "pin",
+        log,
+        12.0,
+        along_x(),
+        Vec3::new(4.0, 0.165, 0.0),
+    );
+    for (name, z) in [("under0", -0.1), ("under1", 0.1)] {
+        solid(&mut p, name, log, 12.0, along_x(), Vec3::new(6.0, 0.105, z));
+    }
+    let groove = 0.1 + 0.03f32.sqrt();
+    solid(
+        &mut p,
+        "top",
+        log,
+        12.0,
+        along_x(),
+        Vec3::new(6.0, groove + 0.005, 0.0),
+    );
+    p
+}
+
+// ---------------------------------------------------------------------------------
 // Behaviour scenes
 
 fn behave(project: &mut Project, character: CharacterId, start: i32, end: i32, name: &str) {
@@ -2915,6 +3117,8 @@ mod tests {
             "heli_leap" => heli_leap(),
             "rotating_floor" => rotating_floor(),
             "turntable" => turntable(),
+            "cylinders" => cylinders(),
+            "cylinder_pile" => cylinder_pile(),
             "tilting_floor" => tilting_floor(),
             "roof_edge" => roof_edge(),
             "cut_rope" => cut_rope(),
@@ -3193,6 +3397,145 @@ mod tests {
         // Lying or standing on the disc, not floating above it.
         let height = resting_height(&project, &sim, "dancer");
         assert!(height < 0.1, "dancer rests {height} m above the turntable");
+    }
+
+    /// A one-body prop's world transform at every frame.
+    fn prop_track(project: &Project, sim: &Simulation, name: &str) -> Vec<(Quat, Vec3)> {
+        let ci = project
+            .characters
+            .iter()
+            .position(|c| c.name == name)
+            .unwrap();
+        (0..=project.settings.range.end)
+            .map(|f| sim.frame(f).unwrap()[ci].as_ref().unwrap().bodies[0])
+            .collect()
+    }
+
+    /// How a prop ends: its centre, the angle of its axis (local Z) from upright,
+    /// radians, and its fastest speed over the last half second, m/s (jitter at rest).
+    fn settled(project: &Project, sim: &Simulation, name: &str) -> (Vec3, f32, f32) {
+        let track = prop_track(project, sim, name);
+        let fps = project.settings.fps;
+        let (rotation, center) = *track.last().unwrap();
+        let tilt = libm::acosf((rotation * Vec3::Z).dot(Vec3::Y).abs().min(1.0));
+        let last = track.len() - (fps * 0.5) as usize;
+        let jitter = track[last..]
+            .windows(2)
+            .map(|w| w[0].1.distance(w[1].1) * fps)
+            .fold(0.0, f32::max);
+        (center, tilt, jitter)
+    }
+
+    /// The lowest a prop's centre goes once it has first come within 1 mm of `rest`
+    /// (sinking into what it lands on), m.
+    fn lowest_after_landing(project: &Project, sim: &Simulation, name: &str, rest: f32) -> f32 {
+        let track = prop_track(project, sim, name);
+        let landed = track.iter().position(|t| t.1.y < rest + 0.001).unwrap_or(0);
+        track[landed..]
+            .iter()
+            .map(|t| t.1.y)
+            .fold(f32::MAX, f32::min)
+    }
+
+    /// Checks a prop that comes to rest: its centre's height (m) to a millimetre,
+    /// whether it stands (axis upright) or lies (axis level) within half a degree,
+    /// that it never sinks a millimetre below its rest, and that it is still.
+    fn rests(project: &Project, sim: &Simulation, name: &str, height: f32, standing: bool) {
+        let (centre, tilt, jitter) = settled(project, sim, name);
+        let lowest = lowest_after_landing(project, sim, name, height);
+        let lean = if standing {
+            tilt
+        } else {
+            std::f32::consts::FRAC_PI_2 - tilt
+        };
+        println!(
+            "{name:<12} centre y {:.4} m  tilt {:.2}°  lowest {lowest:.4} m  jitter {jitter:.4} m/s",
+            centre.y,
+            tilt.to_degrees()
+        );
+        assert!(
+            (centre.y - height).abs() < 0.001,
+            "{name} rests at {} m, not {height} m",
+            centre.y
+        );
+        assert!(
+            lean.to_degrees() < 0.5,
+            "{name} leans {}°",
+            lean.to_degrees()
+        );
+        assert!(lowest > height - 0.001, "{name} sinks to {lowest} m");
+        assert!(jitter < 0.002, "{name} still moves at {jitter} m/s");
+    }
+
+    /// Lesson 8: cylinders collide as cylinders, with flat caps and a sharp rim.
+    #[test]
+    fn cylinders_rest_on_caps_and_sides() {
+        let project = cylinders();
+        let sim = check(project.clone());
+        // Stood on its cap; as the capsule it used to be, its round end tipped it over.
+        rests(&project, &sim, "standing", 0.25, true);
+        rests(&project, &sim, "disc", 0.02, true);
+        rests(&project, &sim, "on box", 0.7, true);
+        rests(&project, &sim, "across box", 0.6, false);
+        rests(&project, &sim, "lying", 0.1, false);
+        // On the cap 3 cm in from the rim, where a round end would roll it off (a
+        // ball's local Z starts level and it does not roll).
+        rests(&project, &sim, "ball inside", 1.05, false);
+        // Its centre 2 cm past the rim: the sharp edge throws it outwards to the ground.
+        let (ball, _, _) = settled(&project, &sim, "ball outside");
+        println!("ball outside ends at {ball}");
+        assert!((ball.y - 0.05).abs() < 0.001 && ball.z > 0.3, "{ball}");
+
+        // The log rolls straight along +Z on its side, at 2/3 of the 1 m/s it was given
+        // (a solid cylinder rolling), without slowing, drifting or sinking.
+        let track = prop_track(&project, &sim, "log");
+        let fps = project.settings.fps;
+        let (rotation, end) = *track.last().unwrap();
+        let speed = (end.z - track[track.len() - 31].1.z) * fps / 30.0;
+        let lowest = track.iter().map(|t| t.1.y).fold(f32::MAX, f32::min);
+        let axis = rotation * Vec3::Z;
+        println!("log ends at {end}, rolling at {speed:.4} m/s, axis {axis}, lowest {lowest:.4} m");
+        assert!(end.z > 1.8, "log rolled only {} m", end.z);
+        assert!((speed - 2.0 / 3.0).abs() < 0.02, "log rolls at {speed} m/s");
+        assert!((end.x - 2.0).abs() < 0.005, "log drifted to x = {}", end.x);
+        assert!(axis.x.abs() > 0.9999, "log turned: axis {axis}");
+        assert!(
+            lowest > 0.099 && (end.y - 0.1).abs() < 0.001,
+            "log at {lowest} m"
+        );
+    }
+
+    /// Cylinders on cylinders: caps stacked, a cap on a side, sides side by side.
+    #[test]
+    fn cylinder_pile_settles() {
+        let project = cylinder_pile();
+        let (sim, elapsed) = simulate(&project);
+        let report = measure(&project, &sim, elapsed);
+        let steps = project.settings.range.end as f32 / project.settings.fps * project.physics.rate;
+        println!(
+            "{report}  {:.0} µs per step",
+            elapsed.as_secs_f32() * 1e6 / steps
+        );
+        assert!(report.held(), "{report}\n{}", report.places());
+        for (name, height) in [
+            ("disc0", 0.03),
+            ("disc1", 0.09),
+            ("disc2", 0.15),
+            ("base", 0.03),
+            ("post", 0.36),
+            ("plate", 0.03),
+        ] {
+            rests(&project, &sim, name, height, true);
+        }
+        let groove = 0.1 + 0.03f32.sqrt();
+        for (name, height) in [
+            ("pin", 0.16),
+            ("under0", 0.1),
+            ("under1", 0.1),
+            ("top", groove),
+        ] {
+            rests(&project, &sim, name, height, false);
+        }
     }
 
     /// Without a ground plane, things may go as low as the scenery takes them: a floor

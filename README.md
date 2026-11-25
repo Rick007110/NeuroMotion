@@ -10,7 +10,9 @@ toward a modern physics engine that behaves like endorphin's and then goes furth
 > **Status: early development.** The editor, timeline, undo/redo and endorphin import
 > work. The physics engine runs imported endorphin characters with their own bodies,
 > joint limits and muscles; all 16 bundled sample scenes checked simulate
-> cleanly over their whole length. Of endorphin's *behaviours*, balance (which steps
+> cleanly over their whole length, and a test scores NeuroMotion against measurements
+> of endorphin's own runs ([docs/reference-measurements.md](docs/reference-measurements.md)).
+> Of endorphin's *behaviours*, balance (which steps
 > when pushed too hard to stand still), stagger, catch fall, body foetal, writhe and
 > look and reach and explosion (writhe in mid-air) have original controllers; scenes
 > that rely on the others behave like a limp character instead.
@@ -74,7 +76,8 @@ compatibility.
 NeuroMotion has its own physics engine, modelled on endorphin's so imported scenes
 behave the same way, then improved:
 
-- One rigid body per bone, with endorphin's masses and collision shapes; twist/swing
+- One rigid body per bone, with endorphin's masses and collision shapes (cylinders
+  exact, with flat caps and a sharp rim); twist/swing
   joint limits with soft zones; force-limited muscles with endorphin's presets
   (Default, Normal, DesiredPoseCalibration, Strong, Weak); material pairs for friction
   and bounce.

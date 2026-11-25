@@ -64,11 +64,11 @@ Keep these boundaries: `document`, `timeline` and `physics` must never depend on
 
 ### `physics`
 
-- `world.rs`: bodies, joints, muscles, locks and contacts, and the solver (substepped
-  sequential impulses with soft constraints; locked groups, and characters something
-  heavy presses on, solved directly).
+- `world.rs`: bodies, joints, muscles, virtual muscles, locks and contacts, and the
+  solver (substepped sequential impulses with soft constraints; locked groups, and
+  characters something heavy presses on, solved directly).
 - `collide.rs`: contact generation between shapes (spheres, capsules, boxes,
-  cylinders).
+  and exact cylinders with flat caps and a sharp rim).
 - `behaviour.rs`: controllers that drive muscles while a character is simulated
   (Balance, Stagger, CatchFall, BodyFoetal, Writhe, Look and Reach, Explosion). New behaviours go here; see [docs/behaviours.md](docs/behaviours.md).
 - `interp.rs`: blends two cached frames for output at a fractional frame (viewport

@@ -102,7 +102,9 @@ NeuroMotion, and we need numbers to prove it.
   yet (doing so tipped Multi Martial's Stagger landing over), and endorphin's own gains
   (1 in every preset field) make them weak, more brake than pull; how endorphin scales
   them isn't known. None of the scenes with endorphin measurements uses them
-- ⬜ **Exact cylinders** ([#14](https://github.com/Rick007110/NeuroMotion/issues/14))
+- ✅ **Exact cylinders** ([#14](https://github.com/Rick007110/NeuroMotion/issues/14)):
+  flat caps and a sharp rim against every shape, resting still on a cap or a side
+  (lesson 36). A cap rests on six rim points, not the whole circle
 - ✅ **Interpolated output** between cached frames, for smooth 60 fps playback: the
   viewport blends the two neighbouring simulated frames at the fractional playhead, and
   export can write 2x or 4x the project's frame rate (the simulation itself still runs

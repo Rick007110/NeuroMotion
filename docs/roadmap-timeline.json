@@ -3,7 +3,7 @@
   "subtitle": "Road to 1.0: everything endorphin 2.5 could do",
   "releases": [
     { "version": "0.1", "name": "First public beta", "detail": "Opens endorphin scenes, own physics, FBX/BVH export", "state": "released" },
-    { "version": "0.2", "name": "Physics parity", "detail": "Same results as endorphin, checked by numbers", "state": "current" },
+    { "version": "0.2", "name": "Physics parity", "detail": "Same results as endorphin, scored on 36 measurements of its runs", "state": "current" },
     { "version": "0.3", "name": "Behaviours", "detail": "Look and Reach, Explosion done; JumpDive and more", "state": "planned" },
     { "version": "0.4", "name": "Your own motion", "detail": "Import BVH/FBX, your own characters and props", "state": "planned" },
     { "version": "0.5–0.9", "name": "The editor", "detail": "3D viewport, toolbar, posing tools", "state": "planned" },
