@@ -39,17 +39,19 @@ NeuroMotion, and we need numbers to prove it.
   poses, active animations, constraints (lock and join, including negative
   "drive" strengths)
 - ✅ Scenery props, characters placed in the world, the scene's own keys
-- 🟡 Sample scenes clean, 16 of 17: the real Car Hit's clavicle came apart in its
+- ✅ Sample scenes clean, 17 of 17: the real Car Hit's clavicle came apart in its
   transition back to animation, which shortened the bones it drew; transitions now
   blend each bone in its own pose's frame (lesson 18,
   [#7](https://github.com/Rick007110/NeuroMotion/issues/7)). Lessons 15 and 17 fixed
   the car's hit and the arm whipping round after it stops
   ([#23](https://github.com/Rick007110/NeuroMotion/issues/23)) in the Car carry
   stand-in. Bridge Escape, skipped for size until the large-scenes item, was clean by
-  luck: its 28 t truck cab, tumbling on its wheels, gains speed from its ground
-  contact, and one run in five fails (flying off at 47.7 m/s, or buried 17 cm). Since
-  a level switch acts on the step into its frame (lesson 42) the default run is that
-  one
+  luck: its 28 t truck cab, tumbling on its wheels, gained speed from its ground
+  contact, and one run in five failed (flying off at 47.7 m/s, or buried 17 cm). The
+  cause was the truck's hitch: at a large swing, its twist and swing stops pushed
+  along axes that weren't their gradients and fought each other through the cab's
+  one wheel on the ground. They now push along the true gradients (lesson 45), and
+  Bridge Escape is clean in 9 of 9 runs with gravity nudged by up to ±4e-4
 - ✅ Heavy bodies pressing on a character, friction only where surfaces touch, and
   characters with a joint come apart solved directly (lessons 15, 16 and 17)
 - ✅ Car Hit measured against a recording of endorphin's: a lock that falls behind

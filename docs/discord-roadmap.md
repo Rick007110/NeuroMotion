@@ -2,7 +2,7 @@
 
 ### ✅ Done
 - Opens **endorphin 2.5** scenes, characters and poses (`.ens`, `.nmc`, `.nma`)
-- Own physics engine at **120 Hz**: **16 of the 17 endorphin sample scenes** simulate stably over their **full length**, faster than real time (Bridge Escape's tumbling truck fails about one run in five, being looked at)
+- Own physics engine at **120 Hz**: **all 17 endorphin sample scenes** simulate stably over their **full length**, faster than real time, Bridge Escape's tumbling truck included
 - **Car Hit matches endorphin**: compared frame by frame with endorphin's own run
 - Friction and constraints that behave like endorphin's, smooth transitions back to animation
 - Balance and Stagger on endorphin's friction, now used by NeuroMotion's own projects too
