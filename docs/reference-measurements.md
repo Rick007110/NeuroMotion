@@ -151,15 +151,16 @@ repository.
 ## What is covered
 
 Run with active poses bending swing joints at a sixteenth of their preset
-(physics-design.md, lesson 46), drives fading as cos(θ/2) (lesson 47), imported
+(physics-design.md, lesson 46), drives fading as cos(θ/2) (lesson 47) and driving on
+again 33° short of a whole turn (lesson 51), imported
 scenes' contacts at 120 Hz (lesson 48) and those that carry a load rigid in the
 character's own solve, with active poses' twist muscles limited to 0.4 of their preset
-at any strength (lesson 50), 2026-11-25, with `NM_NUDGES=2`:
+at any strength (lesson 50), 2026-11-27, with `NM_NUDGES=2`:
 
 | Scene | Rows | Within | Guards | Mean error (× uncertainty) |
 |---|---|---|---|---|
 | Car Hit | 20 | 9 | 5 | 1.8 |
-| Back-Flip-To-Combo (#6, the user's own scene) | 21 | 14 | 5 | 1.3 |
+| Back-Flip-To-Combo (#6, the user's own scene) | 21 | 14 | 5 | 1.2 |
 | Tackle (the tackled character) | 9 | 4 | 0 | 1.9 |
 | Hands reach and look at 2.5 (Look and Reach) | 3 | 2 | 1 | 1.4 |
 | Writhe in mid-air 2.5 (Explosion) | 5 | 3 | 3 | 1.2 |
@@ -180,15 +181,16 @@ lesson 42; over all eight, lesson 46 took it from 159.9 to 140.1 (21 to 29 rows
 within, all of them Back-Flip-To-Combo's). Three rows on the flip's turn came after
 it (71 rows, the sum 150.4; it would have been 171.0 before lesson 46, where the flip
 turned too little: those rows count at most 4 each either way); lesson 47's drive
-reading took it to 145.0, lesson 48's stiffer contacts to 140.6 and lesson 50's rigid footing to 138.5. Ways of
+reading took it to 145.0, lesson 48's stiffer contacts to 140.6, lesson 50's rigid footing to 138.5 and lesson
+51's drive to 136.7. Ways of
 reading endorphin's numbers scored on the recordings are in lessons 34 and 39. The
 baselines are this run's values; every guard holds over `NM_NUDGES=2`, where every
 row's nudged range is within a frame, 0.1° or 2 cm except Stagger Walk's feet (-0.75 to
 -0.49 m along z and 0.02 to 0.23 m along x by frame 96) and the top of its neck (-0.31
 to -0.05 m by 108), Tackle's lying x and z (0.73 to 0.76 m, 1.95 to 2.01 m), the flip's
-turn (within 2°), Trapeze's landing and standing
+turn (within 4°), Trapeze's landing and standing
 (frames 362 to 433, 0.26 to 4.10 m high at 400, 0.19 to 0.34 m at 600: it stays on
-the platform or falls off it) and Back-Flip-To-Combo's combo (1.00 to 1.10 m).
+the platform or falls off it) and Back-Flip-To-Combo's combo (1.07 to 1.18 m).
 
 The known gaps, with their errors on that run:
 
@@ -203,15 +205,17 @@ The known gaps, with their errors on that run:
   box top. It jumps to 3.74 m at frame 239 where endorphin's reaches 3.745 m at 242
   (3.69 m at 236 with lesson 48's contacts, 3.61 m at 233 before), its lowest body
   3.58 m up at the top (3.60), falls past the box top at 294 (296) and reaches the
-  floor at 332 (330), all within endorphin's uncertainty. The crouch's height at frame
+  floor at 330 (330), all within endorphin's uncertainty. The crouch's height at frame
   192 is 3.186 m against a bound of 3.188 m (endorphin 3.158 ± 0.03), a guard near its
   edge: rigid feet hold the crouch 1 cm higher than lesson 48's contacts did. Its
   knees bend 6.6° less in the crouch, its hips stay 15° and its arms 9° short of
-  endorphin's at the take-off, and its combo jump reaches 1.10 m where endorphin's
-  reaches 1.67 m. The trunk turns -264 / -525 / -653° by frames 260 / 297 / 330
-  since 190 (endorphin -247 / -523 / -689): on time to frame 297, then 35° short by
-  330, where endorphin's flip gains angular momentum with nothing touching it (lessons
-  49 and 50).
+  endorphin's at the take-off, and its combo jump reaches 1.07 m where endorphin's
+  reaches 1.67 m. The trunk turns -265 / -527 / -668° by frames 260 / 297 / 330
+  since 190 (endorphin -247 / -523 / -689): on time to frame 297, then 21° short by
+  330 (35° before lesson 51, where endorphin's drive turned out to drive on again near
+  a whole turn): it is less tucked than endorphin's through the flip, so it reaches
+  that point three steps later, and endorphin's momentum keeps growing after 300 with
+  nothing touching it, which may be its rig differing from NeuroMotion's reading.
 - **Tackle**: the tackled runner goes down later and slower (centre of mass 0.83 m at
   frame 55, endorphin 0.70; head 0.70 m over it at 60, 0.46) and ends up 0.30 m
   further along z (0.40 m before lesson 50, 0.28 m before lesson 48's contacts, 0.53 m

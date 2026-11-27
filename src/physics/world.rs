@@ -71,6 +71,9 @@ fn cap_spring(stiffness: f32, damping: f32, max_stiffness: f32) -> (f32, f32) {
     (max_stiffness, damping * scale)
 }
 const MAX_ANGULAR_SPEED: f32 = 100.0;
+/// How far short of a whole turn (rad, 33°) a turning drive stops pushing back and
+/// drives on again (`World::apply_lock_drives`).
+const DRIVE_TURNS_ON_BEFORE: f32 = 0.576;
 /// Swing (rad) past which a joint's stops take their gradients as at this swing: the
 /// swing-twist split degenerates towards π (lesson 45).
 const MAX_SWING_GRADIENT: f32 = 2.5;
@@ -1017,8 +1020,21 @@ impl World {
                 Some(a) => self.bodies[a].rotation.inverse() * self.bodies[lock.body].rotation,
                 None => self.bodies[lock.body].rotation,
             };
-            let turned = relative.dot(lock.target.0);
-            let torque = frame * lock.angular.min(Vec3::ZERO) * (h * turned);
+            let push = lock.angular.min(Vec3::ZERO);
+            let mut turned = relative.dot(lock.target.0);
+            // 33° short of a whole turn it stops pushing back and drives on, as it did when
+            // it began: endorphin's upper spine and pelvis each switched there, two steps
+            // apart, as each reached it (lesson 51). Half the turn towards the push, in
+            // (-180°, 180°]: past a whole turn the quaternion's sign has gone round, so the
+            // window it drives on in, (-33°, 327°] of turn, repeats every whole turn.
+            let turn = relative * lock.target.0.inverse();
+            let half = libm::atan2f(turn.xyz().dot(push.normalize_or_zero()), turn.w);
+            if !(-DRIVE_TURNS_ON_BEFORE / 2.0..=std::f32::consts::PI - DRIVE_TURNS_ON_BEFORE / 2.0)
+                .contains(&half)
+            {
+                turned = -turned;
+            }
+            let torque = frame * push * (h * turned);
             for (body, sign) in [(Some(lock.body), 1.0), (lock.anchor, -1.0)] {
                 let Some(body) = body.map(|b| &mut self.bodies[b]).filter(|b| b.is_dynamic())
                 else {
@@ -3443,8 +3459,8 @@ mod tests {
     /// A negative angular strength turns with that many newton-metres about the world
     /// axis at first, times cos(θ/2) as the body turns θ from where the lock began
     /// (lesson 47): -100 N·m about X spins a ball of 1 kg·m² at -100 rad/s² to start
-    /// with, fastest (20 rad/s, from ω² = 400 sin(-θ/2)) after half a turn, and to a stop
-    /// after a whole one.
+    /// with, fastest (20 rad/s, from ω² = 400 sin(-θ/2)) after half a turn, and slowest
+    /// 33° short of a whole one (10.7 rad/s), where it drives on again (lesson 51).
     #[test]
     fn negative_angular_strength_turns_with_a_torque_that_fades_over_a_turn() {
         let mut w = world();
@@ -3465,22 +3481,24 @@ mod tests {
             (spin.x - start).abs() < 0.02,
             "{spin}, expected about {start} rad/s"
         );
-        let mut fastest = 0.0f32;
-        for _ in 0..240 {
+        let (mut fastest, mut slowest) = (0.0f32, f32::MAX);
+        for _ in 0..60 {
             run(&mut w, 1.0 / 120.0);
             let spin = w.bodies[b].angular_velocity;
             assert!(spin.y.abs() < 1e-4 && spin.z.abs() < 1e-4, "{spin}");
-            fastest = fastest.max(-spin.x);
-            if spin.x >= 0.0 {
-                break;
+            assert!(spin.x < 0.0, "stopped: {spin}");
+            // Half a turn: the body's w goes from 1 to 0, then to -1 at a whole turn.
+            if w.bodies[b].rotation.w > 0.0 {
+                fastest = fastest.max(-spin.x);
+            } else {
+                slowest = slowest.min(-spin.x);
             }
         }
         assert!((fastest - 20.0).abs() < 0.3, "fastest {fastest} rad/s");
-        // Stopped after a whole turn: cos(θ/2) back at -1, the body's w at -1.
-        let w_now = w.bodies[b].rotation.w;
+        let wanted = 20.0 * libm::sqrtf(libm::sinf(163.5f32.to_radians()));
         assert!(
-            w_now < -0.99,
-            "stopped at w = {w_now}, not after a whole turn"
+            (slowest - wanted).abs() < 0.8,
+            "slowest {slowest} rad/s past half a turn, expected about {wanted}"
         );
     }
 
@@ -3518,15 +3536,59 @@ mod tests {
             "held rotation still turning: {}",
             body.angular_velocity
         );
-        // The X drive's torque fades with the turn (cos(θ/2)): from rest, with 1 kg·m²,
-        // ω² = 400 sin(-θ/2), sin(θ/2) being the rotation's x.
+        // The X drive's torque fades with the turn (cos(θ/2)) and pushes back past half a
+        // turn, until 33° short of a whole one, where it drives on again: from rest, with
+        // 1 kg·m², by now the ball has turned about 400°, past a whole turn, and
+        // ω² = 400 (sin(θ'/2) + 2 sin 16.5°), θ' = θ - 360°, sin(θ'/2) being the
+        // rotation's x (a_turning_drive_drives_on_near_a_whole_turn).
         let (spin, q) = (body.angular_velocity.x, body.rotation);
-        assert!(q.w < 0.0, "drive axis didn't turn it past half a turn: {q}");
         assert!(
-            (spin * spin + 400.0 * q.x).abs() < 4.0,
+            q.w < 0.0 && q.x > 0.0,
+            "drive axis didn't turn it past a whole turn: {q}"
+        );
+        let wanted = 400.0 * (q.x + 2.0 * libm::sinf(16.5f32.to_radians()));
+        assert!(
+            (spin * spin - wanted).abs() < 8.0,
             "spin {spin} rad/s after a turn of {} rad",
             2.0 * libm::atan2f(q.x, q.w)
         );
+    }
+
+    /// A turning drive pushes back from half a turn, but 33° short of a whole turn it
+    /// drives on again, and every whole turn after (endorphin's flip, lesson 51): from
+    /// rest, the ball doesn't stop at a whole turn but keeps spinning up.
+    #[test]
+    fn a_turning_drive_drives_on_near_a_whole_turn() {
+        let mut w = world();
+        w.ground = None;
+        w.gravity = Vec3::ZERO;
+        let b = ball(&mut w, Vec3::ZERO, 0.5, 10.0);
+        w.locks.push(Lock {
+            anchor: None,
+            body: b,
+            target: (Quat::IDENTITY, Vec3::ZERO),
+            linear: Vec3::ZERO,
+            angular: Vec3::new(-100.0, 0.0, 0.0),
+        });
+        // With 1 kg·m², ω² = 400 sin(θ/2) up to 327°; then the drive counts its turn from
+        // the next whole turn, -33° (θ' = θ - 360°), and ω² = 400 (sin(θ'/2) + 2 sin 16.5°).
+        let mut turned = 0.0;
+        for _ in 0..240 {
+            w.step(1.0 / 120.0);
+            turned -= w.bodies[b].angular_velocity.x / 120.0;
+            if turned > 7.0 {
+                break;
+            }
+        }
+        assert!(turned > 7.0, "turned only {turned} rad in 2 s");
+        let (spin, q) = (w.bodies[b].angular_velocity.x, w.bodies[b].rotation);
+        // Past a whole turn, the rotation's x is sin(θ'/2).
+        let wanted = 400.0 * (q.x + 2.0 * libm::sinf(16.5f32.to_radians()));
+        assert!(
+            (spin * spin - wanted).abs() < 8.0,
+            "spin {spin} rad/s at a turn of {turned} rad, ω² wanted {wanted}"
+        );
+        assert!(spin < -14.0, "spin {spin} rad/s");
     }
 
     /// A join's negative axis pushes the body and its anchor apart with equal and

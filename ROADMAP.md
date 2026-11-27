@@ -89,13 +89,16 @@ NeuroMotion, and we need numbers to prove it.
   character, and its knees push at most 400 N·m whatever the pose's strength, as
   endorphin's (lesson 50): it jumps to 3.74 m at 239 (3.745 m at 242), passes the box
   top at 294 (296) and lands at 332 (330), all within endorphin's uncertainty, with
-  14 of 21 rows within. Still short: the trunk turns 18° too far by frame 260 and is
-  35° short by 330 (endorphin's flip gains angular momentum after 290 with nothing
-  touching it), so #6 stays open; its knees bend 6.6° less in the crouch (endorphin's
+  14 of 21 rows within. Measured step by step, endorphin's flip drive drives on again
+  33° short of a whole turn where NeuroMotion's pushed back (lesson 51): the trunk is
+  now 21° short by frame 330 (35° before). Still short: the trunk turns 18° too far by
+  frame 260 and 21° too little by 330 (it is less tucked than endorphin's), so #6
+  stays open; NeuroMotion's relax pass leaks angular momentum in flight, which hides
+  a take-off that spins too fast (lesson 51); its knees bend 6.6° less in the crouch (endorphin's
   hold a quarter of their preset, which here loses the jump); its unnamed ankles still
   follow the legs' pose where endorphin's are limp (limp, it jumps 3.67 m); the
   crouch's height guard is near its edge (3.186 m, bound 3.188); and its combo jumps
-  reach 1.10 m (1.67 m)
+  reach 1.07 m (1.67 m)
 - ✅ **Reference measurements**: scenes measured in endorphin (frames, positions,
   angles) and scored against NeuroMotion by a test, `reference_scores`, so "behaves
   like endorphin" is checked, not eyeballed. 71 measurements in eight scenes: Car Hit,
@@ -299,7 +302,8 @@ What moves NeuroMotion closest to endorphin quality now, in order:
 2. **Back-Flip-To-Combo's jump** ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)): it now holds its poses as endorphin's does up to
    the take-off (lesson 46), its planted feet are rigid (lesson 50) and its jump,
    the frames it passes the box top and lands are within endorphin's uncertainty.
-   Next: what turns endorphin's flip after frame 290 (and 18° less by 260), then the
+   Next: the take-off's spin with the relax pass's angular momentum leak fixed
+   (lesson 51), the flip's tuck (18° too far by 260, 21° short by 330), then the
    knees at a quarter of their preset and limp unnamed joints without losing the
    jump (lesson 50).
 3. **The other missing behaviours** in the inventory's order (JumpDive, Jump,

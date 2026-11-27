@@ -2650,6 +2650,102 @@ Measured joint by joint against Back-Flip-To-Combo's export, the trunk gave one 
     still the weak point with many contacts: a lying character with a few dozen contact
     rows needs 20-50 rounds a pass.
 
+51. **endorphin's flip drive drives on again 33° short of a whole turn, and acts a step
+    earlier than its span; NeuroMotion's relax pass leaks angular momentum, which hid
+    part of the gap.** (Number to be assigned at integration.) Back-Flip-To-Combo's
+    trunk was 35° short of endorphin's by frame 330 (lesson 49's "turn after 290").
+    Measured step by step: the angular momentum about the centre of mass along X (the
+    flip's axis) over each frame interval, from velocities over that interval alone, so
+    the change from one interval to the next is one step's impulse (bodies placed on
+    the exported joints with NeuroMotion's rig and inertia, as in lesson 47; checked on
+    NeuroMotion's own dump, where free flight gives back its own momentum to 0.1
+    kg·m²/s). Torque per step, N·m (step k is frame k to k + 1):
+
+    | Step | 244 | 245 | 246 | 253 | 260 | 269 | 280 | 288 | 289 | 290 | 291 | 295 | 296 |
+    |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+    | endorphin | 19 | -69 | -71 | -87 | -52 | 0 | 60 | 86 | -2 | -1 | -84 | -91 | -2 |
+    | NeuroMotion (before) | 8 | 8 | -55 | -85 | -58 | -6 | 61 | 92 | 96 | 98 | 100 | 103 | 106 |
+
+    - **A step earlier.** The span is 246-297; endorphin's drive acts from the step
+      out of 245 to the step into 296, as a level switch does (lesson 42), at full
+      strength from its first step. Its cos(θ/2) (lesson 47) crosses zero on step 269,
+      when the two bodies have turned 174° and 182° since frame 245.
+    - **Driving on.** On steps 289 and 290 the drive's torque is -1.8 and -1.4 N·m,
+      then from 291 the full -84 to -91, pushing on in the turn's direction. Each body
+      has half the strength: with the upper spine reversed and the pelvis not yet, the
+      two halves leave 46.5 × (|w_pelvis| - |w_spine2|) = -1.7 and -1.4 N·m, as
+      measured. The upper spine reverses between frames 288 and 289, as its turn since
+      245 goes from 322° to 329°, the pelvis between 290 and 291, from 325° to 332°:
+      both at 325-329°, 33° short of a whole turn, each as it gets there. Not a contact (nothing is near,
+      and the centre of mass falls without a jolt), and not where any quaternion sign
+      convention tried changes sign: w ≥ 0, largest component positive, or taken from
+      the rotation matrix, on the joints' or the bodies' axes and on the 24 axis-aligned
+      frames on either, put none of the two flips where they are. Why 33° isn't known.
+      Lesson 50's reading (a spring towards half a turn, the short way) would reverse
+      at a whole turn, two to four steps later than these.
+
+    So a turning drive now pushes with cos(θ/2) of its turn within (-33°, 327°] and
+    with -cos(θ/2) outside it: past 327° it counts its turn from the next whole turn,
+    and the window repeats every whole turn (a quaternion can't tell 327° from -393°,
+    so the rule can't depend on more than that). A constraint whose strengths are all
+    negative or zero acts on the steps into the frames of its span; one that holds
+    keeps to the steps out of them (lesson 42). Both measured on this one drive; no
+    sample scene has one, and NeuroMotion's own back flip stand-in is the only other
+    user. `a_turning_drive_drives_on_near_a_whole_turn`: a 1 kg·m² ball under -100 N·m
+    from rest no longer stops at a whole turn (ω² = 400 sin(-θ/2) and back) but slows
+    to 10.7 rad/s at 327° and spins on, ω² = 400 (sin(θ'/2) + 2 sin 16.5°) with θ' = θ
+    - 360°; the two older drive tests now check that.
+
+    | Back-Flip-To-Combo | endorphin | before | now |
+    |---|---|---|---|
+    | Angular momentum (kg·m²/s) at frames 290 / 300 / 320 | -63.7 / -67.6 / -71.0 | -65.0 / -59.0 / -58.7 | -64.3 / -64.9 / -64.5 |
+    | Turned since 190 by frames 260 / 297 / 330 | -247 / -523 / -689° | -264 / -525 / -653° | -265 / -527 / -668° |
+    | On the floor | 330 | 332 | 330 |
+    | Combo jump | 1.67 m | 1.10 m | 1.07 m |
+
+    The drive shifted a step alone moves none of the rows by more than 1° (the
+    cos(θ/2) push depends on the turn, not the time); the reversal does it. NeuroMotion's
+    bodies reach 327° on steps 292-293, three steps after endorphin's: its trunk is
+    less tucked through the flip (spine bend 38° against 51°, inertia about the flip's
+    axis 4.7 against 4.4 kg·m² on the same rig), so it turns more slowly for the same
+    momentum. After frame 306 the two shapes agree (inertia within 5%), and the trunk's
+    turn rate follows the momentum: -64.7 against endorphin's -69.4 at 310.
+
+    Still unexplained: endorphin's momentum grows from -67.6 to -71.3 kg·m²/s between
+    300 and 324 (-10 to -31 N·m, falling to -7 by 329) with nothing touching it and
+    the pelvis lock gone at 305, while the body opens out (inertia 4.4 to 13.6 kg·m²).
+    It may be the rig: on NeuroMotion's masses and centres endorphin's centre of mass
+    falls at 9.3-10.0 m/s² in flight, not 9.81, so its bodies' masses or centres aren't
+    quite NeuroMotion's reading, and an opening body shows that as momentum. Fitting
+    centre offsets to make it fall at g was ill-conditioned (offsets of 30-40 cm).
+
+    **NeuroMotion's relax pass leaks angular momentum.** Instrumented substep by
+    substep, the character's momentum in flight changes in the relax pass by +5 to +20
+    N·m (+6.1 kg·m²/s over steps 216-296, 12% of the flip's), always against the turn,
+    and by -6 to +6 N·m as positions are integrated (a spinning body's ω is kept, its
+    world inertia turns, no gyroscopic term). The relax pass uses the joints' levers
+    from the start of the substep, after the positions have moved, so a joint's two
+    anchor impulses act at points (v_B - v_A) h apart: Σ (p_B - p_A) × ΔP over the
+    joints is the measured leak to 0.1 N·m. With the levers turned with their bodies
+    and the articulations and lock groups built again for the relax pass, flight keeps
+    its momentum to 0.1 N·m. It turns too far, though: the take-off leaves the box
+    spinning at -70.0 kg·m²/s instead of -65.0 (endorphin about -64), the stance's
+    contacts and joints leaking too, and Back-Flip-To-Combo (without the reversal above)
+    scores 10 of 21, mean error 1.6, turning -289 / -576 / -710° by 260 / 297 / 330 and
+    on the floor at 325. Not
+    changed: the leak hides that the take-off gives too much spin (its hips stay 19°
+    bent, endorphin's 4°), and the fix would also rebuild every jointed group's
+    factor twice a substep. Worth doing with the take-off.
+
+    `reference_scores` (`NM_NUDGES=2`): Back-Flip-To-Combo 26.4 → 24.6 (14 of 21
+    within, as before; every guard holds, the crouch's height at frame 192 unchanged
+    at 3.1863 m), the other scenes unchanged; in all 138.5 → 136.7, 32 of 71 within.
+    The sample sweep is unchanged, 51 of 51 with gravity scaled by 1 ± 1e-4: no sample
+    scene has a drive. `simulations_are_bit_identical_everywhere`, `nudge_survey`'s
+    scenes and the other stand-ins have none either. The back flip stand-in, standing:
+    leaves the box at 418 (419) and lands at 461 (462), -283° in all; left alone,
+    leaves at 409 (410), lands at 446 (448), -301° (-276°).
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over
@@ -2749,7 +2845,7 @@ What each stand-in reproduces:
 | Truck | Bridge Escape's truck: a 28 t cab on four cylinder wheels joined to an 80 t trailer by a hitch (twist ±2.5°, swing 90° and 15°), jackknifed 88°, rolled 50° and dropped 4 m onto a floor box, landing with the hitch on both stops (lesson 45) | gains 382-638 kJ of its 4.55 MJ on landing, over 9 nudged runs | 0.2 kJ at most |
 | Hanging weight | A 20-80 kg weight on a rope locked at the top, hanging straight (lesson 10) | 0.36 m stretch, 63 m/s | 1.5 cm, 0.6 m/s |
 | Car carry | Car Hit: a 747 kg car joined (1e5) to a keyed carrier drives into a standing character with clavicles at 8 m/s, catches its arm against its ribs, carries it on the bonnet and stops dead at 1.65 s (lesson 15). The join gives way by 23 cm as the carrier stops, by design. After the stop the pedestrian slides off and the arm whips round against its own chest and neck. Coulomb friction, and the car 15 cm off the ground, as Car Hit's is (lesson 21) | 5.8 cm (shoulder) at the hit; 7.0 cm after the stop (#23) | Over 201 nudged runs, up to the stop: 0.7 cm at most for the body (shoulder included), toes and fingers 0.5-2.2 cm at the hit. After the stop: 1.1 cm at most (lessons 17 and 21) |
-| Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps, Coulomb friction (lesson 21), whole-limb muscle cap (lesson 27) | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -11° at 297, leaves the box at 419, lands behind it at 462, -283° in all. Left alone: leaves at 410, lands at 448, -276° (changed by lessons 16 and 21, the limb cap and lesson 47's fading, shared drive) |
+| Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps, Coulomb friction (lesson 21), whole-limb muscle cap (lesson 27) | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -11° at 297, leaves the box at 418, lands behind it at 461, -283° in all. Left alone: leaves at 409, lands at 446, -301° (changed by lessons 16 and 21, the limb cap, lesson 47's fading, shared drive and lesson 51's) |
 | Bonnet slide | Car Hit's pedestrian landing on the bonnet: a 75 kg box thrown at 4 m/s against Heavy join's car drops onto it (lesson 21) | slides on at 3.7-3.9 m/s | stopped dead: -0.33 m/s three frames after landing |
 | Heavy join | Car Hit's join alone: a 747 kg car joined (1e5) to a light keyed carrier that drives off at 8 m/s and stops dead 1 s later (lesson 20) | 15-18 cm behind its carrier for the whole drive and after the stop | 23 cm behind at frame 4, on the carrier from frame 11; 23 cm past it at the stop, back 8 frames later |
 | Gun drop | Walk With Gun: a placeholder holds a 550 kg box in both hands (`JoinBodies`, 1e5 N and 1e4 N·m), its 0.39 kg fingers 3 cm below the box's underside, and drops with it; Coulomb friction (lesson 25) | lowest finger 1.4 cm in the ground | 2.7 to 2.8 cm above it, over 9 nudged runs |
@@ -2816,7 +2912,9 @@ hasn't been re-run against endorphin's scene since.
   up and over, but to 3.61 m at frame 233 where endorphin's reaches 3.745 m at 242:
   its take-off starts earlier and pushes less (lesson 46). Its knees bend 6.5° less
   in the crouch, and why endorphin's swing muscles act at a sixteenth of their preset
-  and its drives fade as cos(θ/2) (lesson 47) is measured, not understood.
+  and its drives fade as cos(θ/2) (lesson 47) and drive on again 33° short of a whole
+  turn (lesson 51) is measured, not understood. The relax pass's levers are those from
+  the start of the substep, which leaks angular momentum in flight (lesson 51).
 
 ## Improvements planned beyond endorphin
 

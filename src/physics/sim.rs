@@ -621,6 +621,14 @@ fn update_constraints(running: &mut Running, frame: i32) {
     let world = &mut running.world;
     world.locks.clear();
     for c in running.constraints.iter_mut() {
+        // A constraint that only drives (every strength negative or zero) acts on the
+        // steps into the frames of its span, as a level switch does: Back-Flip-To-Combo's
+        // flip, 246-297, turns endorphin's character from the step out of 245 to the step
+        // into 296 (lesson 51). One that holds keeps to the steps out of them (lesson 42).
+        let drives = c.linear.max_element() <= 0.0
+            && c.angular.max_element() <= 0.0
+            && (c.linear.min_element() < 0.0 || c.angular.min_element() < 0.0);
+        let frame = if drives { frame + 1 } else { frame };
         if frame < c.start || frame >= c.end {
             c.locks = None;
             continue;

@@ -558,7 +558,7 @@ pub const SCENES: &[Scene] = &[
                 330.0,
                 3.0,
                 false,
-                332.0,
+                330.0,
             ),
             fbx(
                 "flip: trunk (pelvis to head) turned since frame 190, frame 260",
@@ -567,7 +567,7 @@ pub const SCENES: &[Scene] = &[
                 -246.7,
                 10.0,
                 false,
-                -264.2,
+                -265.2,
             ),
             fbx(
                 "flip: trunk (pelvis to head) turned since frame 190, frame 297",
@@ -576,7 +576,7 @@ pub const SCENES: &[Scene] = &[
                 -522.8,
                 10.0,
                 false,
-                -524.9,
+                -526.7,
             ),
             fbx(
                 "flip: trunk (pelvis to head) turned since frame 190, frame 330",
@@ -585,7 +585,7 @@ pub const SCENES: &[Scene] = &[
                 -688.5,
                 10.0,
                 false,
-                -653.2,
+                -667.5,
             ),
             fbx(
                 "combo: centre of mass highest, frames 500-620",
@@ -594,7 +594,7 @@ pub const SCENES: &[Scene] = &[
                 1.667,
                 0.1,
                 false,
-                1.10,
+                1.07,
             ),
         ],
     },
