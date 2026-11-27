@@ -219,6 +219,36 @@ pub const SCENES: &[Scene] = &[
                 true,
                 0.868,
             ),
+            // The left foot on the windscreen (lesson 52): endorphin's slides up the glass
+            // and stays where it was along the road; NeuroMotion's sticks to the glass and
+            // rides along with the car.
+            fbx(
+                "impact: left toes height, frame 52",
+                Signal::Coord(joint("LeftToesJoint"), Axis::Y),
+                Measure::At(52),
+                1.060,
+                0.05,
+                false,
+                0.825,
+            ),
+            fbx(
+                "impact: left toes height, frame 55",
+                Signal::Coord(joint("LeftToesJoint"), Axis::Y),
+                Measure::At(55),
+                1.235,
+                0.05,
+                false,
+                0.851,
+            ),
+            fbx(
+                "impact: left toes x (along the road), frame 55",
+                Signal::Coord(joint("LeftToesJoint"), Axis::X),
+                Measure::At(55),
+                -0.376,
+                0.05,
+                false,
+                0.171,
+            ),
             fbx(
                 "flight: centre of mass highest",
                 com(Axis::Y),

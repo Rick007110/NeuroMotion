@@ -2746,6 +2746,94 @@ Measured joint by joint against Back-Flip-To-Combo's export, the trunk gave one 
     leaves the box at 418 (419) and lands at 461 (462), -283° in all; left alone,
     leaves at 409 (410), lands at 446 (448), -301° (-276°).
 
+52. **In endorphin's Car Hit the pedestrian's contacts with the car carry no friction
+    and no bounce; made so here, the foot slides up the windscreen as endorphin's does
+    and the car stops carrying the pedestrian, but it flies 0.6 m too high, so nothing
+    changed yet.** Measured on endorphin's own
+    run (lesson 40; its first key is the bind pose, so key f + 1 is frame f), against
+    `dump_scene_motion` of NeuroMotion's, the left foot in the car's frame (the export
+    has only the pedestrian, so the car is placed where NeuroMotion's is):
+
+    | Frame | 49 | 50 | 51 | 52 | 53 | 54 | 55 |
+    |---|---|---|---|---|---|---|---|
+    | endorphin: toes' speed up the glass (m/s) | 10.7 | 9.6 | 9.4 | 8.4 | 7.8 | 7.0 | 5.6 |
+    | endorphin: toes' speed towards the glass (m/s) | -7.3 | +0.2 | -0.2 | -3.2 | -1.4 | -0.8 | -1.6 |
+    | NeuroMotion: toes' speed up the glass | 11.4 | 5.9 | -0.4 | 0.1 | 0.1 | 0.1 | -0.1 |
+    | NeuroMotion: toes' speed towards the glass | -8.2 | -5.1 | +0.1 | -0.1 | -0.1 | +0.2 | +1.0 |
+
+    In world terms endorphin's left toes stay where they were along the road (x -0.36
+    to -0.41 m from frame 49 to 55) and rise from 0.82 to 1.24 m; NeuroMotion's ride
+    along with the car (x -0.38 to +0.17 m) at 0.82-0.85 m.
+
+    - **What the car does to the pedestrian**, frame by frame, from the change of its
+      momentum less gravity's (NeuroMotion's rig on both runs' joints, 87.6 kg): in
+      endorphin's run (56, 63) N·s along x and y in each of frames 49 and 50, 48.1°
+      above the horizontal, where the windscreen's face normal is 49.9°: the friction
+      impulse is at most 3% of the normal one while the toes slide at 9-11 m/s; in 53
+      and 54, as the foot slides on up the glass, (22, 24) and (11, 12) N·s, 47°: at
+      most 5%. With Bouncy's μ = 1 a sliding foot would take as much along the glass
+      as across it. And no bounce: restitution 1 would throw the toes off at 7 m/s,
+      and they leave at 0.2. The bumper's hit (51-52, (93, 11) and (105, 24) N·s) has
+      no downward friction in it either. In all, over frames 49-55: x 344, y 197, z -6
+      N·s; the pedestrian leaves the car at -0.25 m/s along the road. NeuroMotion's: x
+      420, y 205, z -50 N·s, leaving at +0.65 m/s (carried), 0.36 m/s sideways; the
+      toes' first impulse is 30° off the normal (friction 0.58 of it) and their speed
+      along the glass falls from 11.3 to 0 m/s within three substeps (per-contact
+      trace).
+    - **The car has no material.** Its seven collision surfaces have no `material`
+      attribute, as every prop in endorphin's `Resources/Props` folder; NeuroMotion
+      reads them as `default`, so the rubber feet meet it with Bouncy (μ = 1,
+      restitution 1) and skin with Default (μ = 1, 0.2). In the scene's table the
+      interaction that has almost no friction with both rubber and skin is Icy (μ =
+      0.01), which is what ice, rubber or skin give; CustomA and CustomB are all zero.
+      Which endorphin gives a surface without a material is not known, and no other
+      export has a character on a prop to tell.
+    - **Where the car is.** In frames 49-51 endorphin's foot takes the windscreen's
+      impulse while 9 cm in front of the glass where NeuroMotion has it, and the right
+      foot the bumper's while 8 cm short of it. A car one frame further on (13.7 cm)
+      puts both within 2 cm then, but the left foot 4-7 cm inside the glass at 52-54,
+      where the car as it is fits to 1.5 cm. The car's join to its keyed carrier is
+      1e5 strong, the carrier brakes from 8.24 to 6.68 m/s at frame 49; unresolved.
+    - **The legs at the switch.** endorphin's keep their running pose (left knee 89.3°
+      at 48, 89.1° at 49); NeuroMotion's are pulled towards Explosion's targets, which
+      are turns from the rest pose (knee 82.8° at 49, knee and ankle losing 1 m/s
+      upwards), and while it touches anything (`pressing`) the flailing stops by
+      driving the legs to the rest pose, straight, not by holding them: on a
+      frictionless windscreen the left knee then opens from 82° to 41° by frame 60,
+      pushing the body up the glass (endorphin's 96° to 61°).
+
+    Temporary switches on Car Hit (`reference_scores`, its first 20 rows, unnudged;
+    upside down until is a guard, 83 ± 2):
+
+    | Reading | Toes up the glass 50-54 (m/s) | Centre of mass x at 68 / 78 / 88 | Highest | Upside down until | Within, mean error |
+    |---|---|---|---|---|---|
+    | endorphin | 9.6, 9.4, 8.4, 7.8, 7.0 | -0.07 / -0.11 / -0.16 m | 1.79 m at 68 | 83 | |
+    | as it is | 5.9, -0.4, 0.1, 0.1, 0.1 | 0.19 / 0.30 / 0.41 | 1.84 at 70 | 83 | 9, 1.8 |
+    | Bouncy's restitution 0 | stuck | 0.28 / 0.42 / 0.54 | 1.76 at 68 | | |
+    | Bouncy's μ × 0.3 | stuck from 52 | 0.21 / 0.34 / 0.47 | 2.22 at 76 | | |
+    | no material: no friction, no bounce | 10.5, 11.5, 11.4, 10.0, 6.5 | -0.08 / -0.12 / -0.16 | 2.41 at 79 | 89 (fails) | 11, 1.6 |
+    | no material: Icy | about the same | -0.05 / -0.08 / -0.10 | 2.45 at 79 | 88 (fails) | 9, 1.7 |
+    | no material: Icy for rubber only | slides | -0.03 / -0.04 / -0.05 | 2.40 at 78 | 89 (fails) | 6, 2.0 |
+    | Explosion's legs turned from the pose they hold, not from rest | stuck | 0.51 / 0.84 / 1.17 | 1.91 at 78 | 83 | 7, 2.6 |
+    | both | slides | -0.10 / -0.15 / -0.19 | 2.16 at 75 | 90 (fails) | 10, 1.9 |
+    | no friction, Explosion's legs limp | slides | -0.49 / -0.74 / -0.98 | 1.77 at 70 | 91 (fails) | 10, 1.8 |
+    | the car a frame further on | stuck | 0.22 / 0.31 / 0.41 | 1.82 at 69 | | |
+    | the feet limp in Explosion | stuck | -0.08 / -0.13 / -0.18 | 1.89 at 71 | 86 (fails) | 9, 1.5 |
+
+    Without friction every row along the road and sideways comes within endorphin's
+    uncertainty (x at 68, 78, 88 and 96, z at 68 and 96), and the pedestrian leaves
+    the car at -0.25 m/s, as endorphin's; but the windscreen, pushed on by a leg that
+    doesn't give, throws it up at 3.9 m/s where endorphin's leaves at 2.3 (y impulse
+    332 N·s, endorphin 197), and it is upside down until 89. Lesson 34's flight height
+    and the stuck foot were hiding each other. So the material stays `default` and
+    Explosion's legs as they were; what is still needed is a leg that yields against
+    the glass as endorphin's does (its knee stays bent at 96° through the slide), which
+    is Explosion's leg design and the knees' stiffness (lesson 49: endorphin's hold a
+    quarter of their preset), and then a reading of materialless surfaces. Three new
+    Car Hit rows measure the slide (the left toes 1.06 and 1.24 m high at frames 52
+    and 55, x -0.38 m at 55; NeuroMotion 0.83, 0.85 and +0.17 m; without friction
+    1.13, 1.35 and -0.43 m).
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over

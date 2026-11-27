@@ -159,7 +159,7 @@ at any strength (lesson 50), 2026-11-27, with `NM_NUDGES=2`:
 
 | Scene | Rows | Within | Guards | Mean error (× uncertainty) |
 |---|---|---|---|---|
-| Car Hit | 20 | 9 | 5 | 1.8 |
+| Car Hit | 23 | 9 | 5 | 2.1 |
 | Back-Flip-To-Combo (#6, the user's own scene) | 21 | 14 | 5 | 1.2 |
 | Tackle (the tackled character) | 9 | 4 | 0 | 1.9 |
 | Hands reach and look at 2.5 (Look and Reach) | 3 | 2 | 1 | 1.4 |
@@ -167,9 +167,9 @@ at any strength (lesson 50), 2026-11-27, with `NM_NUDGES=2`:
 | Stagger Walk | 4 | 0 | 0 | 3.2 |
 | Trapeze (lesson 43) | 6 | 0 | 0 | 4.0 |
 | Balcony (character01, lesson 43) | 3 | 0 | 0 | 4.0 |
-| In all | 71 | 32 | 14 | |
+| In all | 74 | 32 | 14 | |
 
-69 rows come from endorphin's own runs exported as FBX (lessons 40 and 43); character02's two
+72 rows come from endorphin's own runs exported as FBX (lessons 40 and 43); character02's two
 rows in Hands reach and look at still come from a recording (the export holds
 character01 only). The rows used to be 36, all from recordings (18 within on the build
 with lessons up to 39); the exports showed several of them were misread (lesson 40),
@@ -182,7 +182,9 @@ within, all of them Back-Flip-To-Combo's). Three rows on the flip's turn came af
 it (71 rows, the sum 150.4; it would have been 171.0 before lesson 46, where the flip
 turned too little: those rows count at most 4 each either way); lesson 47's drive
 reading took it to 145.0, lesson 48's stiffer contacts to 140.6, lesson 50's rigid footing to 138.5 and lesson
-51's drive to 136.7. Ways of
+51's drive to 136.7.
+Three Car Hit rows on the left foot's slide up the windscreen came after it (lesson 52;
+74 rows, every one of them a known gap). Ways of
 reading endorphin's numbers scored on the recordings are in lessons 34 and 39. The
 baselines are this run's values; every guard holds over `NM_NUDGES=2`, where every
 row's nudged range is within a frame, 0.1° or 2 cm except Stagger Walk's feet (-0.75 to
@@ -196,7 +198,10 @@ The known gaps, with their errors on that run:
 
 - **Car Hit**: the car carries the pedestrian along the road and sideways (centre of
   mass x +0.19 m at frame 68, z -0.20 m; endorphin -0.07, -0.06), because its left
-  foot sticks to the windscreen's face where endorphin's slides up it (lesson 44); it
+  foot sticks to the windscreen's face where endorphin's slides up it (lessons 44 and
+  N: the left toes are 0.85 m high at frame 55 and 0.17 m along the road, endorphin's
+  1.24 m and -0.38 m; endorphin's contacts with the car show no friction, and without
+  friction NeuroMotion's slide too but fly 0.6 m too high); it
   flies 5 cm higher (1.84 m at 70, endorphin 1.79 m at 68; 1.73 m before lesson 42)
   and folds 20° less at the hips.
 - **Back-Flip-To-Combo**: since lesson 46 it holds its poses as endorphin's does
