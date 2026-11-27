@@ -63,7 +63,18 @@ NeuroMotion, and we need numbers to prove it.
   frame, as endorphin's does (lesson 42), and Car Hit's pedestrian flies to 1.83 m
   where endorphin's own run, exported as FBX, reaches 1.79 m (1.73 m before). The car
   still carries it along the road and sideways: its left foot sticks to the
-  windscreen's face where endorphin's slides up it (lesson 44)
+  windscreen's face where endorphin's slides up it (lesson 44; at frame 55 its toes are
+  0.85 m high and 0.17 m along the road, endorphin's 1.24 m and -0.38 m). endorphin's
+  contacts with the car (which has no material in the file) show no friction and no
+  bounce; made so, the foot slides as endorphin's and the pedestrian leaves the car at
+  endorphin's -0.25 m/s, but a leg that doesn't give against the glass throws it to
+  2.41 m (lesson 52). Legs that yield as endorphin's (eased in from the held pose, at
+  endorphin's pose shares) match its knees and hip on the glass and bring it to 2.05 m,
+  but it then spins 30% too little (angular momentum 93 kg·m²/s, endorphin 130) and
+  stays upside down until 91 (83): its impulse goes through the windscreen where
+  endorphin's goes through the bumper, whose impacts stop the bodies 5-10 cm short of
+  NeuroMotion's car. Frictionless surfaces without a material also cost Tackle a row
+  and tear Bridge Escape apart in a nudged run, so neither is in yet (lesson 53)
 - ✅ A force pushes the bodies it names, a massless body never moves, and a
   transition ends exactly on the animation (lessons 22-24); scenes run as long as
   endorphin runs them, and the sweep checks each scene's whole range
@@ -89,20 +100,25 @@ NeuroMotion, and we need numbers to prove it.
   character, and its knees push at most 400 N·m whatever the pose's strength, as
   endorphin's (lesson 50): it jumps to 3.74 m at 239 (3.745 m at 242), passes the box
   top at 294 (296) and lands at 332 (330), all within endorphin's uncertainty, with
-  14 of 21 rows within. Still short: the trunk turns 18° too far by frame 260 and is
-  35° short by 330 (endorphin's flip gains angular momentum after 290 with nothing
-  touching it), so #6 stays open; its knees bend 6.6° less in the crouch (endorphin's
-  hold a quarter of their preset, which here loses the jump); its unnamed ankles still
+  14 of 21 rows within. Measured step by step, endorphin's flip drive drives on again
+  33° short of a whole turn where NeuroMotion's pushed back (lesson 51): the trunk is
+  now 21° short by frame 330 (35° before). Still short: the trunk turns 18° too far by
+  frame 260 and 21° too little by 330 (it is less tucked than endorphin's), so #6
+  stays open; NeuroMotion's relax pass leaks angular momentum in flight, which hides
+  a take-off that spins too fast (lesson 51); its knees bend 6.6° less in the crouch (endorphin's
+  hold a quarter of their preset, which here loses the jump: 3.57 m, the push-off
+  1.08 m/s against 1.31; not the hips, which bend as endorphin's through the push-off,
+  lesson 53); its unnamed ankles still
   follow the legs' pose where endorphin's are limp (limp, it jumps 3.67 m); the
   crouch's height guard is near its edge (3.186 m, bound 3.188); and its combo jumps
-  reach 1.10 m (1.67 m)
+  reach 1.07 m (1.67 m)
 - ✅ **Reference measurements**: scenes measured in endorphin (frames, positions,
   angles) and scored against NeuroMotion by a test, `reference_scores`, so "behaves
-  like endorphin" is checked, not eyeballed. 71 measurements in eight scenes: Car Hit,
+  like endorphin" is checked, not eyeballed. 74 measurements in eight scenes: Car Hit,
   Back-Flip-To-Combo, Tackle, Stagger Walk, Trapeze, Balcony and the Look and Reach
   and Explosion behaviour scenes; 32 are within endorphin's uncertainty, 14 of them
   guarded against regressions, and the known gaps print their error so progress shows
-  ([details](docs/reference-measurements.md)). 69 are read from endorphin's own runs
+  ([details](docs/reference-measurements.md)). 72 are read from endorphin's own runs
   exported as FBX (every joint at every frame, lesson 40; `tools/fbx_motion.py`
   reads an export), which corrected several recording-based rows; two still come from
   a recording. Anyone with endorphin can add rows, using the *Reference measurement*
@@ -299,7 +315,8 @@ What moves NeuroMotion closest to endorphin quality now, in order:
 2. **Back-Flip-To-Combo's jump** ([#6](https://github.com/Rick007110/NeuroMotion/issues/6)): it now holds its poses as endorphin's does up to
    the take-off (lesson 46), its planted feet are rigid (lesson 50) and its jump,
    the frames it passes the box top and lands are within endorphin's uncertainty.
-   Next: what turns endorphin's flip after frame 290 (and 18° less by 260), then the
+   Next: the take-off's spin with the relax pass's angular momentum leak fixed
+   (lesson 51), the flip's tuck (18° too far by 260, 21° short by 330), then the
    knees at a quarter of their preset and limp unnamed joints without losing the
    jump (lesson 50).
 3. **The other missing behaviours** in the inventory's order (JumpDive, Jump,

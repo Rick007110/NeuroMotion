@@ -742,6 +742,14 @@ priorities, which NeuroMotion doesn't use yet.
   isn't known.
 - Landing goes limp; whether endorphin's characters keep any muscle on the ground
   isn't known (they lie still either way).
+- **The legs don't yield as endorphin's.** In Car Hit endorphin's legs keep their
+  running pose for the first step, fold up against the windscreen (knee 89° → 97°,
+  hip 98° → 127°) and then open towards straight at 4-7° a frame; ours open at once
+  and resist the impact like a heavy damper. Eased in from the held pose over 0.1 s,
+  at a quarter (twist) and a sixteenth (swing) of the preset and pedalling on while
+  touching, ours match endorphin's knees and hip on a frictionless windscreen, but
+  that flight is still too high and spins too little, and with the car's friction as
+  it is the design scores worse, so it isn't in (docs/physics-design.md, lesson 53).
 
 ## Solver changes behind them
 

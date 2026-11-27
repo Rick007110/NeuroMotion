@@ -2650,6 +2650,297 @@ Measured joint by joint against Back-Flip-To-Combo's export, the trunk gave one 
     still the weak point with many contacts: a lying character with a few dozen contact
     rows needs 20-50 rounds a pass.
 
+51. **endorphin's flip drive drives on again 33° short of a whole turn, and acts a step
+    earlier than its span; NeuroMotion's relax pass leaks angular momentum, which hid
+    part of the gap.** (Number to be assigned at integration.) Back-Flip-To-Combo's
+    trunk was 35° short of endorphin's by frame 330 (lesson 49's "turn after 290").
+    Measured step by step: the angular momentum about the centre of mass along X (the
+    flip's axis) over each frame interval, from velocities over that interval alone, so
+    the change from one interval to the next is one step's impulse (bodies placed on
+    the exported joints with NeuroMotion's rig and inertia, as in lesson 47; checked on
+    NeuroMotion's own dump, where free flight gives back its own momentum to 0.1
+    kg·m²/s). Torque per step, N·m (step k is frame k to k + 1):
+
+    | Step | 244 | 245 | 246 | 253 | 260 | 269 | 280 | 288 | 289 | 290 | 291 | 295 | 296 |
+    |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+    | endorphin | 19 | -69 | -71 | -87 | -52 | 0 | 60 | 86 | -2 | -1 | -84 | -91 | -2 |
+    | NeuroMotion (before) | 8 | 8 | -55 | -85 | -58 | -6 | 61 | 92 | 96 | 98 | 100 | 103 | 106 |
+
+    - **A step earlier.** The span is 246-297; endorphin's drive acts from the step
+      out of 245 to the step into 296, as a level switch does (lesson 42), at full
+      strength from its first step. Its cos(θ/2) (lesson 47) crosses zero on step 269,
+      when the two bodies have turned 174° and 182° since frame 245.
+    - **Driving on.** On steps 289 and 290 the drive's torque is -1.8 and -1.4 N·m,
+      then from 291 the full -84 to -91, pushing on in the turn's direction. Each body
+      has half the strength: with the upper spine reversed and the pelvis not yet, the
+      two halves leave 46.5 × (|w_pelvis| - |w_spine2|) = -1.7 and -1.4 N·m, as
+      measured. The upper spine reverses between frames 288 and 289, as its turn since
+      245 goes from 322° to 329°, the pelvis between 290 and 291, from 325° to 332°:
+      both at 325-329°, 33° short of a whole turn, each as it gets there. Not a contact (nothing is near,
+      and the centre of mass falls without a jolt), and not where any quaternion sign
+      convention tried changes sign: w ≥ 0, largest component positive, or taken from
+      the rotation matrix, on the joints' or the bodies' axes and on the 24 axis-aligned
+      frames on either, put none of the two flips where they are. Why 33° isn't known.
+      Lesson 50's reading (a spring towards half a turn, the short way) would reverse
+      at a whole turn, two to four steps later than these.
+
+    So a turning drive now pushes with cos(θ/2) of its turn within (-33°, 327°] and
+    with -cos(θ/2) outside it: past 327° it counts its turn from the next whole turn,
+    and the window repeats every whole turn (a quaternion can't tell 327° from -393°,
+    so the rule can't depend on more than that). A constraint whose strengths are all
+    negative or zero acts on the steps into the frames of its span; one that holds
+    keeps to the steps out of them (lesson 42). Both measured on this one drive; no
+    sample scene has one, and NeuroMotion's own back flip stand-in is the only other
+    user. `a_turning_drive_drives_on_near_a_whole_turn`: a 1 kg·m² ball under -100 N·m
+    from rest no longer stops at a whole turn (ω² = 400 sin(-θ/2) and back) but slows
+    to 10.7 rad/s at 327° and spins on, ω² = 400 (sin(θ'/2) + 2 sin 16.5°) with θ' = θ
+    - 360°; the two older drive tests now check that.
+
+    | Back-Flip-To-Combo | endorphin | before | now |
+    |---|---|---|---|
+    | Angular momentum (kg·m²/s) at frames 290 / 300 / 320 | -63.7 / -67.6 / -71.0 | -65.0 / -59.0 / -58.7 | -64.3 / -64.9 / -64.5 |
+    | Turned since 190 by frames 260 / 297 / 330 | -247 / -523 / -689° | -264 / -525 / -653° | -265 / -527 / -668° |
+    | On the floor | 330 | 332 | 330 |
+    | Combo jump | 1.67 m | 1.10 m | 1.07 m |
+
+    The drive shifted a step alone moves none of the rows by more than 1° (the
+    cos(θ/2) push depends on the turn, not the time); the reversal does it. NeuroMotion's
+    bodies reach 327° on steps 292-293, three steps after endorphin's: its trunk is
+    less tucked through the flip (spine bend 38° against 51°, inertia about the flip's
+    axis 4.7 against 4.4 kg·m² on the same rig), so it turns more slowly for the same
+    momentum. After frame 306 the two shapes agree (inertia within 5%), and the trunk's
+    turn rate follows the momentum: -64.7 against endorphin's -69.4 at 310.
+
+    Still unexplained: endorphin's momentum grows from -67.6 to -71.3 kg·m²/s between
+    300 and 324 (-10 to -31 N·m, falling to -7 by 329) with nothing touching it and
+    the pelvis lock gone at 305, while the body opens out (inertia 4.4 to 13.6 kg·m²).
+    It may be the rig: on NeuroMotion's masses and centres endorphin's centre of mass
+    falls at 9.3-10.0 m/s² in flight, not 9.81, so its bodies' masses or centres aren't
+    quite NeuroMotion's reading, and an opening body shows that as momentum. Fitting
+    centre offsets to make it fall at g was ill-conditioned (offsets of 30-40 cm).
+
+    **NeuroMotion's relax pass leaks angular momentum.** Instrumented substep by
+    substep, the character's momentum in flight changes in the relax pass by +5 to +20
+    N·m (+6.1 kg·m²/s over steps 216-296, 12% of the flip's), always against the turn,
+    and by -6 to +6 N·m as positions are integrated (a spinning body's ω is kept, its
+    world inertia turns, no gyroscopic term). The relax pass uses the joints' levers
+    from the start of the substep, after the positions have moved, so a joint's two
+    anchor impulses act at points (v_B - v_A) h apart: Σ (p_B - p_A) × ΔP over the
+    joints is the measured leak to 0.1 N·m. With the levers turned with their bodies
+    and the articulations and lock groups built again for the relax pass, flight keeps
+    its momentum to 0.1 N·m. It turns too far, though: the take-off leaves the box
+    spinning at -70.0 kg·m²/s instead of -65.0 (endorphin about -64), the stance's
+    contacts and joints leaking too, and Back-Flip-To-Combo (without the reversal above)
+    scores 10 of 21, mean error 1.6, turning -289 / -576 / -710° by 260 / 297 / 330 and
+    on the floor at 325. Not
+    changed: the leak hides that the take-off gives too much spin (its hips stay 19°
+    bent, endorphin's 4°), and the fix would also rebuild every jointed group's
+    factor twice a substep. Worth doing with the take-off.
+
+    `reference_scores` (`NM_NUDGES=2`): Back-Flip-To-Combo 26.4 → 24.6 (14 of 21
+    within, as before; every guard holds, the crouch's height at frame 192 unchanged
+    at 3.1863 m), the other scenes unchanged; in all 138.5 → 136.7, 32 of 71 within.
+    The sample sweep is unchanged, 51 of 51 with gravity scaled by 1 ± 1e-4: no sample
+    scene has a drive. `simulations_are_bit_identical_everywhere`, `nudge_survey`'s
+    scenes and the other stand-ins have none either. The back flip stand-in, standing:
+    leaves the box at 418 (419) and lands at 461 (462), -283° in all; left alone,
+    leaves at 409 (410), lands at 446 (448), -301° (-276°).
+
+52. **In endorphin's Car Hit the pedestrian's contacts with the car carry no friction
+    and no bounce; made so here, the foot slides up the windscreen as endorphin's does
+    and the car stops carrying the pedestrian, but it flies 0.6 m too high, so nothing
+    changed yet.** Measured on endorphin's own
+    run (lesson 40; its first key is the bind pose, so key f + 1 is frame f), against
+    `dump_scene_motion` of NeuroMotion's, the left foot in the car's frame (the export
+    has only the pedestrian, so the car is placed where NeuroMotion's is):
+
+    | Frame | 49 | 50 | 51 | 52 | 53 | 54 | 55 |
+    |---|---|---|---|---|---|---|---|
+    | endorphin: toes' speed up the glass (m/s) | 10.7 | 9.6 | 9.4 | 8.4 | 7.8 | 7.0 | 5.6 |
+    | endorphin: toes' speed towards the glass (m/s) | -7.3 | +0.2 | -0.2 | -3.2 | -1.4 | -0.8 | -1.6 |
+    | NeuroMotion: toes' speed up the glass | 11.4 | 5.9 | -0.4 | 0.1 | 0.1 | 0.1 | -0.1 |
+    | NeuroMotion: toes' speed towards the glass | -8.2 | -5.1 | +0.1 | -0.1 | -0.1 | +0.2 | +1.0 |
+
+    In world terms endorphin's left toes stay where they were along the road (x -0.36
+    to -0.41 m from frame 49 to 55) and rise from 0.82 to 1.24 m; NeuroMotion's ride
+    along with the car (x -0.38 to +0.17 m) at 0.82-0.85 m.
+
+    - **What the car does to the pedestrian**, frame by frame, from the change of its
+      momentum less gravity's (NeuroMotion's rig on both runs' joints, 87.6 kg): in
+      endorphin's run (56, 63) N·s along x and y in each of frames 49 and 50, 48.1°
+      above the horizontal, where the windscreen's face normal is 49.9°: the friction
+      impulse is at most 3% of the normal one while the toes slide at 9-11 m/s; in 53
+      and 54, as the foot slides on up the glass, (22, 24) and (11, 12) N·s, 47°: at
+      most 5%. With Bouncy's μ = 1 a sliding foot would take as much along the glass
+      as across it. And no bounce: restitution 1 would throw the toes off at 7 m/s,
+      and they leave at 0.2. The bumper's hit (51-52, (93, 11) and (105, 24) N·s) has
+      no downward friction in it either. In all, over frames 49-55: x 344, y 197, z -6
+      N·s; the pedestrian leaves the car at -0.25 m/s along the road. NeuroMotion's: x
+      420, y 205, z -50 N·s, leaving at +0.65 m/s (carried), 0.36 m/s sideways; the
+      toes' first impulse is 30° off the normal (friction 0.58 of it) and their speed
+      along the glass falls from 11.3 to 0 m/s within three substeps (per-contact
+      trace).
+    - **The car has no material.** Its seven collision surfaces have no `material`
+      attribute, as every prop in endorphin's `Resources/Props` folder; NeuroMotion
+      reads them as `default`, so the rubber feet meet it with Bouncy (μ = 1,
+      restitution 1) and skin with Default (μ = 1, 0.2). In the scene's table the
+      interaction that has almost no friction with both rubber and skin is Icy (μ =
+      0.01), which is what ice, rubber or skin give; CustomA and CustomB are all zero.
+      Which endorphin gives a surface without a material is not known, and no other
+      export has a character on a prop to tell.
+    - **Where the car is.** In frames 49-51 endorphin's foot takes the windscreen's
+      impulse while 9 cm in front of the glass where NeuroMotion has it, and the right
+      foot the bumper's while 8 cm short of it. A car one frame further on (13.7 cm)
+      puts both within 2 cm then, but the left foot 4-7 cm inside the glass at 52-54,
+      where the car as it is fits to 1.5 cm. The car's join to its keyed carrier is
+      1e5 strong, the carrier brakes from 8.24 to 6.68 m/s at frame 49; unresolved.
+    - **The legs at the switch.** endorphin's keep their running pose (left knee 89.3°
+      at 48, 89.1° at 49); NeuroMotion's are pulled towards Explosion's targets, which
+      are turns from the rest pose (knee 82.8° at 49, knee and ankle losing 1 m/s
+      upwards), and while it touches anything (`pressing`) the flailing stops by
+      driving the legs to the rest pose, straight, not by holding them: on a
+      frictionless windscreen the left knee then opens from 82° to 41° by frame 60,
+      pushing the body up the glass (endorphin's 96° to 61°).
+
+    Temporary switches on Car Hit (`reference_scores`, its first 20 rows, unnudged;
+    upside down until is a guard, 83 ± 2):
+
+    | Reading | Toes up the glass 50-54 (m/s) | Centre of mass x at 68 / 78 / 88 | Highest | Upside down until | Within, mean error |
+    |---|---|---|---|---|---|
+    | endorphin | 9.6, 9.4, 8.4, 7.8, 7.0 | -0.07 / -0.11 / -0.16 m | 1.79 m at 68 | 83 | |
+    | as it is | 5.9, -0.4, 0.1, 0.1, 0.1 | 0.19 / 0.30 / 0.41 | 1.84 at 70 | 83 | 9, 1.8 |
+    | Bouncy's restitution 0 | stuck | 0.28 / 0.42 / 0.54 | 1.76 at 68 | | |
+    | Bouncy's μ × 0.3 | stuck from 52 | 0.21 / 0.34 / 0.47 | 2.22 at 76 | | |
+    | no material: no friction, no bounce | 10.5, 11.5, 11.4, 10.0, 6.5 | -0.08 / -0.12 / -0.16 | 2.41 at 79 | 89 (fails) | 11, 1.6 |
+    | no material: Icy | about the same | -0.05 / -0.08 / -0.10 | 2.45 at 79 | 88 (fails) | 9, 1.7 |
+    | no material: Icy for rubber only | slides | -0.03 / -0.04 / -0.05 | 2.40 at 78 | 89 (fails) | 6, 2.0 |
+    | Explosion's legs turned from the pose they hold, not from rest | stuck | 0.51 / 0.84 / 1.17 | 1.91 at 78 | 83 | 7, 2.6 |
+    | both | slides | -0.10 / -0.15 / -0.19 | 2.16 at 75 | 90 (fails) | 10, 1.9 |
+    | no friction, Explosion's legs limp | slides | -0.49 / -0.74 / -0.98 | 1.77 at 70 | 91 (fails) | 10, 1.8 |
+    | the car a frame further on | stuck | 0.22 / 0.31 / 0.41 | 1.82 at 69 | | |
+    | the feet limp in Explosion | stuck | -0.08 / -0.13 / -0.18 | 1.89 at 71 | 86 (fails) | 9, 1.5 |
+
+    Without friction every row along the road and sideways comes within endorphin's
+    uncertainty (x at 68, 78, 88 and 96, z at 68 and 96), and the pedestrian leaves
+    the car at -0.25 m/s, as endorphin's; but the windscreen, pushed on by a leg that
+    doesn't give, throws it up at 3.9 m/s where endorphin's leaves at 2.3 (y impulse
+    332 N·s, endorphin 197), and it is upside down until 89. Lesson 34's flight height
+    and the stuck foot were hiding each other. So the material stays `default` and
+    Explosion's legs as they were; what is still needed is a leg that yields against
+    the glass as endorphin's does (its knee stays bent at 96° through the slide), which
+    is Explosion's leg design and the knees' stiffness (lesson 49: endorphin's hold a
+    quarter of their preset), and then a reading of materialless surfaces. Three new
+    Car Hit rows measure the slide (the left toes 1.06 and 1.24 m high at frames 52
+    and 55, x -0.38 m at 55; NeuroMotion 0.83, 0.85 and +0.17 m; without friction
+    1.13, 1.35 and -0.43 m).
+
+53. **Legs that yield as endorphin's reproduce its leg motion on the windscreen, but
+    don't bring Car Hit's flight down: the frictionless car gives the pedestrian 30%
+    too little spin, because its impulse goes through the windscreen where endorphin's
+    goes through the bumper. Quarter-strength knees lose Back-Flip-To-Combo's jump at
+    the push-off itself, not through the hips. Nothing changed yet.** Measured on
+    endorphin's own runs (lesson 40) against `dump_scene_motion`, with temporary
+    environment switches scored by `reference_scores` (unnudged unless said).
+
+    - **What endorphin's legs do in Car Hit.** Left / right knee bend at frames 48, 49,
+      50, 52, 54, 56, 58, 60: 89.3 / 65.5, 89.1 / 65.3, 96.2 / 61.5, 96.9 / 50.9, 91.3 /
+      41.8, 77.8 / 34.8, 65.9 / 29.3, 61.1 / 32.6°; the left hip (trunk to thigh) 98 at
+      48, folding to 127° at 54 and back to 102° at 60. So the legs hold their pose for
+      the first step, the glass then folds the left leg up (knee +7°, hip +29°), and
+      from frame 50 (right) and 54 (left) both knees open towards nearly straight at 4-7°
+      a frame: the right knee's opening falls by about 0.89 a frame, a first-order
+      approach to about 8° with a time constant of about 0.14 s. In endorphin's own
+      Explosion scene (Writhe in mid-air 2.5, falling free) the knees pedal from 1° to
+      43° in 15 frames, also 4°/frame at most. NeuroMotion's knees, driven at the Normal
+      preset × 0.5 (knee 2500 N·m/rad, 500 N·m·s/rad: c / k = 0.2 s, overdamped), open
+      at once (82.9° at 49) and resist the impact as a heavy damper: the knee doesn't
+      flex, the hip opens instead (38° at 60).
+    - **A leg design that yields.** Temporary switches in Explosion: the leg targets
+      eased from the pose the timeline holds into the pedal over 0.1 s; the legs at a
+      quarter of the preset on their twist axis and a sixteenth on their swing axes (as
+      endorphin's active poses, lessons 46 and 49), stiffness and damping alike; and the
+      legs pedalling on while it touches something. Without friction on the car this
+      gives the knees 87.6, 101.5, 93.3, 77.8, 65.6, 56.1° at 50-60 (left) and the hip
+      101 → 127 → 97°, close to endorphin's; holding the timeline's pose instead of
+      easing keeps the left knee at 99° by 60 (endorphin 61°).
+    - **The flight stays too high and the tumble too slow.** Car Hit (23 rows; upside
+      down until is a guard, 83 ± 2):
+
+      | Reading | Highest (frame) | x at 68 / 88 | Left knee at 60 | Upside down until | Within, mean error |
+      |---|---|---|---|---|---|
+      | endorphin | 1.79 m (68) | -0.07 / -0.16 m | 61.1° | 83 | |
+      | as it is | 1.84 (70) | 0.19 / 0.41 | 60.4 | 83 | 9, 2.1 |
+      | no material: no friction, no bounce | 2.41 (79) | -0.08 / -0.16 | 41.1 | 89 (fails) | 11, 1.6 |
+      | the same, legs held, quarter and sixteenth | 1.99 (73) | -0.23 / -0.45 | 99.4 | 92 (fails) | 9, 2.2 |
+      | the same, legs eased in 0.1 s, quarter and sixteenth, pedalling on | 2.05 (74) | -0.12 / -0.21 | 56.1 | 91 (fails) | 12, 1.5 |
+      | the same, force limit a quarter too | 1.77 (69) | -0.41 / -0.85 | 99.1 | 97 (fails) | 13, 1.6 |
+      | the leg design with friction (no material = default, as now) | 1.64 (66) | 0.05 / 0.14 | 67.7 | 84 | 9, 2.3 |
+
+      The angular momentum about the centre of mass along the tumble's axis
+      (NeuroMotion's rig on both runs' joints) settles by frame 52: endorphin 130
+      kg·m²/s, as it is 157 (the stuck foot), without friction 73 (legs held) to 93
+      (the yielding legs). Contact impulses on the pedestrian, frames 49-55 (N·s along
+      the road, up): endorphin's in all (343, 197), of which the bumper (frames 51-52)
+      about (198, 35) and the windscreen about (145, 162); NeuroMotion's frictionless
+      run with the yielding legs (338, 263), of which the right foot on the bumper
+      (103, 10) and the left foot on the glass (235, 253). The totals are close; the
+      share is not, and the low bumper hit is what turns the body over. endorphin's
+      impacts also stop the bodies short of NeuroMotion's car: at frame 52 its right
+      foot is stopped (10.7 → 2.1 m/s) 8.4 cm from the bumper's box and its shin 5 cm,
+      at 50 its left foot 10 cm from the glass, while the foot sliding on the glass at
+      53 is 0.5 cm from it; NeuroMotion's first impulse comes a frame later (step 50 →
+      51, endorphin's 49 → 50). 8-10 cm is the relative speed, 12 m/s, over one 120 Hz
+      tick. A diagnostic rule that stops a body approaching the car as soon as it
+      would reach the car within a tick (a 12 cm contact margin) brings the impulse to
+      (346, 217), the flight to 1.88 m at 70 and x at 68 / 78 / 88 within endorphin's
+      uncertainty (13 of 23 rows, mean 1.2), but the spin only to 100 kg·m²/s and the
+      pedestrian stays upside down until 90. Shifting the car's keyed carrier ahead in
+      time instead (half a frame to a frame, eased in) threw the pedestrian onto the
+      bonnet and along with the car; not pursued.
+    - **No material, no friction, elsewhere.** All surfaces without a material
+      frictionless and without bounce: Back-Flip-To-Combo, Trapeze, Balcony and the
+      Look and Reach and Writhe scenes score as before (Back-Flip's box has a material,
+      tarmac); Tackle falls from 4 to 3 of 9 rows (its characters' head and limb shapes
+      have no material: lying, it slides on to z 2.24 m at frame 100, 1.95 before,
+      endorphin 1.65); and the sweep is 50 of 51 clean: Bridge Escape with gravity × (1
+      - 1e-4) comes apart (9 m of joint stretch, 80 m/s). In the sample scenes the
+      surfaces without a material are on props (Car Hit's car and its carrier, Car
+      Crash's car, the imported pieces of Bridge Escape, Heli Leap, Gymnast Rings,
+      Catch Run and Walk With Gun), on environments (Balcony, Rotating Floor, Trapeze,
+      Catch Rope, Bendy Stick) and on characters (Car Hit's and Gymnast Rings' extra
+      leg capsules, Tackle's head and limbs, Balcony's hands). The one reading that
+      fits both Car Hit and Tackle is that only props' surfaces without a material
+      carry nothing; no other export has a character on such a prop to test it.
+    - **Back-Flip-To-Combo's knees at a quarter** (twist stiffness and damping × 1/4,
+      the 400 N·m limit kept): crouching height at 168 3.16 m (endorphin 3.16, now
+      3.20), knee bend at 170 111.7° (111.8, now 105.2); the jump drops to 3.57 m at 233
+      (3.745 at 242, now 3.74 at 239), past the box top at 274 (296); 11 of 21 rows
+      within, mean 1.7 (14, 1.2). **It isn't the hips:** through the push-off the hip
+      bends as endorphin's (frames 192 / 200 / 210: endorphin 85.6 / 63.8 / 22.7°, at a
+      quarter 81.0 / 57.1 / 30.4°); the 19° against 4° of the "hips straightest" row is
+      in the air, at frame 224-226, as the flip tucks. What is short is the push itself:
+      the centre of mass rises at most 1.31 m/s in endorphin's run (frames 206-210),
+      1.27 now and 1.08 with quarter knees, all from the same crouch height. Over frames
+      198-208 the net upward push (box, locks and weight) is 14% below endorphin's at a
+      quarter. Other
+      knobs, each with quarter knees: no twist force limit 3.61 m; limit 0.3 or 0.6 of
+      the preset 3.56-3.59; hips' and ankles' swing at an eighth or a quarter 3.38-3.39
+      (crouch guards fail); unnamed joints limp (the Default preset, lesson 49) from
+      frame 0, 102 or 190 3.39-3.65 m (guards fail from 0 and 102); every swing axis at
+      a thirty-second 3.86 m (crouch guards fail); only the feet's swing at a
+      thirty-second 3.70 m at 238 (13 of 21, mean 1.3, every guard holding), but a
+      twenty-fourth gives 3.63 m and a forty-eighth 3.82 m with the lean guard failing,
+      and the trunk turns 40° less by frame 297 (-486°, endorphin -523°): a factor on a
+      knife edge, not a reading. Not adopted.
+
+    Nothing in the engine or in Explosion changed; Explosion's legs stay as lesson 52
+    left them, and surfaces without a material keep reading as `default`. What is
+    still needed for Car Hit is where the car's impacts act (they stop the bodies
+    short of NeuroMotion's car and put more through the bumper); for Back-Flip's knees,
+    what else makes endorphin's push-off stronger once its knees are soft. The
+    switches were temporary; the sample sweep and `reference_scores` are unchanged
+    (51 of 51, 32 of 74 within with `NM_NUDGES=2`).
+
 ## Status against endorphin's sample scenes
 
 `cargo test --release -- --ignored --nocapture` simulates every bundled scene over
@@ -2749,7 +3040,7 @@ What each stand-in reproduces:
 | Truck | Bridge Escape's truck: a 28 t cab on four cylinder wheels joined to an 80 t trailer by a hitch (twist ±2.5°, swing 90° and 15°), jackknifed 88°, rolled 50° and dropped 4 m onto a floor box, landing with the hitch on both stops (lesson 45) | gains 382-638 kJ of its 4.55 MJ on landing, over 9 nudged runs | 0.2 kJ at most |
 | Hanging weight | A 20-80 kg weight on a rope locked at the top, hanging straight (lesson 10) | 0.36 m stretch, 63 m/s | 1.5 cm, 0.6 m/s |
 | Car carry | Car Hit: a 747 kg car joined (1e5) to a keyed carrier drives into a standing character with clavicles at 8 m/s, catches its arm against its ribs, carries it on the bonnet and stops dead at 1.65 s (lesson 15). The join gives way by 23 cm as the carrier stops, by design. After the stop the pedestrian slides off and the arm whips round against its own chest and neck. Coulomb friction, and the car 15 cm off the ground, as Car Hit's is (lesson 21) | 5.8 cm (shoulder) at the hit; 7.0 cm after the stop (#23) | Over 201 nudged runs, up to the stop: 0.7 cm at most for the body (shoulder included), toes and fingers 0.5-2.2 cm at the hit. After the stop: 1.1 cm at most (lessons 17 and 21) |
-| Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps, Coulomb friction (lesson 21), whole-limb muscle cap (lesson 27) | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -11° at 297, leaves the box at 419, lands behind it at 462, -283° in all. Left alone: leaves at 410, lands at 448, -276° (changed by lessons 16 and 21, the limb cap and lesson 47's fading, shared drive) |
+| Back flip | A character on a 2.5 m box: weak toe locks, a pelvis lock holding X and turning about Y and Z, then a -100 N·m drive about X on pelvis and upper spine (lesson 13); 120 fps, Coulomb friction (lesson 21), whole-limb muscle cap (lesson 27) | floats above the box | standing (Balance until the drive): flips backwards, 0° at frame 246, -11° at 297, leaves the box at 418, lands behind it at 461, -283° in all. Left alone: leaves at 409, lands at 446, -301° (changed by lessons 16 and 21, the limb cap, lesson 47's fading, shared drive and lesson 51's) |
 | Bonnet slide | Car Hit's pedestrian landing on the bonnet: a 75 kg box thrown at 4 m/s against Heavy join's car drops onto it (lesson 21) | slides on at 3.7-3.9 m/s | stopped dead: -0.33 m/s three frames after landing |
 | Heavy join | Car Hit's join alone: a 747 kg car joined (1e5) to a light keyed carrier that drives off at 8 m/s and stops dead 1 s later (lesson 20) | 15-18 cm behind its carrier for the whole drive and after the stop | 23 cm behind at frame 4, on the carrier from frame 11; 23 cm past it at the stop, back 8 frames later |
 | Gun drop | Walk With Gun: a placeholder holds a 550 kg box in both hands (`JoinBodies`, 1e5 N and 1e4 N·m), its 0.39 kg fingers 3 cm below the box's underside, and drops with it; Coulomb friction (lesson 25) | lowest finger 1.4 cm in the ground | 2.7 to 2.8 cm above it, over 9 nudged runs |
@@ -2816,7 +3107,9 @@ hasn't been re-run against endorphin's scene since.
   up and over, but to 3.61 m at frame 233 where endorphin's reaches 3.745 m at 242:
   its take-off starts earlier and pushes less (lesson 46). Its knees bend 6.5° less
   in the crouch, and why endorphin's swing muscles act at a sixteenth of their preset
-  and its drives fade as cos(θ/2) (lesson 47) is measured, not understood.
+  and its drives fade as cos(θ/2) (lesson 47) and drive on again 33° short of a whole
+  turn (lesson 51) is measured, not understood. The relax pass's levers are those from
+  the start of the substep, which leaks angular momentum in flight (lesson 51).
 
 ## Improvements planned beyond endorphin
 
