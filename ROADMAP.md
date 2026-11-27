@@ -68,7 +68,13 @@ NeuroMotion, and we need numbers to prove it.
   contacts with the car (which has no material in the file) show no friction and no
   bounce; made so, the foot slides as endorphin's and the pedestrian leaves the car at
   endorphin's -0.25 m/s, but a leg that doesn't give against the glass throws it to
-  2.41 m, so it waits on Explosion's legs and the knees' stiffness (lesson 52)
+  2.41 m (lesson 52). Legs that yield as endorphin's (eased in from the held pose, at
+  endorphin's pose shares) match its knees and hip on the glass and bring it to 2.05 m,
+  but it then spins 30% too little (angular momentum 93 kg·m²/s, endorphin 130) and
+  stays upside down until 91 (83): its impulse goes through the windscreen where
+  endorphin's goes through the bumper, whose impacts stop the bodies 5-10 cm short of
+  NeuroMotion's car. Frictionless surfaces without a material also cost Tackle a row
+  and tear Bridge Escape apart in a nudged run, so neither is in yet (lesson 53)
 - ✅ A force pushes the bodies it names, a massless body never moves, and a
   transition ends exactly on the animation (lessons 22-24); scenes run as long as
   endorphin runs them, and the sweep checks each scene's whole range
@@ -100,7 +106,9 @@ NeuroMotion, and we need numbers to prove it.
   frame 260 and 21° too little by 330 (it is less tucked than endorphin's), so #6
   stays open; NeuroMotion's relax pass leaks angular momentum in flight, which hides
   a take-off that spins too fast (lesson 51); its knees bend 6.6° less in the crouch (endorphin's
-  hold a quarter of their preset, which here loses the jump); its unnamed ankles still
+  hold a quarter of their preset, which here loses the jump: 3.57 m, the push-off
+  1.08 m/s against 1.31; not the hips, which bend as endorphin's through the push-off,
+  lesson 53); its unnamed ankles still
   follow the legs' pose where endorphin's are limp (limp, it jumps 3.67 m); the
   crouch's height guard is near its edge (3.186 m, bound 3.188); and its combo jumps
   reach 1.07 m (1.67 m)
